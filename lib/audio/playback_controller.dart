@@ -30,6 +30,8 @@ class PlaybackController {
   Duration _currentPosition = Duration.zero;
   String? _openedUri;
   String? _lastEmittedUri;
+  int _consecutiveFatalErrors = 0;
+  bool _isAdvancing = false;
   bool _disposed = false;
 
   /// Creates a controller wired to [engine] and [queue].
@@ -42,7 +44,12 @@ class PlaybackController {
   /// Initializes the controller and starts listening to engine events.
   Future<void> init() async {
     _subs.add(engine.playbackStateStream.listen(_onPlaybackState));
-    _subs.add(engine.positionStream.listen((pos) => _currentPosition = pos));
+    _subs.add(engine.positionStream.listen((pos) {
+      _currentPosition = pos;
+      if (pos > Duration.zero) {
+        _consecutiveFatalErrors = 0;
+      }
+    }));
     _subs.add(engine.errorStream.listen(_onError));
   }
 
@@ -77,6 +84,7 @@ class PlaybackController {
 
   /// Starts playback from the current queue position, or resumes if paused.
   Future<void> play() async {
+    _consecutiveFatalErrors = 0;
     final source = queue.current;
     if (source == null) return;
 
@@ -103,6 +111,7 @@ class PlaybackController {
 
   /// Starts the queue from scratch at index 0.
   Future<void> playFromStart() async {
+    _consecutiveFatalErrors = 0;
     if (queue.isEmpty) return;
     queue.jumpTo(0);
     await play();
@@ -110,6 +119,7 @@ class PlaybackController {
 
   /// Jumps to track at [index] in active playback order and starts playback.
   Future<void> playTrack(int index) async {
+    _consecutiveFatalErrors = 0;
     if (index < 0 || index >= queue.length) return;
     queue.jumpTo(index);
     final source = queue.current;
@@ -134,6 +144,7 @@ class PlaybackController {
 
   /// Skips to the next track.
   Future<void> skipNext() async {
+    _consecutiveFatalErrors = 0;
     final next = queue.next();
     if (next == null) {
       _openedUri = null;
@@ -149,6 +160,7 @@ class PlaybackController {
 
   /// Skips to the previous track, or restarts current track if played past 3 seconds.
   Future<void> skipPrevious() async {
+    _consecutiveFatalErrors = 0;
     if (_currentPosition > const Duration(seconds: 3)) {
       _currentPosition = Duration.zero;
       await engine.seek(Duration.zero);
@@ -178,32 +190,55 @@ class PlaybackController {
     _stateCtrl.add(state);
 
     if (state == PlaybackState.completed) {
+      // Ignore a second completed event if an advance is already in progress.
+      if (_isAdvancing) return;
       _autoAdvance();
     }
   }
 
-  void _onError(AudioError error) {
+  Future<void> _onError(AudioError error) async {
     if (_disposed) return;
     _errorCtrl.add(error);
     // Do not skip track for non-fatal errors (e.g. lyrics/subtitle file errors).
     if (!error.isFatal) {
       return;
     }
-    _autoAdvance();
+    // Ignore a second error event for the same track while an advance is in progress.
+    if (_isAdvancing) return;
+
+    _consecutiveFatalErrors++;
+    if (_consecutiveFatalErrors > queue.length || _consecutiveFatalErrors >= 3) {
+      await stop();
+      _errorCtrl.add(AudioError(
+        code: AudioErrorCode.engineFailure,
+        message:
+            'Playback stopped after $_consecutiveFatalErrors consecutive fatal errors.',
+        isFatal: true,
+      ));
+      return;
+    }
+
+    await _autoAdvance();
   }
 
   Future<void> _autoAdvance() async {
-    if (_disposed) return;
-    final next = queue.next();
-    if (next == null) {
-      _openedUri = null;
-      _emitCurrent(null);
-      return;
+    if (_disposed || _isAdvancing) return;
+    _isAdvancing = true;
+    try {
+      final next = queue.advance();
+      if (next == null) {
+        _openedUri = null;
+        await engine.stop();
+        _emitCurrent(null);
+        return;
+      }
+      _openedUri = next.uri;
+      await engine.open(next, autoPlay: true);
+      _emitCurrent(next);
+      _preloadNext();
+    } finally {
+      _isAdvancing = false;
     }
-    _openedUri = next.uri;
-    await engine.open(next, autoPlay: true);
-    _emitCurrent(next);
-    _preloadNext();
   }
 
   void _preloadNext() {

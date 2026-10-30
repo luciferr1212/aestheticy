@@ -120,6 +120,7 @@ class MpvAudioEngine extends AudioEngine {
   AudioStreamInfo? _currentStreamInfo;
   double _volume = 1.0;
   String? _currentUri;
+  int _lastMpvPlaylistIndex = 0;
 
   // ── Stream controllers ──────────────────────────────────────────────
 
@@ -146,6 +147,19 @@ class MpvAudioEngine extends AudioEngine {
         initialVolume: 100,
       ),
     );
+
+    // Disable automatic sidecar file loading (subtitles/.lrc and companion audio files).
+    // This prevents mpv from failing when external .lrc lyrics or sidecar tracks are present.
+    try {
+      await _player!.setRawProperty('sub-auto', 'no');
+    } catch (_) {
+      // Fallback: the .lrc safety net filter in errorStream handles it if unsupported.
+    }
+    try {
+      await _player!.setRawProperty('audio-file-auto', 'no');
+    } catch (_) {
+      // Fallback: safety net filter handles it.
+    }
 
     _listenToStreams();
   }
@@ -227,6 +241,15 @@ class MpvAudioEngine extends AudioEngine {
       _devicesCtrl.add(
         list.map((d) => AudioDevice(id: d.name, name: d.description)).toList(),
       );
+    }));
+
+    // playlist  →  detects when mpv moves to the next preloaded playlist entry (gapless)
+    _subs.add(p.stream.playlist.listen((playlist) {
+      if (playlist.index >= 0 && playlist.index > _lastMpvPlaylistIndex) {
+        _lastMpvPlaylistIndex = playlist.index;
+        // Previous track reached EOF and mpv transitioned to the next entry.
+        _playbackStateCtrl.add(PlaybackState.completed);
+      }
     }));
 
     // audio device  →  mpv property `audio-device`
@@ -321,6 +344,24 @@ class MpvAudioEngine extends AudioEngine {
   @override
   Future<void> open(AudioSource source, {bool autoPlay = false}) async {
     _currentUri = source.uri;
+
+    final p = _player;
+    if (p != null) {
+      final currentMpvPath = p.state.path;
+      final playlist = p.state.playlist;
+      // If mpv is already actively playing this track (via gapless playlist advance),
+      // avoid re-opening the file from scratch which would kill seamless playback.
+      if (p.state.playing &&
+          (currentMpvPath == source.uri ||
+              (playlist.index >= 0 &&
+                  playlist.index < playlist.items.length &&
+                  playlist.items[playlist.index].uri == source.uri))) {
+        _rebuildStreamInfo();
+        return;
+      }
+    }
+
+    _lastMpvPlaylistIndex = 0;
     // player.open()  →  mpv command `loadfile`
     await _player!.open(
       mpv.Media(source.uri, extras: source.extras),
@@ -344,6 +385,7 @@ class MpvAudioEngine extends AudioEngine {
   Future<void> stop() async {
     _currentUri = null;
     _currentStreamInfo = null;
+    _lastMpvPlaylistIndex = 0;
     _streamInfoCtrl.add(null);
     // player.stop()  →  mpv command `stop`
     await _player!.stop();
@@ -474,21 +516,32 @@ class MpvAudioEngine extends AudioEngine {
   /// Builds a chain of 10 [mpv.EqualizerEffect] instances (one per band)
   /// plus an optional volume-gain for the preamp, and applies them
   /// atomically via [mpv.Player.setAudioEffects].
+  ///
+  /// Auto-protection against digital clipping:
+  /// When positive band gains are used, reduces the preamp automatically so that
+  /// the peak sum (preamp + maxPositiveGain) does not exceed 0.0 dBFS, avoiding
+  /// digital distortion. When the EQ is disabled, volume gain is reset to 0.0 dB.
   Future<void> _applyEq() async {
     if (!_eqEnabled) {
-      // Remove all audio effects
+      // Remove all audio effects and reset preamp volume gain to 0
       await _player!.setAudioEffects([]);
+      await _player!.setVolumeGain(0.0);
       return;
     }
 
     final effects = <mpv.AudioEffect>[];
 
-    // Preamp via volume-gain
-    if (_preamp != 0.0) {
-      await _player!.setVolumeGain(_preamp);
+    // Auto-protection against clipping:
+    // If positive band gains are present, lower the preamp so (effectivePreamp + maxPositiveGain) <= 0.0 dB.
+    final maxPositiveGain = _eqGains.fold(0.0, (max, g) => g > max ? g : max);
+    final double effectivePreamp;
+    if (maxPositiveGain > 0.0 && (_preamp + maxPositiveGain > 0.0)) {
+      effectivePreamp = -maxPositiveGain;
     } else {
-      await _player!.setVolumeGain(0.0);
+      effectivePreamp = _preamp;
     }
+
+    await _player!.setVolumeGain(effectivePreamp);
 
     // 10-band EQ: each band is a separate EqualizerEffect instance.
     for (var i = 0; i < 10; i++) {

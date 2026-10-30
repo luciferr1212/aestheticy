@@ -65,6 +65,102 @@ void main() {
       });
     });
 
+    group('mutation cursor preservation', () {
+      test('insert before the current item keeps current item active', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.next(); // cursor on 'b'
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(q.currentIndex, 1);
+
+        q.insert(0, _src('x')); // insert before current
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(q.currentIndex, 2);
+        expect(q.items.map((s) => s.uri), [
+          'file:///x.flac',
+          'file:///a.flac',
+          'file:///b.flac',
+          'file:///c.flac',
+        ]);
+      });
+
+      test('remove before the current item keeps current item active', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.next(); // cursor on 'b'
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(q.currentIndex, 1);
+
+        q.remove(0); // remove 'a' before 'b'
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(q.currentIndex, 0);
+        expect(q.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///c.flac',
+        ]);
+      });
+
+      test('remove the current item moves cursor to next item at that position', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.next(); // cursor on 'b' at index 1
+        expect(q.current?.uri, 'file:///b.flac');
+
+        q.remove(1); // remove 'b'
+        expect(q.current?.uri, 'file:///c.flac');
+        expect(q.currentIndex, 1);
+        expect(q.items.map((s) => s.uri), [
+          'file:///a.flac',
+          'file:///c.flac',
+        ]);
+      });
+
+      test('remove the last item while it is current clamps cursor to new last item', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.next(); // b
+        q.next(); // c (last item, index 2)
+        expect(q.current?.uri, 'file:///c.flac');
+        expect(q.currentIndex, 2);
+
+        q.remove(2); // remove 'c'
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(q.currentIndex, 1);
+        expect(q.items.map((s) => s.uri), [
+          'file:///a.flac',
+          'file:///b.flac',
+        ]);
+      });
+
+      test('shuffle on and off preserves the active current item', () {
+        final q = PlaybackQueue(random: _seededRandom());
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.add(_src('d'));
+        q.next(); // b
+        q.next(); // c (index 2)
+        expect(q.current?.uri, 'file:///c.flac');
+        expect(q.currentIndex, 2);
+
+        q.setShuffle(true);
+        expect(q.current?.uri, 'file:///c.flac');
+        expect(q.currentIndex, 0); // pinned first in shuffled order
+
+        q.setShuffle(false);
+        expect(q.current?.uri, 'file:///c.flac');
+        expect(q.currentIndex, 2); // restored to natural position
+      });
+    });
+
     group('navigation', () {
       test('next advances through the queue', () {
         final q = PlaybackQueue();
@@ -157,13 +253,18 @@ void main() {
         expect(q.next()?.uri, 'file:///a.flac'); // wrap
       });
 
-      test('repeat one stays on same item', () {
+      test('repeat one stays on same item on auto advance, but next/previous move', () {
         final q = PlaybackQueue();
         q.add(_src('a'));
         q.add(_src('b'));
         q.repeatMode = RepeatMode.one;
-        expect(q.next()?.uri, 'file:///a.flac'); // same
-        expect(q.next()?.uri, 'file:///a.flac'); // same
+        // Automatic advance repeats current track
+        expect(q.advance()?.uri, 'file:///a.flac');
+        expect(q.advance()?.uri, 'file:///a.flac');
+        // Manual next moves to neighbouring track
+        expect(q.next()?.uri, 'file:///b.flac');
+        // Manual previous moves back to neighbouring track
+        expect(q.previous()?.uri, 'file:///a.flac');
       });
 
       test('repeat all wraps previous at start', () {
@@ -503,6 +604,111 @@ void main() {
 
       await eSub.cancel();
       await cSub.cancel();
+    });
+
+    test('error loop protection stops on failing track under RepeatMode.one', () async {
+      queue.add(_src('failing_track'));
+      queue.repeatMode = RepeatMode.one;
+
+      final errors = <AudioError>[];
+      final eSub = controller.errorStream.listen(errors.add);
+
+      await controller.play();
+
+      // Simulate fatal error on track 1
+      engine.simulateError(
+        const AudioError(
+          code: AudioErrorCode.fileNotFound,
+          message: 'File not found',
+          isFatal: true,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // In RepeatMode.one with 1 item, second attempt fails too
+      engine.simulateError(
+        const AudioError(
+          code: AudioErrorCode.fileNotFound,
+          message: 'File not found',
+          isFatal: true,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // Consecutive fatal errors exceeded queue length (2 > 1) -> stops and emits final error
+      expect(
+        errors.any((e) => e.message.contains('consecutive fatal errors')),
+        isTrue,
+      );
+      expect(controller.currentState, PlaybackState.idle);
+
+      await eSub.cancel();
+    });
+
+    test('error loop protection stops on failing tracks under RepeatMode.all', () async {
+      queue.add(_src('fail1'));
+      queue.add(_src('fail2'));
+      queue.repeatMode = RepeatMode.all;
+
+      final errors = <AudioError>[];
+      final eSub = controller.errorStream.listen(errors.add);
+
+      await controller.play();
+
+      // fail1 fatal error
+      engine.simulateError(
+        const AudioError(
+          code: AudioErrorCode.fileNotFound,
+          message: 'fail1 error',
+          isFatal: true,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // fail2 fatal error
+      engine.simulateError(
+        const AudioError(
+          code: AudioErrorCode.fileNotFound,
+          message: 'fail2 error',
+          isFatal: true,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // 3rd attempt (wrap around to fail1) fails -> stops after 3 fatal errors in a row
+      engine.simulateError(
+        const AudioError(
+          code: AudioErrorCode.fileNotFound,
+          message: 'fail1 error again',
+          isFatal: true,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        errors.any((e) => e.message.contains('consecutive fatal errors')),
+        isTrue,
+      );
+      expect(controller.currentState, PlaybackState.idle);
+
+      await eSub.cancel();
+    });
+
+    test('manual next and previous move to neighbouring track in RepeatMode.one', () async {
+      queue.add(_src('song1'));
+      queue.add(_src('song2'));
+      queue.repeatMode = RepeatMode.one;
+
+      await controller.play();
+      expect(controller.queue.current?.uri, 'file:///song1.flac');
+
+      // Manual skipNext must move to neighbouring track (song2) even in RepeatMode.one
+      await controller.skipNext();
+      expect(controller.queue.current?.uri, 'file:///song2.flac');
+
+      // Manual skipPrevious must move back to neighbouring track (song1)
+      await controller.skipPrevious();
+      expect(controller.queue.current?.uri, 'file:///song1.flac');
     });
   });
 }

@@ -15,4 +15,20 @@ void main() {
     // Verify the credit text is displayed.
     expect(find.text('by mido'), findsOneWidget);
   });
+
+  testWidgets('AudioInitErrorApp displays error message and copy button', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const AudioInitErrorApp(
+        error: 'Test initialization error message',
+        stackTrace: 'Test stack trace details',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Audio Engine Initialization Failed'), findsOneWidget);
+    expect(find.textContaining('Test initialization error message'), findsOneWidget);
+    expect(find.text('Copy Error Log'), findsOneWidget);
+  });
 }

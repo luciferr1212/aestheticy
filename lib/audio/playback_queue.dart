@@ -76,14 +76,16 @@ class PlaybackQueue {
 
   /// Appends [source] to the end of the queue.
   void add(AudioSource source) {
+    final currentItem = current;
     _items.add(source);
-    _rebuildOrder(keepCurrent: true);
+    _rebuildOrder(prevItem: currentItem);
   }
 
   /// Inserts [source] at [index] in user order.
   void insert(int index, AudioSource source) {
+    final currentItem = current;
     _items.insert(index, source);
-    _rebuildOrder(keepCurrent: true);
+    _rebuildOrder(prevItem: currentItem);
   }
 
   /// Removes the item at [index] in active playback order.
@@ -92,17 +94,22 @@ class PlaybackQueue {
   /// same order position (or moves to the last valid one).
   void remove(int index) {
     if (index < 0 || index >= _order.length) return;
-    final originalIdx = _order[index];
+    final currentItem = current;
     final wasCurrent = _orderIndex == index;
+    final originalIdx = _order[index];
+
     _items.removeAt(originalIdx);
     if (_items.isEmpty) {
       _order = [];
       _orderIndex = -1;
       return;
     }
-    _rebuildOrder(keepCurrent: !wasCurrent);
+
     if (wasCurrent) {
-      _orderIndex = _orderIndex.clamp(0, _order.length - 1);
+      _rebuildOrder(prevItem: null);
+      _orderIndex = index.clamp(0, _order.length - 1);
+    } else {
+      _rebuildOrder(prevItem: currentItem);
     }
   }
 
@@ -139,15 +146,14 @@ class PlaybackQueue {
   /// When turning shuffle **off**, the order reverts to the natural
   /// sequence and the cursor points at the current item's original index.
   void setShuffle(bool enabled) {
+    final currentItem = current;
     _shuffled = enabled;
-    _rebuildOrder(keepCurrent: true);
+    _rebuildOrder(prevItem: currentItem);
   }
 
-  /// Rebuilds [_order] from [_items]. When [keepCurrent] is `true` the
-  /// cursor stays on the same item.
-  void _rebuildOrder({required bool keepCurrent}) {
-    final prevItem = keepCurrent ? current : null;
-
+  /// Rebuilds [_order] from [_items]. When [prevItem] is non-null, the
+  /// cursor stays on that item.
+  void _rebuildOrder({required AudioSource? prevItem}) {
     _order = List<int>.generate(_items.length, (i) => i);
 
     if (_shuffled && _items.isNotEmpty) {
@@ -185,11 +191,12 @@ class PlaybackQueue {
 
   // ── Navigation ──────────────────────────────────────────────────────
 
-  /// Moves to the next item according to the current repeat mode.
+  /// Automatically advances to the next track upon track completion.
   ///
-  /// Returns the new current item, or `null` if the end was reached
-  /// without repeat.
-  AudioSource? next() {
+  /// In [RepeatMode.one], repeats the same track.
+  /// In [RepeatMode.all], wraps around to the beginning.
+  /// In [RepeatMode.off], stops at the end of the queue.
+  AudioSource? advance() {
     if (_order.isEmpty) return null;
 
     if (repeatMode == RepeatMode.one) {
@@ -212,16 +219,36 @@ class PlaybackQueue {
     return null;
   }
 
-  /// Moves to the previous item.
+  /// Moves to the next item (manual skip).
   ///
-  /// Returns the new current item, or `null` if at the start without
-  /// repeat.
-  AudioSource? previous() {
+  /// Always moves to the neighbouring track even in [RepeatMode.one].
+  /// In [RepeatMode.all], wraps around to the beginning.
+  /// Returns the new current item, or `null` if the end was reached without repeat.
+  AudioSource? next() {
     if (_order.isEmpty) return null;
 
-    if (repeatMode == RepeatMode.one) {
+    if (_orderIndex + 1 < _order.length) {
+      _orderIndex++;
       return current;
     }
+
+    // End of queue.
+    if (repeatMode == RepeatMode.all) {
+      _orderIndex = 0;
+      return current;
+    }
+
+    // RepeatMode.off or RepeatMode.one — no more items beyond end.
+    return null;
+  }
+
+  /// Moves to the previous item (manual skip).
+  ///
+  /// Always moves to the neighbouring track even in [RepeatMode.one].
+  /// In [RepeatMode.all], wraps around to the end.
+  /// Returns the new current item, or `null` if at the start without repeat.
+  AudioSource? previous() {
+    if (_order.isEmpty) return null;
 
     if (_orderIndex - 1 >= 0) {
       _orderIndex--;
