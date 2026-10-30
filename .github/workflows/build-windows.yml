@@ -1,0 +1,48 @@
+name: Build Windows
+
+# Triggers: push to main, pull requests, or manual run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # 1. Check out the repository code.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Install Flutter (stable channel) with caching enabled.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 3. Download all Dart/Flutter dependencies.
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 4. Run static analysis to catch code issues.
+      - name: Analyze code
+        run: flutter analyze
+
+      # 5. Run all unit and widget tests.
+      - name: Run tests
+        run: flutter test
+
+      # 6. Build the Windows release executable.
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      # 7. Upload the built app as a downloadable artifact.
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: aestheticy-windows
+          path: build/windows/x64/runner/Release
