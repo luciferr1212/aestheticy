@@ -26,6 +26,10 @@ class PlaybackController {
   final _currentCtrl = StreamController<AudioSource?>.broadcast();
   final _errorCtrl = StreamController<AudioError>.broadcast();
 
+  PlaybackState _currentState = PlaybackState.idle;
+  Duration _currentPosition = Duration.zero;
+  String? _openedUri;
+  String? _lastEmittedUri;
   bool _disposed = false;
 
   /// Creates a controller wired to [engine] and [queue].
@@ -38,6 +42,7 @@ class PlaybackController {
   /// Initializes the controller and starts listening to engine events.
   Future<void> init() async {
     _subs.add(engine.playbackStateStream.listen(_onPlaybackState));
+    _subs.add(engine.positionStream.listen((pos) => _currentPosition = pos));
     _subs.add(engine.errorStream.listen(_onError));
   }
 
@@ -58,24 +63,42 @@ class PlaybackController {
   /// The playback state of the currently playing track.
   Stream<PlaybackState> get stateStream => _stateCtrl.stream;
 
+  /// Current playback state snapshot.
+  PlaybackState get currentState => _currentState;
+
   /// Emits whenever the current track changes (including `null` when
   /// the queue ends).
   Stream<AudioSource?> get currentStream => _currentCtrl.stream;
 
-  /// Errors that occurred during playback (after skipping to the next
-  /// track).
+  /// Errors that occurred during playback.
   Stream<AudioError> get errorStream => _errorCtrl.stream;
 
   // ── Transport ───────────────────────────────────────────────────────
 
-  /// Starts playback from the current queue position (or the first item
-  /// if nothing is selected).
+  /// Starts playback from the current queue position, or resumes if paused.
   Future<void> play() async {
     final source = queue.current;
     if (source == null) return;
+
+    // When paused on the same track, simply resume playback without re-opening.
+    if (_currentState == PlaybackState.paused && _openedUri == source.uri) {
+      await engine.play();
+      return;
+    }
+
+    _openedUri = source.uri;
     await engine.open(source, autoPlay: true);
-    _currentCtrl.add(source);
+    _emitCurrent(source);
     _preloadNext();
+  }
+
+  /// Toggles between play and pause.
+  Future<void> togglePlayPause() async {
+    if (_currentState == PlaybackState.playing) {
+      await pause();
+    } else {
+      await play();
+    }
   }
 
   /// Starts the queue from scratch at index 0.
@@ -85,11 +108,16 @@ class PlaybackController {
     await play();
   }
 
-  /// Jumps to track at [index] and starts playback.
+  /// Jumps to track at [index] in active playback order and starts playback.
   Future<void> playTrack(int index) async {
     if (index < 0 || index >= queue.length) return;
     queue.jumpTo(index);
-    await play();
+    final source = queue.current;
+    if (source == null) return;
+    _openedUri = source.uri;
+    await engine.open(source, autoPlay: true);
+    _emitCurrent(source);
+    _preloadNext();
   }
 
   /// Pauses playback.
@@ -99,29 +127,44 @@ class PlaybackController {
 
   /// Stops playback and clears the active track.
   Future<void> stop() async {
+    _openedUri = null;
     await engine.stop();
-    _currentCtrl.add(null);
+    _emitCurrent(null);
   }
 
   /// Skips to the next track.
   Future<void> skipNext() async {
     final next = queue.next();
     if (next == null) {
+      _openedUri = null;
       await engine.stop();
-      _currentCtrl.add(null);
+      _emitCurrent(null);
       return;
     }
+    _openedUri = next.uri;
     await engine.open(next, autoPlay: true);
-    _currentCtrl.add(next);
+    _emitCurrent(next);
     _preloadNext();
   }
 
-  /// Skips to the previous track.
+  /// Skips to the previous track, or restarts current track if played past 3 seconds.
   Future<void> skipPrevious() async {
+    if (_currentPosition > const Duration(seconds: 3)) {
+      _currentPosition = Duration.zero;
+      await engine.seek(Duration.zero);
+      return;
+    }
+
     final prev = queue.previous();
-    if (prev == null) return;
+    if (prev == null) {
+      _currentPosition = Duration.zero;
+      await engine.seek(Duration.zero);
+      return;
+    }
+    _openedUri = prev.uri;
+    _currentPosition = Duration.zero;
     await engine.open(prev, autoPlay: true);
-    _currentCtrl.add(prev);
+    _emitCurrent(prev);
     _preloadNext();
   }
 
@@ -129,6 +172,9 @@ class PlaybackController {
 
   void _onPlaybackState(PlaybackState state) {
     if (_disposed) return;
+    // Deduplicate rapid identical state emissions.
+    if (_currentState == state) return;
+    _currentState = state;
     _stateCtrl.add(state);
 
     if (state == PlaybackState.completed) {
@@ -139,7 +185,10 @@ class PlaybackController {
   void _onError(AudioError error) {
     if (_disposed) return;
     _errorCtrl.add(error);
-    // Skip to next track on error — do not crash.
+    // Do not skip track for non-fatal errors (e.g. lyrics/subtitle file errors).
+    if (!error.isFatal) {
+      return;
+    }
     _autoAdvance();
   }
 
@@ -147,11 +196,13 @@ class PlaybackController {
     if (_disposed) return;
     final next = queue.next();
     if (next == null) {
-      _currentCtrl.add(null);
+      _openedUri = null;
+      _emitCurrent(null);
       return;
     }
+    _openedUri = next.uri;
     await engine.open(next, autoPlay: true);
-    _currentCtrl.add(next);
+    _emitCurrent(next);
     _preloadNext();
   }
 
@@ -159,5 +210,11 @@ class PlaybackController {
     if (!engine.capabilities.gapless) return;
     final peeked = queue.peekNext();
     engine.preloadNext(peeked);
+  }
+
+  void _emitCurrent(AudioSource? source) {
+    if (_lastEmittedUri == source?.uri && source != null) return;
+    _lastEmittedUri = source?.uri;
+    _currentCtrl.add(source);
   }
 }

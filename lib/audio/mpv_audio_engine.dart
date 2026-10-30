@@ -11,9 +11,7 @@ import 'package:mpv_audio_kit/mpv_audio_kit.dart' as mpv;
 import 'audio_engine.dart';
 import 'audio_models.dart';
 
-/// Bit-depth heuristic: maps the mpv sample-format string to an integer
-/// bit depth. Returns `null` for formats where "bit depth" is ambiguous
-/// (e.g. compressed or planar float reported as generic "float").
+/// Bit-depth heuristic: maps the mpv sample-format enum to an integer bit depth.
 int? _bitDepthFromFormat(mpv.Format? format) => switch (format) {
       mpv.Format.u8 || mpv.Format.u8Planar => 8,
       mpv.Format.s16 || mpv.Format.s16Planar => 16,
@@ -24,12 +22,79 @@ int? _bitDepthFromFormat(mpv.Format? format) => switch (format) {
       _ => null,
     };
 
+/// Bit-depth parser from raw format name string (e.g. 's16', 's24', 's32', 'fltp').
+int? _bitDepthFromFormatName(String? formatName) {
+  if (formatName == null) return null;
+  final f = formatName.toLowerCase();
+  if (f.contains('16')) return 16;
+  if (f.contains('24')) return 24;
+  if (f.contains('32')) return 32;
+  if (f.contains('64')) return 64;
+  if (f.contains('8')) return 8;
+  return null;
+}
+
+/// Cleans up raw container string from mpv.
+///
+/// For example, if mpv reports 'mov,mp4,m4a,3gp,3g2,mj2' and the file has extension
+/// 'm4a', it returns 'm4a' instead of the long list.
+String? _cleanContainer(String? rawFormat, String? pathOrUri) {
+  if (rawFormat == null || rawFormat.trim().isEmpty) return null;
+
+  String? ext;
+  if (pathOrUri != null && pathOrUri.isNotEmpty) {
+    final dot = pathOrUri.lastIndexOf('.');
+    if (dot != -1 && dot < pathOrUri.length - 1) {
+      ext = pathOrUri
+          .substring(dot + 1)
+          .toLowerCase()
+          .split('?')
+          .first
+          .split('#')
+          .first;
+    }
+  }
+
+  final candidates = rawFormat
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .where((s) => s.isNotEmpty)
+      .toList();
+
+  if (candidates.isEmpty) return null;
+  if (candidates.length == 1) return candidates.first;
+
+  if (ext != null) {
+    if (candidates.contains(ext)) return ext;
+    if (ext == 'm4a' || ext == 'alac') return 'm4a';
+    if (ext == 'mp3') return 'mp3';
+    if (ext == 'flac') return 'flac';
+    if (ext == 'wav') return 'wav';
+    if (ext == 'ogg') return 'ogg';
+    if (ext == 'opus') return 'opus';
+    if (ext == 'aac') return 'aac';
+  }
+
+  return candidates.first;
+}
+
 /// Lossless codec heuristic — checks the codec short name.
 bool? _isLossless(String? codec) {
   if (codec == null || codec.isEmpty) return null;
   final lower = codec.toLowerCase();
-  const lossless = ['flac', 'alac', 'ape', 'wav', 'pcm', 'wavpack', 'tta',
-      'aiff', 'dsd', 'mlp', 'truehd'];
+  const lossless = [
+    'flac',
+    'alac',
+    'ape',
+    'wav',
+    'pcm',
+    'wavpack',
+    'tta',
+    'aiff',
+    'dsd',
+    'mlp',
+    'truehd',
+  ];
   for (final l in lossless) {
     if (lower.contains(l)) return true;
   }
@@ -54,6 +119,7 @@ class MpvAudioEngine extends AudioEngine {
   AudioDevice _currentDevice = AudioDevice.auto;
   AudioStreamInfo? _currentStreamInfo;
   double _volume = 1.0;
+  String? _currentUri;
 
   // ── Stream controllers ──────────────────────────────────────────────
 
@@ -63,6 +129,7 @@ class MpvAudioEngine extends AudioEngine {
   final _volumeCtrl = StreamController<double>.broadcast();
   final _errorCtrl = StreamController<AudioError>.broadcast();
   final _devicesCtrl = StreamController<List<AudioDevice>>.broadcast();
+  final _streamInfoCtrl = StreamController<AudioStreamInfo?>.broadcast();
 
   final List<StreamSubscription<dynamic>> _subs = [];
 
@@ -80,9 +147,6 @@ class MpvAudioEngine extends AudioEngine {
       ),
     );
 
-    // Gapless default: mpv property `gapless-audio=weak` (already the
-    // package default).
-
     _listenToStreams();
   }
 
@@ -91,14 +155,20 @@ class MpvAudioEngine extends AudioEngine {
 
     // playbackState  →  derived from mpv.MpvPlaybackState
     _subs.add(p.stream.playbackState.listen((s) {
-      _playbackStateCtrl.add(switch (s) {
+      final state = switch (s) {
         mpv.MpvPlaybackState.idle => PlaybackState.idle,
         mpv.MpvPlaybackState.loading => PlaybackState.loading,
         mpv.MpvPlaybackState.playing => PlaybackState.playing,
         mpv.MpvPlaybackState.paused => PlaybackState.paused,
         mpv.MpvPlaybackState.buffering => PlaybackState.loading,
         mpv.MpvPlaybackState.completed => PlaybackState.completed,
-      });
+      };
+      _playbackStateCtrl.add(state);
+
+      // Refresh stream info once playback starts or resumes
+      if (s == mpv.MpvPlaybackState.playing || s == mpv.MpvPlaybackState.paused) {
+        _rebuildStreamInfo();
+      }
     }));
 
     // position  →  mpv property `time-pos`
@@ -115,6 +185,22 @@ class MpvAudioEngine extends AudioEngine {
 
     // errors  →  mpv error stream (EndFileError | LogError)
     _subs.add(p.stream.error.listen((e) {
+      final msg = e.message;
+      final isLyricsOrSubError = msg.toLowerCase().contains('.lrc') ||
+          msg.toLowerCase().contains('external file') ||
+          msg.toLowerCase().contains('subtitles') ||
+          msg.toLowerCase().contains('sub track');
+
+      if (isLyricsOrSubError) {
+        // Non-fatal lyrics/subtitle warning. Do NOT abort or skip audio track!
+        _errorCtrl.add(AudioError(
+          code: AudioErrorCode.engineFailure,
+          message: 'Lyrics file failed to load: $msg',
+          isFatal: false,
+        ));
+        return;
+      }
+
       final AudioErrorCode code;
       switch (e) {
         case mpv.EndFileError():
@@ -125,10 +211,15 @@ class MpvAudioEngine extends AudioEngine {
                   : e.isAudioOutputError
                       ? AudioErrorCode.deviceUnavailable
                       : AudioErrorCode.engineFailure;
+          _errorCtrl.add(AudioError(code: code, message: msg, isFatal: true));
         case mpv.LogError():
-          code = AudioErrorCode.engineFailure;
+          // Internal mpv log warnings are non-fatal diagnostics.
+          _errorCtrl.add(AudioError(
+            code: AudioErrorCode.engineFailure,
+            message: msg,
+            isFatal: false,
+          ));
       }
-      _errorCtrl.add(AudioError(code: code, message: e.message));
     }));
 
     // devices  →  mpv property `audio-device-list`
@@ -143,7 +234,7 @@ class MpvAudioEngine extends AudioEngine {
       _currentDevice = AudioDevice(id: d.name, name: d.description);
     }));
 
-    // stream info  →  combined from audioParams, audioBitrate, fileFormat
+    // stream info  →  combined from audioParams, audioBitrate, fileFormat, currentAudioTrack
     _subs.add(p.stream.audioParams.listen((params) {
       _rebuildStreamInfo(params: params);
     }));
@@ -153,31 +244,49 @@ class MpvAudioEngine extends AudioEngine {
     _subs.add(p.stream.fileFormat.listen((fmt) {
       _rebuildStreamInfo(containerOverride: fmt);
     }));
+    _subs.add(p.stream.currentAudioTrack.listen((track) {
+      _rebuildStreamInfo(trackOverride: track);
+    }));
   }
 
-  /// Merges the latest values into [_currentStreamInfo].
+  /// Merges the latest values into [_currentStreamInfo] and emits on [_streamInfoCtrl].
   void _rebuildStreamInfo({
     mpv.AudioParams? params,
     double? bitrateOverride,
     String? containerOverride,
+    mpv.MpvTrack? trackOverride,
   }) {
     final p = _player;
     if (p == null) return;
 
     final ap = params ?? p.state.audioParams;
-    final codec = ap.codec ?? ap.codecName;
-    final container = containerOverride ?? p.state.fileFormat;
-    final bitrate = bitrateOverride ?? p.state.audioBitrate;
+    final track = trackOverride ?? p.state.currentAudioTrack;
+
+    final codec = ap.codec ?? ap.codecName ?? track?.codec ?? track?.codecDesc;
+    final rawContainer = containerOverride ?? p.state.fileFormat;
+    final container = _cleanContainer(rawContainer, _currentUri ?? p.state.path);
+
+    final bitrate = bitrateOverride ??
+        (p.state.audioBitrate != null && p.state.audioBitrate! > 0
+            ? p.state.audioBitrate
+            : track?.demuxBitrate);
+
+    final sampleRate = ap.sampleRate ?? track?.sampleRate;
+    final channels = ap.channelCount ?? track?.channelCount;
+    final bitDepth =
+        _bitDepthFromFormat(ap.format) ?? _bitDepthFromFormatName(track?.formatName);
 
     _currentStreamInfo = AudioStreamInfo(
-      codec: codec,
-      container: container.isEmpty ? null : container,
-      sampleRate: ap.sampleRate,
-      bitDepth: _bitDepthFromFormat(ap.format),
-      channels: ap.channelCount,
-      bitrateKbps: bitrate != null ? bitrate / 1000.0 : null,
+      codec: (codec != null && codec.isNotEmpty) ? codec : null,
+      container: container,
+      sampleRate: sampleRate,
+      bitDepth: bitDepth,
+      channels: channels,
+      bitrateKbps: bitrate != null && bitrate > 0 ? bitrate / 1000.0 : null,
       isLossless: _isLossless(codec),
     );
+
+    _streamInfoCtrl.add(_currentStreamInfo);
   }
 
   @override
@@ -194,6 +303,7 @@ class MpvAudioEngine extends AudioEngine {
     await _volumeCtrl.close();
     await _errorCtrl.close();
     await _devicesCtrl.close();
+    await _streamInfoCtrl.close();
   }
 
   // ── Capabilities ────────────────────────────────────────────────────
@@ -210,9 +320,12 @@ class MpvAudioEngine extends AudioEngine {
 
   @override
   Future<void> open(AudioSource source, {bool autoPlay = false}) async {
+    _currentUri = source.uri;
     // player.open()  →  mpv command `loadfile`
-    await _player!.open(mpv.Media(source.uri, extras: source.extras),
-        play: autoPlay);
+    await _player!.open(
+      mpv.Media(source.uri, extras: source.extras),
+      play: autoPlay,
+    );
   }
 
   @override
@@ -229,6 +342,9 @@ class MpvAudioEngine extends AudioEngine {
 
   @override
   Future<void> stop() async {
+    _currentUri = null;
+    _currentStreamInfo = null;
+    _streamInfoCtrl.add(null);
     // player.stop()  →  mpv command `stop`
     await _player!.stop();
   }
@@ -358,9 +474,6 @@ class MpvAudioEngine extends AudioEngine {
   /// Builds a chain of 10 [mpv.EqualizerEffect] instances (one per band)
   /// plus an optional volume-gain for the preamp, and applies them
   /// atomically via [mpv.Player.setAudioEffects].
-  ///
-  /// Each [mpv.EqualizerEffect] maps to FFmpeg's `equalizer` filter:
-  /// `frequency` = center Hz, `gain` = dB, `width` = octave bandwidth.
   Future<void> _applyEq() async {
     if (!_eqEnabled) {
       // Remove all audio effects
@@ -370,8 +483,7 @@ class MpvAudioEngine extends AudioEngine {
 
     final effects = <mpv.AudioEffect>[];
 
-    // Preamp via volume-gain (mpv property: volume-gain, separate from EQ)
-    // We apply it as a preamp adjustment before the EQ chain.
+    // Preamp via volume-gain
     if (_preamp != 0.0) {
       await _player!.setVolumeGain(_preamp);
     } else {
@@ -379,10 +491,6 @@ class MpvAudioEngine extends AudioEngine {
     }
 
     // 10-band EQ: each band is a separate EqualizerEffect instance.
-    // EqualizerEffect  →  FFmpeg `equalizer` filter
-    //   frequency → center frequency in Hz
-    //   gain      → boost/cut in dB
-    //   width     → bandwidth (Q factor with widthType=q, default 1.0 ≈ 1 octave)
     for (var i = 0; i < 10; i++) {
       effects.add(mpv.EqualizerEffect(
         frequency: AudioEngine.eqFrequencies[i].toDouble(),
@@ -391,7 +499,6 @@ class MpvAudioEngine extends AudioEngine {
       ));
     }
 
-    // player.setAudioEffects()  →  mpv property `af` (audio filter chain)
     await _player!.setAudioEffects(effects);
   }
 
@@ -400,8 +507,6 @@ class MpvAudioEngine extends AudioEngine {
   @override
   Future<void> setReplayGainMode(ReplayGainMode mode) async {
     _replayGainMode = mode;
-    // player.setReplayGain()  →  mpv properties `replaygain`,
-    //   `replaygain-preamp`, `replaygain-clip`, `replaygain-fallback`
     await _player!.setReplayGain(mpv.ReplayGainSettings(
       mode: switch (mode) {
         ReplayGainMode.off => mpv.ReplayGain.no,
@@ -437,4 +542,7 @@ class MpvAudioEngine extends AudioEngine {
 
   @override
   AudioStreamInfo? get currentStreamInfo => _currentStreamInfo;
+
+  @override
+  Stream<AudioStreamInfo?> get streamInfoStream => _streamInfoCtrl.stream;
 }

@@ -148,4 +148,7 @@ abstract class AudioEngine {
   /// Fields may be `null` when no track is loaded or the info is not
   /// available yet.
   AudioStreamInfo? get currentStreamInfo;
+
+  /// Emits whenever stream information changes or is decoded.
+  Stream<AudioStreamInfo?> get streamInfoStream;
 }

@@ -83,11 +83,22 @@ class AudioError {
   /// A human-readable description of the error.
   final String message;
 
+  /// Whether this error aborts playback of the current track.
+  ///
+  /// Fatal errors cause the playback controller to skip to the next track.
+  /// Non-fatal errors (e.g. failed external lyrics or subtitle files)
+  /// are reported for diagnostics without interrupting playback.
+  final bool isFatal;
+
   /// Creates a typed [AudioError].
-  const AudioError({required this.code, required this.message});
+  const AudioError({
+    required this.code,
+    required this.message,
+    this.isFatal = true,
+  });
 
   @override
-  String toString() => 'AudioError($code: $message)';
+  String toString() => 'AudioError($code: $message, fatal: $isFatal)';
 }
 
 // ── Stream info ─────────────────────────────────────────────────────────

@@ -46,8 +46,15 @@ class FakeAudioEngine extends AudioEngine {
   final _volumeCtrl = StreamController<double>.broadcast();
   final _errorCtrl = StreamController<AudioError>.broadcast();
   final _devicesCtrl = StreamController<List<AudioDevice>>.broadcast();
+  final _streamInfoCtrl = StreamController<AudioStreamInfo?>.broadcast();
 
   // ── Test helpers ────────────────────────────────────────────────────
+
+  /// How many times [open] has been called.
+  int openCallCount = 0;
+
+  /// Current playback position.
+  Duration get position => _position;
 
   /// The source passed to [open], for assertions.
   AudioSource? get openedSource => _openedSource;
@@ -90,10 +97,12 @@ class FakeAudioEngine extends AudioEngine {
     _playbackStateCtrl.add(_state);
   }
 
-  /// Emits an error and moves to [PlaybackState.error].
+  /// Emits an error. Only moves to error state if fatal.
   void simulateError(AudioError error) {
-    _state = PlaybackState.error;
-    _playbackStateCtrl.add(_state);
+    if (error.isFatal) {
+      _state = PlaybackState.error;
+      _playbackStateCtrl.add(_state);
+    }
     _errorCtrl.add(error);
   }
 
@@ -113,6 +122,7 @@ class FakeAudioEngine extends AudioEngine {
     await _volumeCtrl.close();
     await _errorCtrl.close();
     await _devicesCtrl.close();
+    await _streamInfoCtrl.close();
   }
 
   // ── Capabilities ────────────────────────────────────────────────────
@@ -129,6 +139,7 @@ class FakeAudioEngine extends AudioEngine {
 
   @override
   Future<void> open(AudioSource source, {bool autoPlay = false}) async {
+    openCallCount++;
     _openedSource = source;
     _position = Duration.zero;
     _state = autoPlay ? PlaybackState.playing : PlaybackState.paused;
@@ -142,6 +153,7 @@ class FakeAudioEngine extends AudioEngine {
       bitDepth: 16,
       channels: 2,
     );
+    _streamInfoCtrl.add(_streamInfo);
   }
 
   @override
@@ -288,4 +300,7 @@ class FakeAudioEngine extends AudioEngine {
 
   @override
   AudioStreamInfo? get currentStreamInfo => _streamInfo;
+
+  @override
+  Stream<AudioStreamInfo?> get streamInfoStream => _streamInfoCtrl.stream;
 }

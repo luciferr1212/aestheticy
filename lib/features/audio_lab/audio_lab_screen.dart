@@ -143,6 +143,13 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
       });
       _log('Devices updated: ${_devices.length} device(s) found');
     }));
+
+    _subs.add(widget.engine.streamInfoStream.listen((info) {
+      setState(() => _streamInfo = info);
+      if (info != null && (info.codec != null || info.container != null)) {
+        _log('Stream info: ${info.codec ?? "unknown"} [${info.container ?? "unknown"}]');
+      }
+    }));
   }
 
   @override
@@ -203,11 +210,7 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
   }
 
   Future<void> _playPause() async {
-    if (_playbackState == PlaybackState.playing) {
-      await widget.controller.pause();
-    } else {
-      await widget.controller.play();
-    }
+    await widget.controller.togglePlayPause();
   }
 
   void _cycleRepeat() {

@@ -418,6 +418,92 @@ void main() {
     test('empty queue does not crash on skipPrevious', () async {
       await controller.skipPrevious();
     });
+
+    test('resuming from pause does not re-open the track', () async {
+      queue.add(_src('track1'));
+      await controller.play();
+      expect(engine.openCallCount, 1);
+      expect(engine.state, PlaybackState.playing);
+
+      await controller.pause();
+      expect(engine.state, PlaybackState.paused);
+
+      // Resume via play()
+      await controller.play();
+      expect(engine.state, PlaybackState.playing);
+      expect(engine.openCallCount, 1);
+
+      // Pause and resume via togglePlayPause()
+      await controller.togglePlayPause();
+      expect(engine.state, PlaybackState.paused);
+      await controller.togglePlayPause();
+      expect(engine.state, PlaybackState.playing);
+      expect(engine.openCallCount, 1);
+    });
+
+    test(
+      'previous seeks to 00:00 when position > 3s, and goes to previous when <= 3s',
+      () async {
+        queue.add(_src('song1'));
+        queue.add(_src('song2'));
+
+        // Start song 2
+        await controller.playTrack(1);
+        expect(controller.queue.current?.uri, 'file:///song2.flac');
+
+        // Simulate playing past 3 seconds (5s)
+        engine.simulateTick(const Duration(seconds: 5));
+        await Future<void>.delayed(Duration.zero);
+        expect(engine.position, const Duration(seconds: 5));
+
+        // When > 3s: seek to 00:00, staying on song 2
+        await controller.skipPrevious();
+        expect(engine.position, Duration.zero);
+        expect(controller.queue.current?.uri, 'file:///song2.flac');
+
+        // When <= 3s: skipPrevious goes to song 1
+        await controller.skipPrevious();
+        expect(controller.queue.current?.uri, 'file:///song1.flac');
+      },
+    );
+
+    test('non-fatal lyrics error is emitted without skipping track', () async {
+      queue.add(_src('song1'));
+      queue.add(_src('song2'));
+
+      final errors = <AudioError>[];
+      final currentTracks = <String?>[];
+      final eSub = controller.errorStream.listen(errors.add);
+      final cSub = controller.currentStream.listen(
+        (s) => currentTracks.add(s?.uri),
+      );
+
+      await controller.play();
+      expect(controller.queue.current?.uri, 'file:///song1.flac');
+
+      // Emit non-fatal lyrics error
+      engine.simulateError(
+        const AudioError(
+          code: AudioErrorCode.engineFailure,
+          message:
+              'Lyrics file failed to load: Can not open external file song1.lrc',
+          isFatal: false,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // Error emitted on error stream
+      expect(errors, hasLength(1));
+      expect(errors.first.isFatal, isFalse);
+      expect(errors.first.message, contains('song1.lrc'));
+
+      // Playing track should NOT have skipped
+      expect(controller.queue.current?.uri, 'file:///song1.flac');
+      expect(engine.openedSource?.uri, 'file:///song1.flac');
+
+      await eSub.cancel();
+      await cSub.cancel();
+    });
   });
 }
 

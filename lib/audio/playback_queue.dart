@@ -47,8 +47,11 @@ class PlaybackQueue {
 
   // ── Accessors ───────────────────────────────────────────────────────
 
-  /// Unmodifiable view of the items in user order.
-  List<AudioSource> get items => List<AudioSource>.unmodifiable(_items);
+  /// Unmodifiable view of the items in active playback order (reflects shuffle).
+  List<AudioSource> get items {
+    if (_order.isEmpty) return const [];
+    return List<AudioSource>.unmodifiable(_order.map((i) => _items[i]));
+  }
 
   /// Number of items.
   int get length => _items.length;
@@ -56,18 +59,14 @@ class PlaybackQueue {
   /// Whether the queue is empty.
   bool get isEmpty => _items.isEmpty;
 
-  /// The index in user order of the currently playing item, or –1 if
+  /// The index in active playback order of the currently playing item, or –1 if
   /// nothing is selected.
-  int get currentIndex {
-    if (_orderIndex < 0 || _orderIndex >= _order.length) return -1;
-    return _order[_orderIndex];
-  }
+  int get currentIndex => _orderIndex;
 
   /// The currently selected item, or `null`.
   AudioSource? get current {
-    final idx = currentIndex;
-    if (idx < 0 || idx >= _items.length) return null;
-    return _items[idx];
+    if (_orderIndex < 0 || _orderIndex >= _order.length) return null;
+    return _items[_order[_orderIndex]];
   }
 
   /// Whether the queue is shuffled.
@@ -87,14 +86,15 @@ class PlaybackQueue {
     _rebuildOrder(keepCurrent: true);
   }
 
-  /// Removes the item at [index] in user order.
+  /// Removes the item at [index] in active playback order.
   ///
   /// If the removed item is the current one, the cursor stays at the
   /// same order position (or moves to the last valid one).
   void remove(int index) {
-    if (index < 0 || index >= _items.length) return;
-    final wasCurrent = currentIndex == index;
-    _items.removeAt(index);
+    if (index < 0 || index >= _order.length) return;
+    final originalIdx = _order[index];
+    final wasCurrent = _orderIndex == index;
+    _items.removeAt(originalIdx);
     if (_items.isEmpty) {
       _order = [];
       _orderIndex = -1;
@@ -106,14 +106,20 @@ class PlaybackQueue {
     }
   }
 
-  /// Moves the item at [from] to [to] in user order.
+  /// Moves the item at [from] to [to] in active playback order.
   void move(int from, int to) {
-    if (from < 0 || from >= _items.length) return;
-    if (to < 0 || to >= _items.length) return;
+    if (from < 0 || from >= _order.length) return;
+    if (to < 0 || to >= _order.length) return;
     if (from == to) return;
-    final item = _items.removeAt(from);
-    _items.insert(to, item);
-    _rebuildOrder(keepCurrent: true);
+    final o = _order.removeAt(from);
+    _order.insert(to, o);
+    if (_orderIndex == from) {
+      _orderIndex = to;
+    } else if (from < _orderIndex && to >= _orderIndex) {
+      _orderIndex--;
+    } else if (from > _orderIndex && to <= _orderIndex) {
+      _orderIndex++;
+    }
   }
 
   /// Removes all items and resets the cursor.
@@ -170,7 +176,7 @@ class PlaybackQueue {
         _orderIndex = _items.isEmpty ? -1 : 0;
       }
     } else if (prevItem != null) {
-      _orderIndex = _order.indexOf(_items.indexOf(prevItem));
+      _orderIndex = _items.indexOf(prevItem);
       if (_orderIndex < 0 && _items.isNotEmpty) _orderIndex = 0;
     } else if (_items.isNotEmpty && _orderIndex < 0) {
       _orderIndex = 0;
@@ -251,9 +257,9 @@ class PlaybackQueue {
     return null;
   }
 
-  /// Jumps to [index] in user order.
+  /// Jumps to [index] in active playback order.
   void jumpTo(int index) {
-    if (index < 0 || index >= _items.length) return;
-    _orderIndex = _order.indexOf(index);
+    if (index < 0 || index >= _order.length) return;
+    _orderIndex = index;
   }
 }
