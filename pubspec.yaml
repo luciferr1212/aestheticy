@@ -9,7 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  mpv_audio_kit: ^0.5.3
+  mpv_audio_kit: 0.5.3
+  # file_picker allows picking audio files from local storage in Audio Lab.
+  file_picker: 13.3.0
 
 dev_dependencies:
   flutter_test:

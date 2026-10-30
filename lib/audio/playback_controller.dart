@@ -85,6 +85,24 @@ class PlaybackController {
     await play();
   }
 
+  /// Jumps to track at [index] and starts playback.
+  Future<void> playTrack(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    queue.jumpTo(index);
+    await play();
+  }
+
+  /// Pauses playback.
+  Future<void> pause() async {
+    await engine.pause();
+  }
+
+  /// Stops playback and clears the active track.
+  Future<void> stop() async {
+    await engine.stop();
+    _currentCtrl.add(null);
+  }
+
   /// Skips to the next track.
   Future<void> skipNext() async {
     final next = queue.next();
