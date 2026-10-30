@@ -91,6 +91,10 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
 
   void _initEngineState() {
     _isExclusive = widget.engine.isExclusiveMode;
+    final initialDevices = widget.engine.devices;
+    if (initialDevices.isNotEmpty) {
+      _devices = initialDevices;
+    }
     _selectedDeviceId = widget.engine.currentDevice.id;
     _isEqEnabled = widget.engine.isEqEnabled;
     _eqGains = List<double>.from(widget.engine.eqGains);
@@ -138,7 +142,10 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
       setState(() {
         _devices = devs.isEmpty ? [AudioDevice.auto] : devs;
         if (!_devices.any((d) => d.id == _selectedDeviceId)) {
-          _selectedDeviceId = _devices.first.id;
+          final previousId = _selectedDeviceId;
+          _selectedDeviceId = AudioDevice.auto.id;
+          widget.engine.selectDevice(_selectedDeviceId);
+          _log('Selected device "$previousId" disappeared; fell back to auto');
         }
       });
       _log('Devices updated: ${_devices.length} device(s) found');
@@ -611,10 +618,11 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
                     isExpanded: true,
                     value: _selectedDeviceId,
                     items: _devices.map((d) {
+                      final displayName = d.name.trim().isNotEmpty ? d.name : d.id;
                       return DropdownMenuItem<String>(
                         value: d.id,
                         child: Text(
-                          d.name.isEmpty ? d.id : d.name,
+                          displayName,
                           overflow: TextOverflow.ellipsis,
                         ),
                       );
@@ -632,11 +640,21 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
                   tooltip: 'Refresh devices',
                   icon: const Icon(Icons.refresh),
                   onPressed: () async {
-                    // Re-query current device
+                    await widget.engine.refreshDevices();
                     setState(() {
-                      _selectedDeviceId = widget.engine.currentDevice.id;
+                      _devices = widget.engine.devices;
+                      if (!_devices.any((d) => d.id == _selectedDeviceId)) {
+                        final previousId = _selectedDeviceId;
+                        _selectedDeviceId = AudioDevice.auto.id;
+                        widget.engine.selectDevice(_selectedDeviceId);
+                        _log(
+                          'Selected device "$previousId" disappeared; fell back to auto',
+                        );
+                      }
                     });
-                    _log('Devices refreshed (current: $_selectedDeviceId)');
+                    _log(
+                      'Devices refreshed: ${_devices.length} found (current: $_selectedDeviceId)',
+                    );
                   },
                 ),
               ],

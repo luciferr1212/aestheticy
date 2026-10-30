@@ -107,5 +107,40 @@ void main() {
       expect(engine.eqGains, List<double>.filled(10, 0.0));
       expect(engine.preamp, 0.0);
     });
+
+    testWidgets('a removed selected device falls back to auto and logs event', (
+      tester,
+    ) async {
+      engine.fakeDevices = [
+        AudioDevice.auto,
+        const AudioDevice(id: 'headphones', name: 'USB Headphones'),
+      ];
+
+      await tester.pumpWidget(createTestWidget());
+      await tester.pumpAndSettle();
+
+      // Find dropdown and tap it to open options
+      await tester.ensureVisible(find.byType(DropdownButton<String>));
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+
+      // Tap 'USB Headphones' in dropdown menu
+      await tester.tap(find.text('USB Headphones').last);
+      await tester.pumpAndSettle();
+
+      // Verify selected device is headphones
+      expect(find.text('USB Headphones'), findsWidgets);
+
+      // Now unplug/remove headphones:
+      engine.simulateDevices([AudioDevice.auto]);
+      await tester.pumpAndSettle();
+
+      // Should automatically fall back to 'Auto'
+      expect(find.text('Auto'), findsWidgets);
+      expect(
+        find.textContaining('Selected device "headphones" disappeared; fell back to auto'),
+        findsOneWidget,
+      );
+    });
   });
 }

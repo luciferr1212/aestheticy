@@ -85,6 +85,12 @@ abstract class AudioEngine {
   /// All output devices currently detected.
   Stream<List<AudioDevice>> get devicesStream;
 
+  /// The latest known list of detected output devices (never empty or null).
+  List<AudioDevice> get devices;
+
+  /// Re-reads the output device list from the engine and emits it on [devicesStream].
+  Future<void> refreshDevices();
+
   /// The currently selected output device.
   AudioDevice get currentDevice;
 

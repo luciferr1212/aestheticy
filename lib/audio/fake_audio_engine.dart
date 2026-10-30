@@ -50,6 +50,12 @@ class FakeAudioEngine extends AudioEngine {
 
   // ── Test helpers ────────────────────────────────────────────────────
 
+  /// Updates fake devices and emits on the stream.
+  void simulateDevices(List<AudioDevice> newDevices) {
+    fakeDevices = List<AudioDevice>.from(newDevices);
+    _devicesCtrl.add(devices);
+  }
+
   /// How many times [open] has been called.
   int openCallCount = 0;
 
@@ -231,14 +237,26 @@ class FakeAudioEngine extends AudioEngine {
   // ── Output devices ──────────────────────────────────────────────────
 
   @override
-  Stream<List<AudioDevice>> get devicesStream => _devicesCtrl.stream;
+  Stream<List<AudioDevice>> get devicesStream async* {
+    yield devices;
+    yield* _devicesCtrl.stream;
+  }
+
+  @override
+  List<AudioDevice> get devices => List<AudioDevice>.unmodifiable(fakeDevices);
+
+  @override
+  Future<void> refreshDevices() async {
+    _devicesCtrl.add(devices);
+  }
 
   @override
   AudioDevice get currentDevice => _currentDevice;
 
   @override
   Future<void> selectDevice(String id) async {
-    _currentDevice = AudioDevice(id: id, name: id);
+    final match = fakeDevices.where((d) => d.id == id).firstOrNull;
+    _currentDevice = match ?? AudioDevice(id: id, name: id);
   }
 
   @override

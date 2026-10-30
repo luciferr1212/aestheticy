@@ -117,6 +117,7 @@ class MpvAudioEngine extends AudioEngine {
   double _replayGainPreamp = 0.0;
   bool _exclusiveMode = false;
   AudioDevice _currentDevice = AudioDevice.auto;
+  List<AudioDevice> _cachedDevices = const [AudioDevice.auto];
   AudioStreamInfo? _currentStreamInfo;
   double _volume = 1.0;
   String? _currentUri;
@@ -159,6 +160,17 @@ class MpvAudioEngine extends AudioEngine {
       await _player!.setRawProperty('audio-file-auto', 'no');
     } catch (_) {
       // Fallback: safety net filter handles it.
+    }
+
+    // Cache initial devices synchronously from player state if already available
+    final initial = _player!.state.audioDevices;
+    if (initial.isNotEmpty) {
+      _cachedDevices = initial
+          .map((d) => AudioDevice(
+                id: d.name,
+                name: d.description.isNotEmpty ? d.description : d.name,
+              ))
+          .toList();
     }
 
     _listenToStreams();
@@ -238,9 +250,14 @@ class MpvAudioEngine extends AudioEngine {
 
     // devices  →  mpv property `audio-device-list`
     _subs.add(p.stream.audioDevices.listen((list) {
-      _devicesCtrl.add(
-        list.map((d) => AudioDevice(id: d.name, name: d.description)).toList(),
-      );
+      final mapped = list
+          .map((d) => AudioDevice(
+                id: d.name,
+                name: d.description.isNotEmpty ? d.description : d.name,
+              ))
+          .toList();
+      _cachedDevices = mapped.isNotEmpty ? mapped : const [AudioDevice.auto];
+      _devicesCtrl.add(_cachedDevices);
     }));
 
     // playlist  →  detects when mpv moves to the next preloaded playlist entry (gapless)
@@ -460,7 +477,49 @@ class MpvAudioEngine extends AudioEngine {
   // ── Output devices ──────────────────────────────────────────────────
 
   @override
-  Stream<List<AudioDevice>> get devicesStream => _devicesCtrl.stream;
+  Stream<List<AudioDevice>> get devicesStream async* {
+    yield devices;
+    yield* _devicesCtrl.stream;
+  }
+
+  @override
+  List<AudioDevice> get devices => List<AudioDevice>.unmodifiable(_cachedDevices);
+
+  @override
+  Future<void> refreshDevices() async {
+    final p = _player;
+    if (p == null) return;
+
+    try {
+      final raw = await p.getRawPropertyNode('audio-device-list');
+      if (raw is List) {
+        final list = raw.map((entry) {
+          final m = entry is Map ? entry : const <String, dynamic>{};
+          final id = m['name'] as String? ?? 'auto';
+          final desc = m['description'] as String? ?? '';
+          return AudioDevice(id: id, name: desc.isNotEmpty ? desc : id);
+        }).toList();
+        if (list.isNotEmpty) {
+          _cachedDevices = list;
+          _devicesCtrl.add(_cachedDevices);
+          return;
+        }
+      }
+    } catch (_) {
+      // Fall back to state.audioDevices if raw node query fails
+    }
+
+    final stateDevices = p.state.audioDevices;
+    if (stateDevices.isNotEmpty) {
+      _cachedDevices = stateDevices
+          .map((d) => AudioDevice(
+                id: d.name,
+                name: d.description.isNotEmpty ? d.description : d.name,
+              ))
+          .toList();
+    }
+    _devicesCtrl.add(_cachedDevices);
+  }
 
   @override
   AudioDevice get currentDevice => _currentDevice;

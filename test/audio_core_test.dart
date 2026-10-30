@@ -407,6 +407,34 @@ void main() {
       expect(errors, hasLength(1));
       expect(errors.first.code, AudioErrorCode.fileNotFound);
     });
+
+    test('a listener that subscribes late still gets the current device list', () async {
+      engine.fakeDevices = [
+        AudioDevice.auto,
+        const AudioDevice(id: 'headphone', name: 'USB Headphones'),
+      ];
+      final received = await engine.devicesStream.first;
+      expect(received, hasLength(2));
+      expect(received[1].id, 'headphone');
+      expect(engine.devices, hasLength(2));
+    });
+
+    test('refreshDevices emits the new list to stream listeners', () async {
+      final emittedLists = <List<AudioDevice>>[];
+      final sub = engine.devicesStream.listen(emittedLists.add);
+      await Future<void>.delayed(Duration.zero);
+
+      engine.fakeDevices = [
+        AudioDevice.auto,
+        const AudioDevice(id: 'speakers', name: 'Realtek Speakers'),
+      ];
+      await engine.refreshDevices();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(emittedLists.last, hasLength(2));
+      expect(emittedLists.last[1].id, 'speakers');
+      await sub.cancel();
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════
