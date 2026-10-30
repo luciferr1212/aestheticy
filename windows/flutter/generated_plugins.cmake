@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  mpv_audio_kit
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
