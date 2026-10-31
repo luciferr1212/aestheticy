@@ -34,7 +34,21 @@ abstract class AudioEngine {
   // ── Transport ───────────────────────────────────────────────────────
 
   /// Loads [source] as the current track and optionally starts playback.
-  Future<void> open(AudioSource source, {bool autoPlay = false});
+  ///
+  /// Every call reloads the file from the start, **except** when
+  /// [continuingGapless] is `true` and the engine is already playing
+  /// [source] because it moved on to the preloaded track by itself
+  /// (a gapless transition). In that case the engine only confirms the
+  /// switch and must NOT reload the file. If the engine is not actually
+  /// playing [source], it opens it normally.
+  ///
+  /// Manual actions (tapping a track, Next, Previous) must keep
+  /// [continuingGapless] `false`, so the file is always restarted.
+  Future<void> open(
+    AudioSource source, {
+    bool autoPlay = false,
+    bool continuingGapless = false,
+  });
 
   /// Starts or resumes playback.
   Future<void> play();

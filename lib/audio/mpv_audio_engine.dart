@@ -123,6 +123,12 @@ class MpvAudioEngine extends AudioEngine {
   String? _currentUri;
   int _lastMpvPlaylistIndex = 0;
 
+  /// URI of the entry we appended right after mpv's current playlist entry
+  /// (the prefetched "next" track), or `null` if there is none. We keep our
+  /// own mirror instead of reading `player.state.playlist`, which can be
+  /// stale right after `open()`.
+  String? _preloadedUri;
+
   // ── Stream controllers ──────────────────────────────────────────────
 
   final _playbackStateCtrl = StreamController<PlaybackState>.broadcast();
@@ -264,6 +270,8 @@ class MpvAudioEngine extends AudioEngine {
     _subs.add(p.stream.playlist.listen((playlist) {
       if (playlist.index >= 0 && playlist.index > _lastMpvPlaylistIndex) {
         _lastMpvPlaylistIndex = playlist.index;
+        // The preloaded entry has been consumed: it is the current one now.
+        _preloadedUri = null;
         // Previous track reached EOF and mpv transitioned to the next entry.
         _playbackStateCtrl.add(PlaybackState.completed);
       }
@@ -359,15 +367,22 @@ class MpvAudioEngine extends AudioEngine {
   // ── Transport ───────────────────────────────────────────────────────
 
   @override
-  Future<void> open(AudioSource source, {bool autoPlay = false}) async {
+  Future<void> open(
+    AudioSource source, {
+    bool autoPlay = false,
+    bool continuingGapless = false,
+  }) async {
     _currentUri = source.uri;
 
     final p = _player;
-    if (p != null) {
+    // Only a gapless confirmation may skip the reload. Manual opens (tapping
+    // the playing track, Next, Previous) must always restart the file.
+    if (continuingGapless && p != null) {
       final currentMpvPath = p.state.path;
       final playlist = p.state.playlist;
-      // If mpv is already actively playing this track (via gapless playlist advance),
-      // avoid re-opening the file from scratch which would kill seamless playback.
+      // If mpv is already actively playing this track (it moved on by itself
+      // through the prefetched playlist entry), do not re-open the file: that
+      // would kill the seamless transition.
       if (p.state.playing &&
           (currentMpvPath == source.uri ||
               (playlist.index >= 0 &&
@@ -378,7 +393,9 @@ class MpvAudioEngine extends AudioEngine {
       }
     }
 
+    // A normal open replaces mpv's playlist with this single entry.
     _lastMpvPlaylistIndex = 0;
+    _preloadedUri = null;
     // player.open()  →  mpv command `loadfile`
     await _player!.open(
       mpv.Media(source.uri, extras: source.extras),
@@ -403,6 +420,7 @@ class MpvAudioEngine extends AudioEngine {
     _currentUri = null;
     _currentStreamInfo = null;
     _lastMpvPlaylistIndex = 0;
+    _preloadedUri = null;
     _streamInfoCtrl.add(null);
     // player.stop()  →  mpv command `stop`
     await _player!.stop();
@@ -437,24 +455,44 @@ class MpvAudioEngine extends AudioEngine {
 
   @override
   Future<void> preloadNext(AudioSource? next) async {
-    if (next == null) {
-      // Disable prefetch  →  mpv property `prefetch-playlist=no`
-      await _player!.setPrefetchPlaylist(false);
-      return;
-    }
+    final p = _player;
+    if (p == null) return;
 
-    // Ensure the next track is in the playlist so mpv can prefetch it.
-    final playlist = _player!.state.playlist;
-    final currentIdx = playlist.index;
+    try {
+      if (next == null) {
+        // Disable prefetch  →  mpv property `prefetch-playlist=no`
+        await p.setPrefetchPlaylist(false);
+        return;
+      }
 
-    // If there's already a "next" entry, replace it; otherwise append.
-    if (currentIdx + 1 < playlist.items.length) {
-      await _player!.replace(currentIdx + 1, mpv.Media(next.uri));
-    } else {
-      await _player!.add(mpv.Media(next.uri));
+      // Already queued right after the current entry: nothing to do.
+      if (_preloadedUri == next.uri) return;
+
+      // We track the position of mpv's current entry ourselves
+      // ([_lastMpvPlaylistIndex]) and whether a "next" entry already exists
+      // ([_preloadedUri]). Reading `player.state.playlist` here could return
+      // a stale list right after open().
+      if (_preloadedUri != null) {
+        // Replace the existing "next" entry.
+        await p.replace(_lastMpvPlaylistIndex + 1, mpv.Media(next.uri));
+      } else {
+        // Append the "next" entry.
+        await p.add(mpv.Media(next.uri));
+      }
+      _preloadedUri = next.uri;
+
+      // Enable prefetch  →  mpv property `prefetch-playlist=yes`
+      await p.setPrefetchPlaylist(true);
+    } catch (e) {
+      // The real state of mpv's playlist is unknown now; forget our mirror
+      // and report a non-fatal error instead of losing it silently.
+      _preloadedUri = null;
+      _errorCtrl.add(AudioError(
+        code: AudioErrorCode.engineFailure,
+        message: 'Could not preload the next track: $e',
+        isFatal: false,
+      ));
     }
-    // Enable prefetch  →  mpv property `prefetch-playlist=yes`
-    await _player!.setPrefetchPlaylist(true);
   }
 
   // ── State streams ───────────────────────────────────────────────────

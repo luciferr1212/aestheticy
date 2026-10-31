@@ -507,6 +507,86 @@ void main() {
       await gaplessEngine.dispose();
     });
 
+    test('gapless: engine moving on by itself does not reload the track',
+        () async {
+      final gEngine = _GaplessFakeEngine();
+      await gEngine.init();
+      final q = PlaybackQueue();
+      final ctrl = PlaybackController(engine: gEngine, queue: q);
+      await ctrl.init();
+
+      q.add(_src('a'));
+      q.add(_src('b'));
+      q.add(_src('c'));
+
+      final sources = <String?>[];
+      final sub = ctrl.currentStream.listen((s) => sources.add(s?.uri));
+
+      await ctrl.play();
+      expect(gEngine.openCallCount, 1);
+      expect(gEngine.preloadedNext?.uri, 'file:///b.flac');
+
+      // The engine moves to the preloaded track by itself (gapless).
+      gEngine.simulateGaplessAdvance();
+      await Future<void>.delayed(Duration.zero);
+
+      // The controller followed along WITHOUT reloading the file.
+      expect(gEngine.openCallCount, 1);
+      expect(q.current?.uri, 'file:///b.flac');
+      expect(gEngine.openedSource?.uri, 'file:///b.flac');
+      // ... and prepared the following track.
+      expect(gEngine.preloadedNext?.uri, 'file:///c.flac');
+      expect(sources, ['file:///a.flac', 'file:///b.flac']);
+
+      await sub.cancel();
+      await ctrl.dispose();
+      await gEngine.dispose();
+    });
+
+    test('tapping the playing track restarts it from the beginning', () async {
+      queue.add(_src('a'));
+      queue.add(_src('b'));
+
+      await controller.playTrack(0);
+      expect(engine.openCallCount, 1);
+
+      engine.simulateTick(const Duration(seconds: 10));
+      expect(engine.position, const Duration(seconds: 10));
+
+      // Manual open of the SAME track must reload it, not be ignored.
+      await controller.playTrack(0);
+      expect(engine.openCallCount, 2);
+      expect(engine.position, Duration.zero);
+    });
+
+    test('preload failure is reported as a non-fatal error and playback goes on',
+        () async {
+      final bad = _ThrowingPreloadEngine();
+      await bad.init();
+      final q = PlaybackQueue();
+      final ctrl = PlaybackController(engine: bad, queue: q);
+      await ctrl.init();
+
+      q.add(_src('a'));
+      q.add(_src('b'));
+
+      final errors = <AudioError>[];
+      final sub = ctrl.errorStream.listen(errors.add);
+
+      await ctrl.play();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(errors, isNotEmpty);
+      expect(errors.first.isFatal, isFalse);
+      expect(errors.first.code, AudioErrorCode.engineFailure);
+      expect(bad.state, PlaybackState.playing);
+      expect(q.current?.uri, 'file:///a.flac');
+
+      await sub.cancel();
+      await ctrl.dispose();
+      await bad.dispose();
+    });
+
     test('error on one track skips to next', () async {
       queue.add(_src('bad'));
       queue.add(_src('good'));
@@ -753,4 +833,12 @@ class _GaplessFakeEngine extends FakeAudioEngine {
         equalizer: true,
         replayGain: true,
       );
+}
+
+/// A gapless-capable fake whose preload always fails.
+class _ThrowingPreloadEngine extends _GaplessFakeEngine {
+  @override
+  Future<void> preloadNext(AudioSource? next) async {
+    throw StateError('preload failed');
+  }
 }

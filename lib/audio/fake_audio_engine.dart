@@ -103,6 +103,22 @@ class FakeAudioEngine extends AudioEngine {
     _playbackStateCtrl.add(_state);
   }
 
+  /// Mimics the real engine moving by itself to the preloaded track:
+  /// the preloaded source becomes the opened one WITHOUT an [open] call,
+  /// a `completed` event is emitted (as `MpvAudioEngine` does for a
+  /// playlist advance), then playback continues.
+  void simulateGaplessAdvance() {
+    final next = _preloadedNext;
+    if (next == null) return;
+    _openedSource = next;
+    _preloadedNext = null;
+    _position = Duration.zero;
+    _positionCtrl.add(_position);
+    _playbackStateCtrl.add(PlaybackState.completed);
+    _state = PlaybackState.playing;
+    _playbackStateCtrl.add(_state);
+  }
+
   /// Emits an error. Only moves to error state if fatal.
   void simulateError(AudioError error) {
     if (error.isFatal) {
@@ -144,7 +160,17 @@ class FakeAudioEngine extends AudioEngine {
   // ── Transport ───────────────────────────────────────────────────────
 
   @override
-  Future<void> open(AudioSource source, {bool autoPlay = false}) async {
+  Future<void> open(
+    AudioSource source, {
+    bool autoPlay = false,
+    bool continuingGapless = false,
+  }) async {
+    // Mimics the real engine: a gapless confirmation does not reload.
+    if (continuingGapless &&
+        _state == PlaybackState.playing &&
+        _openedSource?.uri == source.uri) {
+      return;
+    }
     openCallCount++;
     _openedSource = source;
     _position = Duration.zero;

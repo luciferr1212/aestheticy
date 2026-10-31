@@ -97,7 +97,7 @@ class PlaybackController {
     _openedUri = source.uri;
     await engine.open(source, autoPlay: true);
     _emitCurrent(source);
-    _preloadNext();
+    unawaited(_preloadNext());
   }
 
   /// Toggles between play and pause.
@@ -127,7 +127,7 @@ class PlaybackController {
     _openedUri = source.uri;
     await engine.open(source, autoPlay: true);
     _emitCurrent(source);
-    _preloadNext();
+    unawaited(_preloadNext());
   }
 
   /// Pauses playback.
@@ -155,7 +155,7 @@ class PlaybackController {
     _openedUri = next.uri;
     await engine.open(next, autoPlay: true);
     _emitCurrent(next);
-    _preloadNext();
+    unawaited(_preloadNext());
   }
 
   /// Skips to the previous track, or restarts current track if played past 3 seconds.
@@ -177,7 +177,7 @@ class PlaybackController {
     _currentPosition = Duration.zero;
     await engine.open(prev, autoPlay: true);
     _emitCurrent(prev);
-    _preloadNext();
+    unawaited(_preloadNext());
   }
 
   // ── Internal ────────────────────────────────────────────────────────
@@ -233,18 +233,31 @@ class PlaybackController {
         return;
       }
       _openedUri = next.uri;
-      await engine.open(next, autoPlay: true);
+      // continuingGapless: if the engine already moved on to this track by
+      // itself, it only confirms the switch instead of reloading the file.
+      await engine.open(next, autoPlay: true, continuingGapless: true);
       _emitCurrent(next);
-      _preloadNext();
+      unawaited(_preloadNext());
     } finally {
       _isAdvancing = false;
     }
   }
 
-  void _preloadNext() {
-    if (!engine.capabilities.gapless) return;
-    final peeked = queue.peekNext();
-    engine.preloadNext(peeked);
+  /// Asks the engine to prepare the next track. Never throws: a failure is
+  /// reported as a non-fatal error on [errorStream] and playback continues
+  /// (the next track will then start without the gapless preparation).
+  Future<void> _preloadNext() async {
+    if (_disposed || !engine.capabilities.gapless) return;
+    try {
+      await engine.preloadNext(queue.peekNext());
+    } catch (e) {
+      if (_disposed) return;
+      _errorCtrl.add(AudioError(
+        code: AudioErrorCode.engineFailure,
+        message: 'Preloading the next track failed: $e',
+        isFatal: false,
+      ));
+    }
   }
 
   void _emitCurrent(AudioSource? source) {

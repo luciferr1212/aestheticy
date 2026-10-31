@@ -97,3 +97,17 @@ To implement smooth crossfading in a future phase:
 2. When Track 1 approaches its end minus crossfade duration (e.g. 5 seconds remaining), initialize Player B with Track 2 in paused state.
 3. Ramp Player B's volume linearly or logarithmically from 0.0 to 1.0 while simultaneously ramping Player A's volume from 1.0 to 0.0.
 4. Stop Player A once Player B reaches full volume and swap player references for the subsequent track transition.
+
+---
+
+## Known Limitations
+
+These are known and accepted for Phase 1. Revisit them when the queue UI is built.
+
+1. **Queue changes do not notify the controller.** After add, move, remove or a shuffle toggle, the track that mpv already preloaded is not refreshed, and removing the currently playing track does not stop it.
+2. **Synthetic `completed` for gapless.** When mpv moves to the preloaded track by itself, `MpvAudioEngine` emits a `completed` event so the controller advances. This works as long as the package reports another state (for example `playing`) between two transitions. A dedicated `trackAdvanced` event would be cleaner.
+3. **Duplicate tracks in the queue.** The cursor is kept by track identity (the URI), so after an add or a shuffle toggle it can jump to the first copy of a track that appears twice.
+4. **Repeat one grows mpv's playlist.** Every repeat appends one more entry to mpv's internal playlist. The effect is tiny but it is never trimmed.
+5. **Repeat one, last track, Next.** Pressing Next on the last track while repeat one is active stops playback.
+6. **Shuffle reshuffles on add.** Adding a track while shuffle is on re-randomizes the upcoming order.
+7. **Preload mirror.** `MpvAudioEngine` keeps its own record of mpv's playlist position and preloaded entry. If `player.open()` ever stops replacing the whole playlist, this mirror must be revisited.
