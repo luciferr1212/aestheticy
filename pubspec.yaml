@@ -15,6 +15,10 @@ dependencies:
   sqlite3: 3.8.0
   path_provider: 2.1.6
   path: 1.9.1
+  # Pure Dart audio metadata reader (no native C++/Rust toolchain needed on CI)
+  audio_metadata_reader: 1.8.1
+  # Stable cryptographic hashing for cover art caching
+  crypto: 3.0.8
 
 dev_dependencies:
   flutter_test:

@@ -101,17 +101,29 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Step 1 establ
    - `SqliteLibraryRepository.inMemory()` opens a temporary in-memory database (`sqlite3.openInMemory()`), enabling fast, isolated unit tests without disk access.
    - `SqliteLibraryRepository.openDefault()` resolves the OS-specific application support directory via `path_provider` (`%APPDATA%/Aestheticy/library.db` on Windows).
 
+5. **Background Isolate Folder Scanner & Tag Extraction (Step 2):**
+   - **Non-blocking UI Thread:** To support low-spec hardware (such as Core 2 Duo systems), directory crawling and tag parsing run entirely within a spawned background isolate (`Isolate.spawn`).
+   - **Pure Dart Tag Reader (`TagReader`):** Uses `audio_metadata_reader` (pure Dart, MIT license, zero C++/Rust native build requirements on CI) behind the abstract `TagReader` contract, allowing full fake substitution in test suites.
+   - **Robust Error Resilience:** Every file is read within a per-file try/catch block. Corrupt files or malformed headers never abort the scan; they are logged to `ScanProgress.corruptPaths` and increment `ScanProgress.errors`.
+   - **Missing Tag Fallbacks:**
+     - `title`: Extracted title tag, falling back to file name without extension.
+     - `album`: Extracted album tag, falling back to parent folder name (or `'Unknown Album'`).
+     - `artist`: Extracted artist tag, falling back to `'Unknown artist'`.
+   - **Supported File Formats:** Scans only audio extensions: `.mp3`, `.flac`, `.m4a`, `.aac`, `.ogg`, `.opus`, `.wav`, `.wma`, `.aiff`, `.aif`, `.ape`, `.wv`.
+   - **Directory Filtering:** Hidden and system folders (e.g. `.git`, `$RECYCLE.BIN`, `System Volume Information`) are skipped proactively during iteration before traversal.
+   - **Differential/Incremental Rescan:** Compares `path`, `mtime_ms`, and `size_bytes` against `LibraryRepository.existingFiles()`. Metadata tags are only read for new or modified files. Tracks deleted from disk are purged from SQLite via `LibraryRepository.removeTracksByPath()`.
+   - **Batch Database Upserts:** Scanned track metadata is transmitted back to the main isolate in batches of ~200 items, and written to SQLite inside a single `BEGIN IMMEDIATE TRANSACTION` per batch.
+   - **Cover Artwork Cache (`CoverCache`):** Extracts and stores one embedded image per unique album into the application support `covers` folder, keyed by a deterministic MD5 hash (`albumArtist::album`). The key is stored as `cover_key` on the track, and files are resolved via `CoverCache.pathFor(coverKey)`.
+   - **Application Service (`ScanService`):** High-level `ChangeNotifier` and stream-based coordinator exposing `addFolder(path)`, `rescanAll()`, `cancel()`, `isScanning`, and `currentProgress`.
+
 ---
 
 ## How to Extend
 
-1. **Phase 2, Step 2 (Folder Scanner & Metadata Reader):**
-   - Implement background directory crawling (using `existingFiles(folderId)` for differential scanning).
-   - Extract ID3/Vorbis/FLAC metadata tags in a background isolate.
-   - Batch insert/update scanned tracks into `LibraryRepository.upsertTracks()`.
-2. **Phase 2, Step 3 (Library UI):**
+1. **Phase 2, Step 3 (Library UI):**
    - Consume `LibraryRepository.listAlbums()`, `listArtists()`, `listTracks()`, and `search()`.
    - Bind track selection to `Track.toAudioSource()` and pass to `PlaybackController`.
-3. **Future Schema Migrations:**
+   - Bind `ScanService` to folder management and scan progress indicators in the UI.
+2. **Future Schema Migrations:**
    - Increment `kLibrarySchemaVersion` in `lib/library/migrations.dart`.
    - Add incremental migration routines (`_migrateToV2(db)`, etc.) inside `SchemaMigrator.apply()`.
