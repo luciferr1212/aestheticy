@@ -192,8 +192,6 @@ class SqliteLibraryRepository implements LibraryRepository {
       _db.execute('ROLLBACK;');
       rethrow;
     }
-
-    await rebuildArtistLinks();
   }
 
   @override
@@ -231,8 +229,6 @@ class SqliteLibraryRepository implements LibraryRepository {
       _db.execute('ROLLBACK;');
       rethrow;
     }
-
-    await rebuildArtistLinks();
   }
 
   @override
@@ -277,13 +273,22 @@ class SqliteLibraryRepository implements LibraryRepository {
     final sql = StringBuffer('''
       SELECT
         ta.artist_key,
-        (
-          SELECT ta2.artist_name
-          FROM track_artists ta2
-          WHERE ta2.artist_key = ta.artist_key
-          GROUP BY ta2.artist_name
-          ORDER BY COUNT(*) DESC, ta2.artist_name ASC
-          LIMIT 1
+        COALESCE(
+          (
+            SELECT aa.canonical_name
+            FROM artist_aliases aa
+            WHERE aa.canonical_key = ta.artist_key
+            LIMIT 1
+          ),
+          (
+            SELECT ta2.artist_name
+            FROM track_artists ta2
+            WHERE ta2.artist_key = ta.artist_key
+            GROUP BY ta2.artist_name
+            ORDER BY COUNT(*) DESC, ta2.artist_name ASC
+            LIMIT 1
+          ),
+          'Unknown Artist'
         ) AS artist_name,
         COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
         COUNT(DISTINCT t.id) AS track_count
@@ -494,13 +499,22 @@ class SqliteLibraryRepository implements LibraryRepository {
     final sql = '''
       SELECT
         ta.artist_key,
-        (
-          SELECT ta2.artist_name
-          FROM track_artists ta2
-          WHERE ta2.artist_key = ta.artist_key
-          GROUP BY ta2.artist_name
-          ORDER BY COUNT(*) DESC, ta2.artist_name ASC
-          LIMIT 1
+        COALESCE(
+          (
+            SELECT aa.canonical_name
+            FROM artist_aliases aa
+            WHERE aa.canonical_key = ta.artist_key
+            LIMIT 1
+          ),
+          (
+            SELECT ta2.artist_name
+            FROM track_artists ta2
+            WHERE ta2.artist_key = ta.artist_key
+            GROUP BY ta2.artist_name
+            ORDER BY COUNT(*) DESC, ta2.artist_name ASC
+            LIMIT 1
+          ),
+          'Unknown Artist'
         ) AS artist_name,
         COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
         COUNT(DISTINCT t.id) AS track_count
@@ -557,7 +571,11 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> mergeArtists(String sourceKey, String targetKey) async {
+  Future<void> mergeArtists(
+    String sourceKey,
+    String targetKey, {
+    String? targetName,
+  }) async {
     final sKey = TextNormalizer.normalize(sourceKey);
     final tKey = TextNormalizer.normalize(targetKey);
 
@@ -597,29 +615,36 @@ class SqliteLibraryRepository implements LibraryRepository {
     }
 
     // 3. Find display name for rootTargetKey
-    String canonicalName = tKey;
-    final targetArtistRows = _db.select('''
-      SELECT artist_name
-      FROM track_artists
-      WHERE artist_key = ?
-      GROUP BY artist_name
-      ORDER BY COUNT(*) DESC, artist_name ASC
-      LIMIT 1;
-    ''', [rootTargetKey]);
+    String canonicalName = targetName?.trim().isNotEmpty == true
+        ? targetName!.trim()
+        : tKey;
 
-    if (targetArtistRows.isNotEmpty) {
-      canonicalName = targetArtistRows.first['artist_name'] as String;
-    } else if (canonicalNameMap.containsKey(rootTargetKey)) {
-      canonicalName = canonicalNameMap[rootTargetKey]!;
-    } else {
-      final directRows = _db.select('''
-        SELECT artist
-        FROM tracks
-        WHERE normalize_text(artist) = ?
+    if (targetName == null || targetName.trim().isEmpty) {
+      final targetArtistRows = _db.select('''
+        SELECT artist_name
+        FROM track_artists
+        WHERE artist_key = ?
+        GROUP BY artist_name
+        ORDER BY COUNT(*) DESC, artist_name ASC
         LIMIT 1;
       ''', [rootTargetKey]);
-      if (directRows.isNotEmpty && directRows.first['artist'] != null) {
-        canonicalName = directRows.first['artist'] as String;
+
+      if (targetArtistRows.isNotEmpty) {
+        canonicalName = targetArtistRows.first['artist_name'] as String;
+      } else if (canonicalNameMap.containsKey(rootTargetKey)) {
+        canonicalName = canonicalNameMap[rootTargetKey]!;
+      } else {
+        final directRows = _db.select('''
+          SELECT artist
+          FROM tracks
+          WHERE normalize_text(artist) = ?
+          LIMIT 1;
+        ''', [rootTargetKey]);
+        if (directRows.isNotEmpty && directRows.first['artist'] != null) {
+          canonicalName = directRows.first['artist'] as String;
+        } else if (targetKey.trim().isNotEmpty && targetKey.trim() != tKey) {
+          canonicalName = targetKey.trim();
+        }
       }
     }
 

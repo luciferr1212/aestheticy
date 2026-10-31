@@ -31,10 +31,9 @@ class SplitArtist {
 
 /// Utility for splitting multi-artist strings into individual artist entities.
 abstract final class ArtistSplitter {
-  /// Unambiguous separators that always split artist strings.
-  /// Includes: ';', ' feat. ', ' feat ', ' ft. ', ' featuring '.
-  static final RegExp _unambiguousRegex = RegExp(
-    r'(?:\s*;\s*|\s+(?:feat\.?|ft\.?|featuring)\s+)',
+  /// Unambiguous collaboration tokens regex.
+  static final RegExp _featRegex = RegExp(
+    r'\s+(?:feat\.?|ft\.?|featuring)\s+',
     caseSensitive: false,
   );
 
@@ -46,14 +45,31 @@ abstract final class ArtistSplitter {
     caseSensitive: false,
   );
 
+  /// Matches bracketed feature patterns like '(feat. B)', '[feat. B]', '(ft. B)', '[ft. B]'.
+  static final RegExp _bracketedFeatRegex = RegExp(
+    r'\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^\)\]]+)[\)\]]',
+    caseSensitive: false,
+  );
+
   /// Checks if [artistString] contains any ambiguous separators.
   static bool hasAmbiguousSeparator(String artistString) {
+    // Quick pre-filter: avoid regex evaluation if none of the candidate characters exist.
+    if (!artistString.contains(',') &&
+        !artistString.contains('،') &&
+        !artistString.contains('&') &&
+        !artistString.contains('+') &&
+        !artistString.contains('و') &&
+        !artistString.contains('ند') &&
+        !artistString.toLowerCase().contains('and')) {
+      return false;
+    }
     return _ambiguousRegex.hasMatch(artistString);
   }
 
   /// Splits [rawArtist] into distinct [SplitArtist] entities.
   ///
-  /// - Unambiguous separators (';', ' feat. ', etc.) always split.
+  /// - Unambiguous separators (';', ' feat. ', etc.) and bracketed features
+  ///   ('(feat. B)', '[feat. B]', '(ft. B)') always split with brackets stripped.
   /// - Ambiguous separators (' & ', ' and ', ',', etc.) split only when at least
   ///   one resulting part matches a standalone artist in [standaloneArtistKeys]
   ///   (after normalization and [resolveAlias]).
@@ -80,25 +96,70 @@ abstract final class ArtistSplitter {
       return [SplitArtist(name: trimmed, key: resolveKey(fullNormalized))];
     }
 
-    // 1. Always split on unambiguous separators.
-    final unambiguousChunks = trimmed
-        .split(_unambiguousRegex)
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
+    final lower = trimmed.toLowerCase();
+    final hasFeatToken = lower.contains('feat') || lower.contains('ft');
+    final hasBrackets = (trimmed.contains('(') || trimmed.contains('[')) && hasFeatToken;
+    final hasSemicolon = trimmed.contains(';');
+    final hasFeat = hasFeatToken && _featRegex.hasMatch(trimmed);
+    final hasAmbiguous = hasAmbiguousSeparator(trimmed);
+
+    if (!hasBrackets && !hasSemicolon && !hasFeat && !hasAmbiguous) {
+      return [SplitArtist(name: trimmed, key: resolveKey(fullNormalized))];
+    }
+
+    // 1. Unpack bracketed features: '(feat. B)' or '[ft. B]' -> '; B'
+    final String withBracketFeaturesResolved;
+    if (hasBrackets) {
+      withBracketFeaturesResolved = trimmed.replaceAllMapped(
+        _bracketedFeatRegex,
+        (match) {
+          final inner = match.group(1)?.trim() ?? '';
+          return inner.isNotEmpty ? '; $inner' : '';
+        },
+      );
+    } else {
+      withBracketFeaturesResolved = trimmed;
+    }
+
+    // 2. Always split on unambiguous separators (semicolon and feat tokens).
+    final List<String> unambiguousChunks;
+    if (withBracketFeaturesResolved.contains(';')) {
+      final chunks = <String>[];
+      for (final part in withBracketFeaturesResolved.split(';')) {
+        final t = part.trim();
+        if (t.isEmpty) continue;
+        final tLower = t.toLowerCase();
+        if ((tLower.contains('feat') || tLower.contains('ft')) && _featRegex.hasMatch(t)) {
+          chunks.addAll(
+            t.split(_featRegex).map((s) => s.trim()).where((s) => s.isNotEmpty),
+          );
+        } else {
+          chunks.add(t);
+        }
+      }
+      unambiguousChunks = chunks;
+    } else if (hasFeatToken && _featRegex.hasMatch(withBracketFeaturesResolved)) {
+      unambiguousChunks = withBracketFeaturesResolved
+          .split(_featRegex)
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } else {
+      unambiguousChunks = [withBracketFeaturesResolved];
+    }
 
     if (unambiguousChunks.isEmpty) {
       final defaultKey = TextNormalizer.normalize('Unknown Artist');
       return [SplitArtist(name: 'Unknown Artist', key: resolveKey(defaultKey))];
     }
 
-    final finalParts = <String>[];
+    final finalParts = <({String name, String normKey})>[];
 
-    // 2. Evaluate ambiguous separators for each chunk.
+    // 3. Evaluate ambiguous separators for each chunk.
     for (final chunk in unambiguousChunks) {
       final chunkNorm = TextNormalizer.normalize(chunk);
-      if (noSplitKeys.contains(chunkNorm) || !_ambiguousRegex.hasMatch(chunk)) {
-        finalParts.add(chunk);
+      if (noSplitKeys.contains(chunkNorm) || !hasAmbiguousSeparator(chunk)) {
+        finalParts.add((name: chunk, normKey: chunkNorm));
         continue;
       }
 
@@ -109,15 +170,19 @@ abstract final class ArtistSplitter {
           .toList();
 
       if (candidateParts.length <= 1) {
-        finalParts.add(chunk);
+        finalParts.add((name: chunk, normKey: chunkNorm));
         continue;
       }
 
       // Check if at least one candidate part exists alone in the library.
       var shouldSplit = false;
-      for (final candidate in candidateParts) {
-        final candidateNorm = TextNormalizer.normalize(candidate);
-        final candidateKey = resolveKey(candidateNorm);
+      final candidatesWithNorm = candidateParts.map((c) {
+        final norm = TextNormalizer.normalize(c);
+        return (name: c, normKey: norm);
+      }).toList();
+
+      for (final candidate in candidatesWithNorm) {
+        final candidateKey = resolveKey(candidate.normKey);
         if (standaloneArtistKeys.contains(candidateKey)) {
           shouldSplit = true;
           break;
@@ -125,9 +190,9 @@ abstract final class ArtistSplitter {
       }
 
       if (shouldSplit) {
-        finalParts.addAll(candidateParts);
+        finalParts.addAll(candidatesWithNorm);
       } else {
-        finalParts.add(chunk);
+        finalParts.add((name: chunk, normKey: chunkNorm));
       }
     }
 
@@ -136,10 +201,9 @@ abstract final class ArtistSplitter {
     final seenKeys = <String>{};
 
     for (final part in finalParts) {
-      final norm = TextNormalizer.normalize(part);
-      final key = resolveKey(norm);
+      final key = resolveKey(part.normKey);
       if (seenKeys.add(key)) {
-        result.add(SplitArtist(name: part, key: key));
+        result.add(SplitArtist(name: part.name, key: key));
       }
     }
 

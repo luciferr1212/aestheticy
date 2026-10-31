@@ -82,6 +82,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repository.rebuildArtistLinks();
     }
 
     Widget createTestApp({Future<String?> Function()? directoryPicker}) {

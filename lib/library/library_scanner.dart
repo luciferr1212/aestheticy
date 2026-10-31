@@ -225,86 +225,98 @@ class LibraryScanner {
     int totalAdded = 0;
     int totalUpdated = 0;
     int totalRemoved = 0;
+    bool linksRebuilt = false;
 
-    await for (final message in receivePort) {
-      if (_isCancelled) break;
-
-      if (message is _WorkerControlPortMessage) {
-        _workerControlPort = message.controlPort;
-      } else if (message is _BatchMessage) {
-        // Build Track models and batch upsert in one transaction.
-        final tracks = message.items.map((item) {
-          return Track(
-            path: item.path,
-            folderId: folderId,
-            title: item.title,
-            artist: item.artist,
-            albumArtist: item.albumArtist,
-            album: item.album,
-            trackNo: item.trackNo,
-            discNo: item.discNo,
-            year: item.year,
-            durationMs: item.durationMs,
-            mtimeMs: item.mtimeMs,
-            sizeBytes: item.sizeBytes,
-            coverKey: item.coverKey,
-            addedAt: DateTime.now().toUtc(),
-          );
-        }).toList();
-
-        await repository.upsertTracks(tracks);
-
-        totalAdded += message.addedInBatch;
-        totalUpdated += message.updatedInBatch;
-
-        progress = progress.copyWith(
-          added: totalAdded,
-          updated: totalUpdated,
-          processed: message.totalProcessed,
-          found: message.totalFound,
-          errors: message.totalErrors,
-        );
-        yield progress;
-      } else if (message is _ProgressUpdateMessage) {
-        if (message.newCorruptPath != null) {
-          corruptPaths.add(message.newCorruptPath!);
-        }
-        progress = progress.copyWith(
-          found: message.found,
-          processed: message.processed,
-          errors: message.errors,
-          corruptPaths: List.unmodifiable(corruptPaths),
-        );
-        yield progress;
-      } else if (message is _ScanCompleteMessage) {
-        if (message.unreadableDirs == 0 && message.missingPaths.isNotEmpty) {
-          await repository.removeTracksByPath(message.missingPaths);
-          totalRemoved = message.missingPaths.length;
-        }
-
-        if (!_isCancelled) {
-          await repository.markFolderScanned(folderId, DateTime.now().toUtc());
-        }
-
+    Future<void> ensureLinksRebuilt() async {
+      if (linksRebuilt) return;
+      linksRebuilt = true;
+      try {
         await repository.rebuildArtistLinks();
-
-        progress = progress.copyWith(
-          found: message.totalFound,
-          processed: message.totalProcessed,
-          added: totalAdded,
-          updated: totalUpdated,
-          removed: totalRemoved,
-          errors: message.totalErrors,
-          unreadableDirs: message.unreadableDirs,
-          corruptPaths: List.unmodifiable(message.corruptPaths),
-          done: true,
-        );
-        yield progress;
-        break;
-      }
+      } catch (_) {}
     }
 
-    _cleanupIsolate();
+    try {
+      await for (final message in receivePort) {
+        if (_isCancelled) break;
+
+        if (message is _WorkerControlPortMessage) {
+          _workerControlPort = message.controlPort;
+        } else if (message is _BatchMessage) {
+          // Build Track models and batch upsert in one transaction.
+          final tracks = message.items.map((item) {
+            return Track(
+              path: item.path,
+              folderId: folderId,
+              title: item.title,
+              artist: item.artist,
+              albumArtist: item.albumArtist,
+              album: item.album,
+              trackNo: item.trackNo,
+              discNo: item.discNo,
+              year: item.year,
+              durationMs: item.durationMs,
+              mtimeMs: item.mtimeMs,
+              sizeBytes: item.sizeBytes,
+              coverKey: item.coverKey,
+              addedAt: DateTime.now().toUtc(),
+            );
+          }).toList();
+
+          await repository.upsertTracks(tracks);
+
+          totalAdded += message.addedInBatch;
+          totalUpdated += message.updatedInBatch;
+
+          progress = progress.copyWith(
+            added: totalAdded,
+            updated: totalUpdated,
+            processed: message.totalProcessed,
+            found: message.totalFound,
+            errors: message.totalErrors,
+          );
+          yield progress;
+        } else if (message is _ProgressUpdateMessage) {
+          if (message.newCorruptPath != null) {
+            corruptPaths.add(message.newCorruptPath!);
+          }
+          progress = progress.copyWith(
+            found: message.found,
+            processed: message.processed,
+            errors: message.errors,
+            corruptPaths: List.unmodifiable(corruptPaths),
+          );
+          yield progress;
+        } else if (message is _ScanCompleteMessage) {
+          if (message.unreadableDirs == 0 && message.missingPaths.isNotEmpty) {
+            await repository.removeTracksByPath(message.missingPaths);
+            totalRemoved = message.missingPaths.length;
+          }
+
+          if (!_isCancelled) {
+            await repository.markFolderScanned(folderId, DateTime.now().toUtc());
+          }
+
+          await ensureLinksRebuilt();
+
+          progress = progress.copyWith(
+            found: message.totalFound,
+            processed: message.totalProcessed,
+            added: totalAdded,
+            updated: totalUpdated,
+            removed: totalRemoved,
+            errors: message.totalErrors,
+            unreadableDirs: message.unreadableDirs,
+            corruptPaths: List.unmodifiable(message.corruptPaths),
+            done: true,
+          );
+          yield progress;
+          break;
+        }
+      }
+    } finally {
+      _cleanupIsolate();
+      await ensureLinksRebuilt();
+    }
 
     if (_isCancelled && !progress.done) {
       yield progress.copyWith(done: true);

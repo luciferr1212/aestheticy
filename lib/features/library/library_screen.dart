@@ -919,6 +919,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                                         await widget.repository.mergeArtists(
                                           sourceArtist.key,
                                           target.key,
+                                          targetName: target.name,
                                         );
                                         await _refreshAll();
                                         if (mounted) {

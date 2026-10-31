@@ -24,6 +24,25 @@ void main() {
 
       res = ArtistSplitter.split('Artist A featuring Artist B');
       expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
+
+      // Bracketed features: (feat. B), [feat. B], (ft. B), [ft. B], (featuring B)
+      res = ArtistSplitter.split('Artist A (feat. Artist B)');
+      expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
+
+      res = ArtistSplitter.split('Artist A [feat. Artist B]');
+      expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
+
+      res = ArtistSplitter.split('Artist A (ft. Artist B)');
+      expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
+
+      res = ArtistSplitter.split('Artist A [ft. Artist B]');
+      expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
+
+      res = ArtistSplitter.split('Artist A (featuring Artist B)');
+      expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
+
+      res = ArtistSplitter.split('Artist A [featuring Artist B]');
+      expect(res.map((a) => a.name), ['Artist A', 'Artist B']);
     });
 
     test('Never split on "/" (e.g. AC/DC)', () {

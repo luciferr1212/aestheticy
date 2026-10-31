@@ -208,6 +208,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.trackCount(), 2);
 
@@ -287,6 +288,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       // Albums query
       expect(await repo.albumCount(), 3);
@@ -360,6 +362,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       // 1. Search Arabic without Tashkeel
       var results = await repo.search('اغنية حب');
@@ -425,6 +428,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       final trackPercentResults = await repo.search('100%');
       expect(trackPercentResults.length, 1);
@@ -628,6 +632,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.artistCount(), 2);
       final artists = await repo.listArtists();
@@ -677,6 +682,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.artistCount(), 2);
       final artists = await repo.listArtists();
@@ -707,6 +713,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.artistCount(), 1);
       final artists = await repo.listArtists();
@@ -730,6 +737,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.artistCount(), 2);
       final artists = await repo.listArtists();
@@ -764,6 +772,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.artistCount(), 2);
 
@@ -822,6 +831,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repo.rebuildArtistLinks();
 
       // Before no-split: splits into Artist X and Artist Y
       expect(await repo.artistCount(), 2);
@@ -853,6 +863,7 @@ void main() {
         Track(path: 'C:\\Music\\b.mp3', folderId: folder.id!, title: 'B', artist: 'Artist BBB', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
         Track(path: 'C:\\Music\\c.mp3', folderId: folder.id!, title: 'C', artist: 'Artist CCC', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
       ]);
+      await repo.rebuildArtistLinks();
 
       final artists = await repo.listArtists();
       final aKey = artists.firstWhere((x) => x.name == 'Artist AAA').key;
@@ -888,6 +899,7 @@ void main() {
         Track(path: 'C:\\Music\\o1.mp3', folderId: folder.id!, title: 'O1', artist: 'Orphan Artist 1', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
         Track(path: 'C:\\Music\\o2.mp3', folderId: folder.id!, title: 'O2', artist: 'Orphan Artist 2', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
       ]);
+      await repo.rebuildArtistLinks();
 
       expect(await repo.artistCount(), 2);
 
@@ -900,17 +912,75 @@ void main() {
       expect(await repo.artistCount(), 0);
     });
 
-    test('Performance benchmark note: 2,000 distinct artist tracks rebuild in < 100ms', () async {
+    test('merge Fairouz (more tracks) into فيروز => list shows فيروز; after unmerge it goes back', () async {
+      final folder = await repo.addFolder('C:\\Music\\DisplayNameTest');
+      final now = DateTime.now();
+
+      // 5 tracks with 'Fairouz'
+      final fairouzTracks = List.generate(5, (i) => Track(
+        path: 'C:\\Music\\en_$i.mp3',
+        folderId: folder.id!,
+        title: 'Song $i',
+        artist: 'Fairouz',
+        durationMs: 100,
+        mtimeMs: 1,
+        sizeBytes: 1,
+        addedAt: now,
+      ));
+
+      // 1 track with 'فيروز'
+      final arTrack = Track(
+        path: 'C:\\Music\\ar_1.mp3',
+        folderId: folder.id!,
+        title: 'Arabic Song',
+        artist: 'فيروز',
+        durationMs: 100,
+        mtimeMs: 1,
+        sizeBytes: 1,
+        addedAt: now,
+      );
+
+      await repo.upsertTracks([...fairouzTracks, arTrack]);
+      await repo.rebuildArtistLinks();
+
+      final before = await repo.listArtists();
+      expect(before.length, 2);
+
+      final fairouzKey = before.firstWhere((a) => a.name == 'Fairouz').key;
+      final arKey = before.firstWhere((a) => a.name == 'فيروز').key;
+
+      // Merge Fairouz (5 tracks) into فيروز (1 track)
+      await repo.mergeArtists(fairouzKey, arKey, targetName: 'فيروز');
+
+      final afterMerge = await repo.listArtists();
+      expect(afterMerge.length, 1);
+      // Must show 'فيروز' (canonical_name from artist_aliases), NOT 'Fairouz' (most frequent)
+      expect(afterMerge.first.name, 'فيروز');
+      expect(afterMerge.first.trackCount, 6);
+
+      // Search also shows 'فيروز'
+      final searchResults = await repo.searchArtists('fairouz');
+      expect(searchResults.length, 1);
+      expect(searchResults.first.name, 'فيروز');
+
+      // Unmerge restores
+      await repo.unmergeArtist(fairouzKey);
+      final afterUnmerge = await repo.listArtists();
+      expect(afterUnmerge.length, 2);
+      expect(afterUnmerge.map((a) => a.name).toSet(), {'Fairouz', 'فيروز'});
+    });
+
+    test('Performance benchmark: 20,000 tracks with ~3,000 distinct artist strings', () async {
       final folder = await repo.addFolder('C:\\Music\\Bench');
       final now = DateTime.now();
 
-      final batch = List.generate(1000, (i) {
+      final batch = List.generate(20000, (i) {
         return Track(
           path: 'C:\\Music\\bench_$i.mp3',
           folderId: folder.id!,
           title: 'Track $i',
-          artist: 'Artist ${i % 200}; Featured ${i % 50}',
-          album: 'Album ${i % 20}',
+          artist: 'Artist ${i % 3000}; Featured ${i % 100}',
+          album: 'Album ${i % 500}',
           durationMs: 180000,
           mtimeMs: 1000,
           sizeBytes: 2048,
@@ -924,8 +994,9 @@ void main() {
       await repo.rebuildArtistLinks();
       stopwatch.stop();
 
-      // Ensure rebuild was fast
-      expect(stopwatch.elapsedMilliseconds, lessThan(2000));
+      // ignore: avoid_print
+      print('Real rebuild time for 20,000 tracks (~3,000 distinct artists): ${stopwatch.elapsedMilliseconds}ms');
+      expect(stopwatch.elapsedMilliseconds, lessThan(3000));
     });
   });
 }

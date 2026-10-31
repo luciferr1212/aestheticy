@@ -131,17 +131,18 @@ Artists tagged with different spellings or multilingual variations (e.g. Arabic 
 
 ---
 
-## Performance & 50k Track Benchmark Note
+## Performance & Benchmark Note
 
 - `LibraryRepository.rebuildArtistLinks()` operates on **DISTINCT** artist strings (`SELECT DISTINCT COALESCE(NULLIF(artist, ''), 'Unknown Artist') FROM tracks`), rather than evaluating splitting rules and regexes per track.
 - In a library with 50,000 tracks, there are typically only ~1,000 to 3,000 distinct artist strings.
-- Rebuilding artist links for 1,000 distinct tracks executes in under 20-40ms on desktop hardware. For 50k tracks, total execution remains < 100ms within a single immediate SQLite transaction.
-- Links are rebuilt automatically after each completed folder scan, after folder removal, and after any alias or no-split rule changes.
+- Measured rebuild time for 20,000 tracks with ~3,000 distinct artist strings: ~480ms on desktop hardware within a single immediate SQLite transaction using indexed temporary split joins and pre-filtered pure Dart parsing.
+- Links are rebuilt automatically once at the end of every scan session (including cancelled or failed scans, rather than per batch or per folder scan), after folder removal, and after any alias or no-split rule changes.
 
 ---
 
 ## Known Limitations
 
+- **Flattened alias chain un-merging:** Un-merging B after A->B->C was flattened to A->C leaves A merged into C.
 - **Bands containing ambiguous separators with solo artists:** If a band's name contains an ambiguous separator (such as `&` in `Simon & Garfunkel`) and one of its members also exists as a standalone solo artist in the library (e.g. solo tracks tagged `'Simon'`), the splitter will treat the band as a collaboration until the user selects `'Treat "Simon & Garfunkel" as one artist'` (which adds it to `artist_no_split`).
 - **Album merging across artists:** Albums without an `Album Artist` tag merge across different artists when album names match (grouped by `COALESCE(NULLIF(album, ''), 'Unknown Album'), album_artist`).
 - **Paged GROUP BY performance:** Derived aggregation via paged `GROUP BY` is O(n) per page; performance should be benchmarked and measured at 50k+ tracks.

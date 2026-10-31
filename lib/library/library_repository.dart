@@ -58,7 +58,11 @@ abstract class LibraryRepository {
   ///
   /// Merging chains (A->B, B->C) resolve to C; rejects cycles.
   /// Rebuilds artist links after the merge.
-  Future<void> mergeArtists(String sourceKey, String targetKey);
+  Future<void> mergeArtists(
+    String sourceKey,
+    String targetKey, {
+    String? targetName,
+  });
 
   /// Removes an artist merge alias identified by [aliasKey] and rebuilds artist links.
   Future<void> unmergeArtist(String aliasKey);

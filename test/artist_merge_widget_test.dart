@@ -74,6 +74,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repository.rebuildArtistLinks();
 
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
@@ -194,6 +195,7 @@ void main() {
           addedAt: now,
         ),
       ]);
+      await repository.rebuildArtistLinks();
 
       final artists = await repository.listArtists();
       final soloArtist = artists.firstWhere((a) => a.name == 'Solo Artist');

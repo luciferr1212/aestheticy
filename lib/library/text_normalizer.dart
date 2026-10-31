@@ -13,20 +13,24 @@ abstract final class TextNormalizer {
 
   static final RegExp _arabicAlefVariants = RegExp(r'[آأإٱ]');
 
-  static final Map<RegExp, String> _latinAccentReplacements = {
-    RegExp(r'[àáâãäåā]'): 'a',
-    RegExp(r'[èéêëē]'): 'e',
-    RegExp(r'[ìíîïī]'): 'i',
-    RegExp(r'[òóôõöøō]'): 'o',
-    RegExp(r'[ùúûüū]'): 'u',
-    RegExp(r'[ýÿ]'): 'y',
-    RegExp(r'[çćč]'): 'c',
-    RegExp(r'[ñń]'): 'n',
-    RegExp(r'[š]'): 's',
-    RegExp(r'[ž]'): 'z',
-    RegExp(r'ß'): 'ss',
-    RegExp(r'æ'): 'ae',
-    RegExp(r'œ'): 'oe',
+  static final RegExp _accentRegex = RegExp(
+    r'[àáâãäåāèéêëēìíîïīòóôõöøōùúûüūýÿçćčñńšžßæœ]',
+  );
+
+  static const Map<String, String> _accentMap = {
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a', 'ā': 'a',
+    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e', 'ē': 'e',
+    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i', 'ī': 'i',
+    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o', 'ø': 'o', 'ō': 'o',
+    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u', 'ū': 'u',
+    'ý': 'y', 'ÿ': 'y',
+    'ç': 'c', 'ć': 'c', 'č': 'c',
+    'ñ': 'n', 'ń': 'n',
+    'š': 's',
+    'ž': 'z',
+    'ß': 'ss',
+    'æ': 'ae',
+    'œ': 'oe',
   };
 
   /// Normalizes [input] for search indexing and queries.
@@ -37,23 +41,35 @@ abstract final class TextNormalizer {
   static String normalize(String? input) {
     if (input == null || input.isEmpty) return '';
 
+    var hasNonAscii = false;
+    for (var i = 0; i < input.length; i++) {
+      if (input.codeUnitAt(i) > 127) {
+        hasNonAscii = true;
+        break;
+      }
+    }
+
     var result = input.toLowerCase();
 
-    // 1. Remove Arabic harakat/tashkeel & tatweel.
-    result = result.replaceAll(_arabicTashkeel, '');
+    if (hasNonAscii) {
+      // 1. Remove Arabic harakat/tashkeel & tatweel.
+      result = result.replaceAll(_arabicTashkeel, '');
 
-    // 2. Unify Arabic letter variants.
-    result = result
-        .replaceAll(_arabicAlefVariants, 'ا')
-        .replaceAll('ى', 'ي')
-        .replaceAll('ة', 'ه');
+      // 2. Unify Arabic letter variants.
+      result = result
+          .replaceAll(_arabicAlefVariants, 'ا')
+          .replaceAll('ى', 'ي')
+          .replaceAll('ة', 'ه');
 
-    // 3. Normalize Latin accented letters.
-    for (final entry in _latinAccentReplacements.entries) {
-      result = result.replaceAll(entry.key, entry.value);
+      // 3. Normalize Latin accented letters in a single pass.
+      result = result.replaceAllMapped(_accentRegex, (m) {
+        return _accentMap[m.group(0)!] ?? m.group(0)!;
+      });
     }
 
     // 4. Collapse consecutive spaces.
-    return result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return result.contains('  ')
+        ? result.replaceAll(RegExp(r'\s+'), ' ').trim()
+        : result.trim();
   }
 }

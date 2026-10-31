@@ -173,7 +173,9 @@ class SchemaMigrator {
       String resolveAlias(String key) => resolvedAliases[key] ?? key;
 
       // 4. Identify standalone artist keys from distinct strings containing no ambiguous separator
+      // and pre-compute their splits so they never need re-splitting.
       final standaloneKeys = <String>{};
+      final distinctSplits = <String, List<SplitArtist>>{};
       for (final row in distinctRows) {
         final raw = row['raw_artist'] as String;
         if (!ArtistSplitter.hasAmbiguousSeparator(raw)) {
@@ -185,45 +187,68 @@ class SchemaMigrator {
           for (final s in splits) {
             standaloneKeys.add(s.key);
           }
+          distinctSplits[raw] = splits;
         }
       }
 
-      // 5. Split each distinct artist string
-      final distinctSplits = <String, List<SplitArtist>>{};
+      // 5. Split remaining distinct artist strings that contain ambiguous separators
       for (final row in distinctRows) {
         final raw = row['raw_artist'] as String;
-        final splits = ArtistSplitter.split(
-          raw,
-          standaloneArtistKeys: standaloneKeys,
-          noSplitKeys: noSplitKeys,
-          resolveAlias: resolveAlias,
-        );
-        distinctSplits[raw] = splits;
+        if (!distinctSplits.containsKey(raw)) {
+          final splits = ArtistSplitter.split(
+            raw,
+            standaloneArtistKeys: standaloneKeys,
+            noSplitKeys: noSplitKeys,
+            resolveAlias: resolveAlias,
+          );
+          distinctSplits[raw] = splits;
+        }
       }
 
-      // 6. Rewrite track_artists
+      // 6. Rewrite track_artists via a temporary mapping table and a single set-based JOIN
       db.execute('DELETE FROM track_artists;');
-
-      final trackRows = db.select('''
-        SELECT id, COALESCE(NULLIF(artist, ''), 'Unknown Artist') AS raw_artist
-        FROM tracks;
+      db.execute('''
+        CREATE TEMP TABLE IF NOT EXISTS _temp_splits (
+          raw_artist TEXT NOT NULL,
+          artist_key TEXT NOT NULL,
+          artist_name TEXT NOT NULL
+        );
       ''');
+      db.execute('DELETE FROM _temp_splits;');
 
-      final insertStmt = db.prepare('''
-        INSERT OR IGNORE INTO track_artists (track_id, artist_key, artist_name)
+      final insertTempStmt = db.prepare('''
+        INSERT INTO _temp_splits (raw_artist, artist_key, artist_name)
         VALUES (?, ?, ?);
       ''');
 
-      for (final trackRow in trackRows) {
-        final trackId = trackRow['id'] as int;
-        final rawArtist = trackRow['raw_artist'] as String;
-        final splits = distinctSplits[rawArtist] ?? const [];
-        for (final s in splits) {
-          insertStmt.execute([trackId, s.key, s.name]);
+      for (final entry in distinctSplits.entries) {
+        for (final s in entry.value) {
+          insertTempStmt.execute([entry.key, s.key, s.name]);
         }
       }
+      insertTempStmt.close();
 
-      insertStmt.close();
+      db.execute('''
+        CREATE INDEX IF NOT EXISTS _idx_temp_splits_raw ON _temp_splits (raw_artist);
+      ''');
+
+      db.execute('''
+        INSERT OR IGNORE INTO track_artists (track_id, artist_key, artist_name)
+        SELECT t.id, s.artist_key, s.artist_name
+        FROM tracks t
+        JOIN _temp_splits s ON s.raw_artist = t.artist
+        WHERE t.artist IS NOT NULL AND t.artist != '';
+      ''');
+
+      db.execute('''
+        INSERT OR IGNORE INTO track_artists (track_id, artist_key, artist_name)
+        SELECT t.id, s.artist_key, s.artist_name
+        FROM tracks t
+        JOIN _temp_splits s ON s.raw_artist = 'Unknown Artist'
+        WHERE t.artist IS NULL OR t.artist = '';
+      ''');
+
+      db.execute('DELETE FROM _temp_splits;');
     }
 
     if (inTransaction) {
