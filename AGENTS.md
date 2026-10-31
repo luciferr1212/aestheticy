@@ -40,3 +40,10 @@ A native Windows desktop music player called Aestheticy, built with Flutter (no 
 
 ## Roadmap
 1 Audio core -> 2 Library (scan folders, tags, SQLite) -> 3 UI and liquid glass -> 4 Lyrics, queue UI, mini player, stats -> 5 Shared listening and polish.
+
+## Library architecture & rules
+- Library data layer lives in lib/library/; documentation is in docs/library.md.
+- Models (Track, LibraryFolder, AlbumSummary, ArtistSummary) are pure Dart; albums/artists are derived via SQL.
+- Storage uses sqlite3 with migrations; database lives in app-support folder (path_provider).
+- Never import audio packages in lib/library/; use track_audio_source_mapper.dart to map Track -> AudioSource.
+- Track mutations are atomic single transactions; search uses pure Dart Arabic/Latin diacritic normalization.

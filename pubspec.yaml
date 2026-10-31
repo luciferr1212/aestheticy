@@ -12,6 +12,9 @@ dependencies:
   mpv_audio_kit: 0.5.3
   # file_picker allows picking audio files from local storage in Audio Lab.
   file_picker: 13.3.0
+  sqlite3: 3.8.0
+  path_provider: 2.1.6
+  path: 1.9.1
 
 dev_dependencies:
   flutter_test:
