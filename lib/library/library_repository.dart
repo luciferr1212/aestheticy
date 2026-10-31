@@ -51,8 +51,32 @@ abstract class LibraryRepository {
   /// Retrieves all tracks belonging to [album], optionally scoped to [albumArtist].
   Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist});
 
-  /// Retrieves all tracks performed by [artist].
-  Future<List<Track>> tracksOfArtist(String artist);
+  /// Retrieves all tracks performed by [artist], optionally matching by [artistKey].
+  Future<List<Track>> tracksOfArtist(String artist, {String? artistKey});
+
+  /// Merges [sourceKey] artist into [targetKey] artist by creating or updating an alias.
+  ///
+  /// Merging chains (A->B, B->C) resolve to C; rejects cycles.
+  /// Rebuilds artist links after the merge.
+  Future<void> mergeArtists(String sourceKey, String targetKey);
+
+  /// Removes an artist merge alias identified by [aliasKey] and rebuilds artist links.
+  Future<void> unmergeArtist(String aliasKey);
+
+  /// Lists all active artist merge aliases.
+  Future<List<ArtistAlias>> listAliases();
+
+  /// Adds an artist name string to the never-split list and rebuilds artist links.
+  Future<void> addNoSplit(String name);
+
+  /// Removes an artist key from the never-split list and rebuilds artist links.
+  Future<void> removeNoSplit(String key);
+
+  /// Lists all registered never-split artist rules.
+  Future<List<ArtistNoSplit>> listNoSplit();
+
+  /// Rebuilds all artist links in `track_artists` based on distinct track artists.
+  Future<void> rebuildArtistLinks();
 
   /// Lists tracks with optional sorting and pagination.
   Future<List<Track>> listTracks({

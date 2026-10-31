@@ -105,6 +105,7 @@ class SqliteLibraryRepository implements LibraryRepository {
       _db.execute('ROLLBACK;');
       rethrow;
     }
+    await rebuildArtistLinks();
   }
 
   @override
@@ -191,6 +192,8 @@ class SqliteLibraryRepository implements LibraryRepository {
       _db.execute('ROLLBACK;');
       rethrow;
     }
+
+    await rebuildArtistLinks();
   }
 
   @override
@@ -228,6 +231,8 @@ class SqliteLibraryRepository implements LibraryRepository {
       _db.execute('ROLLBACK;');
       rethrow;
     }
+
+    await rebuildArtistLinks();
   }
 
   @override
@@ -271,11 +276,20 @@ class SqliteLibraryRepository implements LibraryRepository {
   Future<List<ArtistSummary>> listArtists({int? limit, int? offset}) async {
     final sql = StringBuffer('''
       SELECT
-        COALESCE(NULLIF(artist, ''), 'Unknown Artist') AS artist_name,
-        COUNT(DISTINCT COALESCE(NULLIF(album, ''), 'Unknown Album')) AS album_count,
-        COUNT(*) AS track_count
-      FROM tracks
-      GROUP BY artist_name
+        ta.artist_key,
+        (
+          SELECT ta2.artist_name
+          FROM track_artists ta2
+          WHERE ta2.artist_key = ta.artist_key
+          GROUP BY ta2.artist_name
+          ORDER BY COUNT(*) DESC, ta2.artist_name ASC
+          LIMIT 1
+        ) AS artist_name,
+        COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
+        COUNT(DISTINCT t.id) AS track_count
+      FROM track_artists ta
+      JOIN tracks t ON t.id = ta.track_id
+      GROUP BY ta.artist_key
       ORDER BY artist_name COLLATE NOCASE ASC
     ''');
     final params = <Object?>[];
@@ -293,7 +307,8 @@ class SqliteLibraryRepository implements LibraryRepository {
 
     return rows.map((row) {
       return ArtistSummary(
-        name: row['artist_name'] as String,
+        key: row['artist_key'] as String,
+        name: (row['artist_name'] as String?) ?? 'Unknown Artist',
         albumCount: row['album_count'] as int,
         trackCount: row['track_count'] as int,
       );
@@ -323,17 +338,21 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<List<Track>> tracksOfArtist(String artist) async {
+  Future<List<Track>> tracksOfArtist(String artist, {String? artistKey}) async {
     final rows = _db.select(
       '''
-      SELECT * FROM tracks
+      SELECT DISTINCT t.*
+      FROM tracks t
+      JOIN track_artists ta ON ta.track_id = t.id
       WHERE (
-        (? = 'Unknown Artist' AND (artist IS NULL OR artist = ''))
-        OR artist = ?
+        (? IS NOT NULL AND ta.artist_key = ?)
+        OR ta.artist_key = ?
+        OR ta.artist_key = normalize_text(?)
+        OR ta.artist_name = ?
       )
-      ORDER BY COALESCE(year, 0) DESC, COALESCE(album, '') COLLATE NOCASE ASC, COALESCE(disc_no, 1) ASC, COALESCE(track_no, 0) ASC;
+      ORDER BY COALESCE(t.year, 0) DESC, COALESCE(t.album, '') COLLATE NOCASE ASC, COALESCE(t.disc_no, 1) ASC, COALESCE(t.track_no, 0) ASC;
       ''',
-      [artist, artist],
+      [artistKey, artistKey, artist, artist, artist],
     );
 
     return rows.map(_mapTrackRow).toList();
@@ -468,32 +487,44 @@ class SqliteLibraryRepository implements LibraryRepository {
     if (terms.isEmpty) return [];
 
     final whereClauses = terms.map((_) =>
-        "normalize_text(COALESCE(NULLIF(artist, ''), 'Unknown Artist')) LIKE ? ESCAPE '\\'"
+        "(normalize_text(ta.artist_name) LIKE ? ESCAPE '\\' OR ta.artist_key LIKE ? ESCAPE '\\')"
     ).join(' AND ');
 
     final effectiveLimit = limit ?? 50;
     final sql = '''
       SELECT
-        COALESCE(NULLIF(artist, ''), 'Unknown Artist') AS artist_name,
-        COUNT(DISTINCT COALESCE(NULLIF(album, ''), 'Unknown Album')) AS album_count,
-        COUNT(*) AS track_count
-      FROM tracks
+        ta.artist_key,
+        (
+          SELECT ta2.artist_name
+          FROM track_artists ta2
+          WHERE ta2.artist_key = ta.artist_key
+          GROUP BY ta2.artist_name
+          ORDER BY COUNT(*) DESC, ta2.artist_name ASC
+          LIMIT 1
+        ) AS artist_name,
+        COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
+        COUNT(DISTINCT t.id) AS track_count
+      FROM track_artists ta
+      JOIN tracks t ON t.id = ta.track_id
       WHERE $whereClauses
-      GROUP BY artist_name
+      GROUP BY ta.artist_key
       ORDER BY artist_name COLLATE NOCASE ASC
       LIMIT ?;
     ''';
 
     final params = <Object?>[];
     for (final t in terms) {
-      params.add('%${_escapeLike(t)}%');
+      final escaped = '%${_escapeLike(t)}%';
+      params.add(escaped);
+      params.add(escaped);
     }
     params.add(effectiveLimit);
 
     final rows = _db.select(sql, params);
     return rows.map((row) {
       return ArtistSummary(
-        name: row['artist_name'] as String,
+        key: row['artist_key'] as String,
+        name: (row['artist_name'] as String?) ?? 'Unknown Artist',
         albumCount: row['album_count'] as int,
         trackCount: row['track_count'] as int,
       );
@@ -514,10 +545,7 @@ class SqliteLibraryRepository implements LibraryRepository {
   @override
   Future<int> artistCount() async {
     final row = _db.select('''
-      SELECT COUNT(*) AS total FROM (
-        SELECT 1 FROM tracks
-        GROUP BY COALESCE(NULLIF(artist, ''), 'Unknown Artist')
-      );
+      SELECT COUNT(DISTINCT artist_key) AS total FROM track_artists;
     ''').first;
     return row['total'] as int;
   }
@@ -526,6 +554,158 @@ class SqliteLibraryRepository implements LibraryRepository {
   Future<int> trackCount() async {
     final row = _db.select('SELECT COUNT(*) AS total FROM tracks;').first;
     return row['total'] as int;
+  }
+
+  @override
+  Future<void> mergeArtists(String sourceKey, String targetKey) async {
+    final sKey = TextNormalizer.normalize(sourceKey);
+    final tKey = TextNormalizer.normalize(targetKey);
+
+    if (sKey.isEmpty || tKey.isEmpty) {
+      throw ArgumentError('Artist keys cannot be empty.');
+    }
+    if (sKey == tKey) {
+      throw ArgumentError('Cannot merge an artist into itself.');
+    }
+
+    // 1. Fetch current aliases to check for cycles and flatten chains
+    final rows = _db.select(
+      'SELECT alias_key, canonical_key, canonical_name FROM artist_aliases;',
+    );
+    final aliasMap = <String, String>{};
+    final canonicalNameMap = <String, String>{};
+    for (final r in rows) {
+      aliasMap[r['alias_key'] as String] = r['canonical_key'] as String;
+      canonicalNameMap[r['alias_key'] as String] =
+          r['canonical_name'] as String;
+    }
+
+    // 2. Trace targetKey to its root canonical
+    var rootTargetKey = tKey;
+    final visited = <String>{rootTargetKey};
+    while (aliasMap.containsKey(rootTargetKey)) {
+      final next = aliasMap[rootTargetKey]!;
+      if (next == sKey) {
+        throw ArgumentError('Cannot merge: creates a cycle ($sKey -> $tKey).');
+      }
+      if (!visited.add(next)) break;
+      rootTargetKey = next;
+    }
+
+    if (rootTargetKey == sKey) {
+      throw ArgumentError('Cannot merge: creates a cycle.');
+    }
+
+    // 3. Find display name for rootTargetKey
+    String canonicalName = tKey;
+    final targetArtistRows = _db.select('''
+      SELECT artist_name
+      FROM track_artists
+      WHERE artist_key = ?
+      GROUP BY artist_name
+      ORDER BY COUNT(*) DESC, artist_name ASC
+      LIMIT 1;
+    ''', [rootTargetKey]);
+
+    if (targetArtistRows.isNotEmpty) {
+      canonicalName = targetArtistRows.first['artist_name'] as String;
+    } else if (canonicalNameMap.containsKey(rootTargetKey)) {
+      canonicalName = canonicalNameMap[rootTargetKey]!;
+    } else {
+      final directRows = _db.select('''
+        SELECT artist
+        FROM tracks
+        WHERE normalize_text(artist) = ?
+        LIMIT 1;
+      ''', [rootTargetKey]);
+      if (directRows.isNotEmpty && directRows.first['artist'] != null) {
+        canonicalName = directRows.first['artist'] as String;
+      }
+    }
+
+    // 4. Update and flatten all aliases in a transaction
+    _db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      _db.execute('''
+        UPDATE artist_aliases
+        SET canonical_key = ?, canonical_name = ?
+        WHERE canonical_key = ?;
+      ''', [rootTargetKey, canonicalName, sKey]);
+
+      _db.execute('''
+        INSERT OR REPLACE INTO artist_aliases (alias_key, canonical_key, canonical_name)
+        VALUES (?, ?, ?);
+      ''', [sKey, rootTargetKey, canonicalName]);
+
+      _db.execute('COMMIT;');
+    } catch (e) {
+      _db.execute('ROLLBACK;');
+      rethrow;
+    }
+
+    await rebuildArtistLinks();
+  }
+
+  @override
+  Future<void> unmergeArtist(String aliasKey) async {
+    final key = TextNormalizer.normalize(aliasKey);
+    _db.execute('DELETE FROM artist_aliases WHERE alias_key = ?;', [key]);
+    await rebuildArtistLinks();
+  }
+
+  @override
+  Future<List<ArtistAlias>> listAliases() async {
+    final rows = _db.select('''
+      SELECT alias_key, canonical_key, canonical_name
+      FROM artist_aliases
+      ORDER BY canonical_name COLLATE NOCASE ASC, alias_key ASC;
+    ''');
+    return rows.map((r) {
+      return ArtistAlias(
+        aliasKey: r['alias_key'] as String,
+        canonicalKey: r['canonical_key'] as String,
+        canonicalName: r['canonical_name'] as String,
+      );
+    }).toList();
+  }
+
+  @override
+  Future<void> addNoSplit(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final key = TextNormalizer.normalize(trimmed);
+    _db.execute('''
+      INSERT OR REPLACE INTO artist_no_split (artist_key, artist_name)
+      VALUES (?, ?);
+    ''', [key, trimmed]);
+    await rebuildArtistLinks();
+  }
+
+  @override
+  Future<void> removeNoSplit(String key) async {
+    final norm = TextNormalizer.normalize(key);
+    _db.execute('DELETE FROM artist_no_split WHERE artist_key = ?;', [norm]);
+    await rebuildArtistLinks();
+  }
+
+  @override
+  Future<List<ArtistNoSplit>> listNoSplit() async {
+    final rows = _db.select('''
+      SELECT artist_key, artist_name
+      FROM artist_no_split
+      ORDER BY artist_name COLLATE NOCASE ASC;
+    ''');
+    return rows.map((r) {
+      return ArtistNoSplit(
+        artistKey: r['artist_key'] as String,
+        artistName: r['artist_name'] as String,
+      );
+    }).toList();
+  }
+
+  @override
+  Future<void> rebuildArtistLinks() async {
+    SchemaMigrator.rebuildArtistLinksSync(_db);
   }
 
   @override

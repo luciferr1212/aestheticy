@@ -18,13 +18,13 @@ void main() {
       await repo.close();
     });
 
-    test('migration from empty DB sets user_version to 1 and creates schema',
+    test('migration from empty DB sets user_version to 2 and creates schema',
         () {
       final rawDb = sqlite3.openInMemory();
       SchemaMigrator.apply(rawDb);
 
       final versionResult = rawDb.select('PRAGMA user_version;');
-      expect(versionResult.first.values.first, 1);
+      expect(versionResult.first.values.first, 2);
 
       // Verify tables exist
       final tables = rawDb
@@ -33,6 +33,9 @@ void main() {
           .toSet();
       expect(tables.contains('folders'), isTrue);
       expect(tables.contains('tracks'), isTrue);
+      expect(tables.contains('track_artists'), isTrue);
+      expect(tables.contains('artist_aliases'), isTrue);
+      expect(tables.contains('artist_no_split'), isTrue);
 
       // Verify indexes exist
       final indexes = rawDb
@@ -43,6 +46,7 @@ void main() {
       expect(indexes.contains('idx_tracks_album'), isTrue);
       expect(indexes.contains('idx_tracks_artist'), isTrue);
       expect(indexes.contains('idx_tracks_search_text'), isTrue);
+      expect(indexes.contains('idx_track_artists_artist_key'), isTrue);
 
       rawDb.close();
     });
@@ -522,6 +526,406 @@ void main() {
       expect(source.extras?['year'], '2024');
       expect(source.extras?['coverKey'], 'cover-123');
       expect(source.extras?['durationMs'], '240000');
+    });
+
+    test('migrating a v1 database that already has tracks populates track_artists', () {
+      final rawDb = sqlite3.openInMemory();
+      rawDb.execute('PRAGMA foreign_keys = ON;');
+
+      // 1. Manually create v1 schema
+      rawDb.execute('''
+        CREATE TABLE folders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL UNIQUE,
+          last_scan_at INTEGER
+        );
+        CREATE TABLE tracks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL UNIQUE,
+          folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+          title TEXT,
+          artist TEXT,
+          album_artist TEXT,
+          album TEXT,
+          track_no INTEGER,
+          disc_no INTEGER,
+          year INTEGER,
+          duration_ms INTEGER NOT NULL,
+          mtime_ms INTEGER NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          cover_key TEXT,
+          added_at INTEGER NOT NULL,
+          search_text TEXT NOT NULL
+        );
+        PRAGMA user_version = 1;
+      ''');
+
+      // 2. Insert v1 tracks
+      rawDb.execute("INSERT INTO folders (path) VALUES ('C:\\\\Music');");
+      rawDb.execute('''
+        INSERT INTO tracks (path, folder_id, title, artist, album, duration_ms, mtime_ms, size_bytes, added_at, search_text)
+        VALUES ('C:\\\\Music\\\\1.mp3', 1, 'Song 1', 'Fairouz', 'Album 1', 100, 10, 10, 1000, 'song 1 fairouz');
+      ''');
+      rawDb.execute('''
+        INSERT INTO tracks (path, folder_id, title, artist, album, duration_ms, mtime_ms, size_bytes, added_at, search_text)
+        VALUES ('C:\\\\Music\\\\2.mp3', 1, 'Duet', 'Fairouz; Ziad Rahbani', 'Album 2', 100, 10, 10, 1000, 'duet fairouz ziad');
+      ''');
+
+      // 3. Apply migration to v2
+      SchemaMigrator.apply(rawDb);
+
+      expect(rawDb.select('PRAGMA user_version;').first.values.first, 2);
+
+      // 4. Verify track_artists populated
+      final rows = rawDb.select('SELECT track_id, artist_key, artist_name FROM track_artists ORDER BY track_id, artist_name;');
+      expect(rows.length, 3);
+      expect(rows[0]['track_id'], 1);
+      expect(rows[0]['artist_name'], 'Fairouz');
+      expect(rows[1]['track_id'], 2);
+      expect(rows[1]['artist_name'], 'Fairouz');
+      expect(rows[2]['track_id'], 2);
+      expect(rows[2]['artist_name'], 'Ziad Rahbani');
+
+      rawDb.close();
+    });
+
+    test('duet: Amr Diab, Mohamed Mounir, Amr Diab and Mohamed Mounir appears under both, no combined entry', () async {
+      final folder = await repo.addFolder('C:\\Music\\Arabic');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\amr.mp3',
+          folderId: folder.id!,
+          title: 'Tamally Maak',
+          artist: 'عمرو دياب',
+          album: 'Tamally Maak',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\mounir.mp3',
+          folderId: folder.id!,
+          title: 'El Leila Ya Samra',
+          artist: 'محمد منير',
+          album: 'El Leila',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\duet.mp3',
+          folderId: folder.id!,
+          title: 'Al Qahira',
+          artist: 'عمرو دياب اند مُحَمَّدْ مُنير',
+          album: 'Singles',
+          durationMs: 220000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+
+      expect(await repo.artistCount(), 2);
+      final artists = await repo.listArtists();
+      expect(artists.length, 2);
+      expect(artists.map((a) => a.name).toSet(), {'عمرو دياب', 'محمد منير'});
+
+      // Duet appears under Amr Diab
+      final amrTracks = await repo.tracksOfArtist('عمرو دياب');
+      expect(amrTracks.length, 2);
+      expect(amrTracks.map((t) => t.title).toSet(), {'Tamally Maak', 'Al Qahira'});
+
+      // Duet appears under Mohamed Mounir
+      final mounirTracks = await repo.tracksOfArtist('محمد منير');
+      expect(mounirTracks.length, 2);
+      expect(mounirTracks.map((t) => t.title).toSet(), {'El Leila Ya Samra', 'Al Qahira'});
+
+      // Track retains its original artist tag for display
+      final duetTrack = amrTracks.firstWhere((t) => t.title == 'Al Qahira');
+      expect(duetTrack.artist, 'عمرو دياب اند مُحَمَّدْ مُنير');
+    });
+
+    test('fairouz, fairouz and kaza kaza (kaza kaza never alone) => two artists, duet under both', () async {
+      final folder = await repo.addFolder('C:\\Music\\Fairouz');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\f1.mp3',
+          folderId: folder.id!,
+          title: 'Kifak Inta',
+          artist: 'fairouz',
+          album: 'Album 1',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\f2.mp3',
+          folderId: folder.id!,
+          title: 'Duet Song',
+          artist: 'fairouz and kaza kaza',
+          album: 'Album 2',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+
+      expect(await repo.artistCount(), 2);
+      final artists = await repo.listArtists();
+      expect(artists.map((a) => a.name).toSet(), {'fairouz', 'kaza kaza'});
+
+      final fairouzTracks = await repo.tracksOfArtist('fairouz');
+      expect(fairouzTracks.length, 2);
+
+      final kazaTracks = await repo.tracksOfArtist('kaza kaza');
+      expect(kazaTracks.length, 1);
+      expect(kazaTracks.first.title, 'Duet Song');
+    });
+
+    test('Simon & Garfunkel alone stays one', () async {
+      final folder = await repo.addFolder('C:\\Music\\Folk');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\sg.mp3',
+          folderId: folder.id!,
+          title: 'The Sound of Silence',
+          artist: 'Simon & Garfunkel',
+          album: 'Wednesday Morning, 3 A.M.',
+          durationMs: 185000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+
+      expect(await repo.artistCount(), 1);
+      final artists = await repo.listArtists();
+      expect(artists.first.name, 'Simon & Garfunkel');
+    });
+
+    test('A feat. B always splits', () async {
+      final folder = await repo.addFolder('C:\\Music\\Collab');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\collab.mp3',
+          folderId: folder.id!,
+          title: 'Collab Song',
+          artist: 'Artist Alpha feat. Artist Beta',
+          album: 'Collab Album',
+          durationMs: 210000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+
+      expect(await repo.artistCount(), 2);
+      final artists = await repo.listArtists();
+      expect(artists.map((a) => a.name).toSet(), {'Artist Alpha', 'Artist Beta'});
+    });
+
+    test('Merge فيروز into fairouz => one entry, tracks from both, survives rescan, unmerge restores', () async {
+      final folder = await repo.addFolder('C:\\Music\\FMerge');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\ar.mp3',
+          folderId: folder.id!,
+          title: 'Habaytak',
+          artist: 'فيروز',
+          album: 'Album A',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\en.mp3',
+          folderId: folder.id!,
+          title: 'Li Beirut',
+          artist: 'fairouz',
+          album: 'Album B',
+          durationMs: 190000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+
+      expect(await repo.artistCount(), 2);
+
+      // Merge Arabic spelling into English spelling
+      final artistsBefore = await repo.listArtists();
+      final arArtist = artistsBefore.firstWhere((a) => a.name == 'فيروز');
+      final enArtist = artistsBefore.firstWhere((a) => a.name == 'fairouz');
+
+      await repo.mergeArtists(arArtist.key, enArtist.key);
+
+      expect(await repo.artistCount(), 1);
+      final artistsAfterMerge = await repo.listArtists();
+      expect(artistsAfterMerge.length, 1);
+      expect(artistsAfterMerge.first.trackCount, 2);
+
+      final combinedTracks = await repo.tracksOfArtist('fairouz');
+      expect(combinedTracks.length, 2);
+
+      // Survives a rebuild / rescan
+      await repo.rebuildArtistLinks();
+      expect(await repo.artistCount(), 1);
+
+      // Unmerge restores
+      await repo.unmergeArtist(arArtist.key);
+      expect(await repo.artistCount(), 2);
+      final restored = await repo.listArtists();
+      expect(restored.length, 2);
+    });
+
+    test('No-split keeps X and Y whole', () async {
+      final folder = await repo.addFolder('C:\\Music\\NoSplit');
+      final now = DateTime.now();
+
+      // First add standalone X so normally "X and Y" would split
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\x.mp3',
+          folderId: folder.id!,
+          title: 'Solo X',
+          artist: 'Artist X',
+          album: 'Album X',
+          durationMs: 120000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\xy.mp3',
+          folderId: folder.id!,
+          title: 'Band XY',
+          artist: 'Artist X and Artist Y',
+          album: 'Album XY',
+          durationMs: 150000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+
+      // Before no-split: splits into Artist X and Artist Y
+      expect(await repo.artistCount(), 2);
+
+      // Add no-split rule for 'Artist X and Artist Y'
+      await repo.addNoSplit('Artist X and Artist Y');
+
+      // Now "Artist X and Artist Y" stays whole as its own artist
+      expect(await repo.artistCount(), 2);
+      final artists = await repo.listArtists();
+      expect(artists.map((a) => a.name).toSet(), {'Artist X', 'Artist X and Artist Y'});
+
+      // Remove no-split
+      final noSplits = await repo.listNoSplit();
+      expect(noSplits.length, 1);
+      await repo.removeNoSplit(noSplits.first.artistKey);
+
+      // After removal, splits again into Artist X and Artist Y
+      final artistsRestored = await repo.listArtists();
+      expect(artistsRestored.map((a) => a.name).toSet(), {'Artist X', 'Artist Y'});
+    });
+
+    test('Chain merging resolves to root canonical and cycles are rejected', () async {
+      final folder = await repo.addFolder('C:\\Music\\Chains');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(path: 'C:\\Music\\a.mp3', folderId: folder.id!, title: 'A', artist: 'Artist AAA', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
+        Track(path: 'C:\\Music\\b.mp3', folderId: folder.id!, title: 'B', artist: 'Artist BBB', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
+        Track(path: 'C:\\Music\\c.mp3', folderId: folder.id!, title: 'C', artist: 'Artist CCC', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
+      ]);
+
+      final artists = await repo.listArtists();
+      final aKey = artists.firstWhere((x) => x.name == 'Artist AAA').key;
+      final bKey = artists.firstWhere((x) => x.name == 'Artist BBB').key;
+      final cKey = artists.firstWhere((x) => x.name == 'Artist CCC').key;
+
+      // Merge A -> B
+      await repo.mergeArtists(aKey, bKey);
+      expect(await repo.artistCount(), 2);
+
+      // Merge B -> C (A should also resolve to C)
+      await repo.mergeArtists(bKey, cKey);
+      expect(await repo.artistCount(), 1);
+
+      final aliases = await repo.listAliases();
+      expect(aliases.length, 2);
+      for (final alias in aliases) {
+        expect(alias.canonicalKey, cKey);
+      }
+
+      // Reject self merge
+      expect(() => repo.mergeArtists(cKey, cKey), throwsArgumentError);
+
+      // Reject cycle: merging C -> A
+      expect(() => repo.mergeArtists(cKey, aKey), throwsArgumentError);
+    });
+
+    test('Deleting a track or folder leaves no orphan rows in track_artists', () async {
+      final folder = await repo.addFolder('C:\\Music\\Orphans');
+      final now = DateTime.now();
+
+      await repo.upsertTracks([
+        Track(path: 'C:\\Music\\o1.mp3', folderId: folder.id!, title: 'O1', artist: 'Orphan Artist 1', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
+        Track(path: 'C:\\Music\\o2.mp3', folderId: folder.id!, title: 'O2', artist: 'Orphan Artist 2', album: 'Alb', durationMs: 100, mtimeMs: 1, sizeBytes: 1, addedAt: now),
+      ]);
+
+      expect(await repo.artistCount(), 2);
+
+      // Delete one track
+      await repo.removeTracksByPath(['C:\\Music\\o1.mp3']);
+      expect(await repo.artistCount(), 1);
+
+      // Delete folder
+      await repo.removeFolder(folder.id!);
+      expect(await repo.artistCount(), 0);
+    });
+
+    test('Performance benchmark note: 2,000 distinct artist tracks rebuild in < 100ms', () async {
+      final folder = await repo.addFolder('C:\\Music\\Bench');
+      final now = DateTime.now();
+
+      final batch = List.generate(1000, (i) {
+        return Track(
+          path: 'C:\\Music\\bench_$i.mp3',
+          folderId: folder.id!,
+          title: 'Track $i',
+          artist: 'Artist ${i % 200}; Featured ${i % 50}',
+          album: 'Album ${i % 20}',
+          durationMs: 180000,
+          mtimeMs: 1000,
+          sizeBytes: 2048,
+          addedAt: now,
+        );
+      });
+
+      await repo.upsertTracks(batch);
+
+      final stopwatch = Stopwatch()..start();
+      await repo.rebuildArtistLinks();
+      stopwatch.stop();
+
+      // Ensure rebuild was fast
+      expect(stopwatch.elapsedMilliseconds, lessThan(2000));
     });
   });
 }

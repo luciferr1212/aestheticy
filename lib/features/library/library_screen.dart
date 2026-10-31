@@ -14,6 +14,7 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/features/audio_lab/audio_lab_screen.dart';
 import 'package:aestheticy/features/library/album_detail_screen.dart';
 import 'package:aestheticy/features/library/artist_detail_screen.dart';
+import 'package:aestheticy/features/library/artist_rules_sheet.dart';
 import 'package:aestheticy/features/library/folder_management_sheet.dart';
 import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/library_repository.dart';
@@ -328,6 +329,13 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   // ── Folder Actions ─────────────────────────────────────────────────
 
+  Future<void> _openArtistRules() async {
+    await ArtistRulesSheet.show(context, repository: widget.repository);
+    if (mounted) {
+      await _refreshAll();
+    }
+  }
+
   Future<void> _openFolderManagement() async {
     await FolderManagementSheet.show(
       context,
@@ -427,6 +435,12 @@ class _LibraryScreenState extends State<LibraryScreen>
           ],
         ),
         actions: [
+          IconButton(
+            key: const Key('artist_rules_button'),
+            tooltip: 'Artist Rules',
+            icon: const Icon(Icons.rule),
+            onPressed: _openArtistRules,
+          ),
           IconButton(
             key: const Key('manage_folders_button'),
             tooltip: 'Manage Folders',
@@ -749,7 +763,39 @@ class _LibraryScreenState extends State<LibraryScreen>
             '${artist.trackCount} track${artist.trackCount == 1 ? '' : 's'}',
             style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
-          trailing: const Icon(Icons.chevron_right, size: 18, color: Colors.white38),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              PopupMenuButton<String>(
+                key: Key('artist_menu_${artist.key}'),
+                icon: const Icon(
+                  Icons.more_vert,
+                  size: 18,
+                  color: Colors.white54,
+                ),
+                tooltip: 'Artist options',
+                onSelected: (val) {
+                  if (val == 'merge') {
+                    _openMergeDialog(artist);
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'merge',
+                    child: Row(
+                      children: [
+                        Icon(Icons.call_merge, size: 16),
+                        SizedBox(width: 8),
+                        Text('Merge into…'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const Icon(Icons.chevron_right, size: 18, color: Colors.white38),
+            ],
+          ),
+          onLongPress: () => _openMergeDialog(artist),
           onTap: () {
             Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -759,6 +805,155 @@ class _LibraryScreenState extends State<LibraryScreen>
                   controller: widget.controller,
                 ),
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openMergeDialog(ArtistSummary sourceArtist) async {
+    final allArtists = await widget.repository.listArtists(limit: 500);
+    final candidates =
+        allArtists.where((a) => a.key != sourceArtist.key).toList();
+
+    if (!mounted) return;
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No other artists available to merge into.'),
+        ),
+      );
+      return;
+    }
+
+    String filter = '';
+    final messenger = ScaffoldMessenger.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (stateCtx, setDialogState) {
+            final filtered = filter.trim().isEmpty
+                ? candidates
+                : candidates
+                    .where((a) =>
+                        a.name.toLowerCase().contains(filter.toLowerCase()))
+                    .toList();
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E22),
+              title: Text('Merge "${sourceArtist.name}" into…'),
+              content: SizedBox(
+                width: 400,
+                height: 350,
+                child: Column(
+                  children: [
+                    TextField(
+                      key: const Key('merge_artist_search_field'),
+                      decoration: const InputDecoration(
+                        hintText: 'Search target artist...',
+                        prefixIcon: Icon(Icons.search, size: 18),
+                        isDense: true,
+                      ),
+                      onChanged: (val) => setDialogState(() => filter = val),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: filtered.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'No matching artists',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: filtered.length,
+                              itemBuilder: (targetItemCtx, idx) {
+                                final target = filtered[idx];
+                                return ListTile(
+                                  dense: true,
+                                  key: Key('merge_target_${target.key}'),
+                                  title: Text(target.name),
+                                  subtitle: Text(
+                                    '${target.trackCount} tracks',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  onTap: () async {
+                                    final dialogNav = Navigator.of(dialogCtx);
+                                    final confirmed = await showDialog<bool>(
+                                      context: stateCtx,
+                                      builder: (c) => AlertDialog(
+                                        backgroundColor:
+                                            const Color(0xFF1E1E22),
+                                        title: const Text('Confirm merge'),
+                                        content: Text(
+                                          'Merge "${sourceArtist.name}" into "${target.name}"?\n\n'
+                                          'Tracks performed by "${sourceArtist.name}" will appear under "${target.name}". Files will not be modified.',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.of(c).pop(false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          ElevatedButton(
+                                            key: const Key(
+                                              'confirm_merge_button',
+                                            ),
+                                            onPressed: () =>
+                                                Navigator.of(c).pop(true),
+                                            child: const Text('Merge'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+
+                                    if (confirmed == true && mounted) {
+                                      dialogNav.pop();
+                                      try {
+                                        await widget.repository.mergeArtists(
+                                          sourceArtist.key,
+                                          target.key,
+                                        );
+                                        await _refreshAll();
+                                        if (mounted) {
+                                          messenger.showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Merged ${sourceArtist.name} into ${target.name}',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      } catch (e) {
+                                        if (mounted) {
+                                          messenger.showSnackBar(
+                                            SnackBar(
+                                              content: Text('Merge failed: $e'),
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    }
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Cancel'),
+                ),
+              ],
             );
           },
         );

@@ -286,6 +286,8 @@ class LibraryScanner {
           await repository.markFolderScanned(folderId, DateTime.now().toUtc());
         }
 
+        await repository.rebuildArtistLinks();
+
         progress = progress.copyWith(
           found: message.totalFound,
           processed: message.totalProcessed,

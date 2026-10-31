@@ -277,7 +277,10 @@ class AlbumSummary {
 
 /// Lightweight read model for an artist derived on-the-fly from track records.
 class ArtistSummary {
-  /// Artist name.
+  /// Unique normalized canonical key for grouping and aliases.
+  final String key;
+
+  /// Artist name (most frequent spelling).
   final String name;
 
   /// Total number of distinct albums by this artist.
@@ -288,24 +291,93 @@ class ArtistSummary {
 
   /// Creates an immutable [ArtistSummary] instance.
   const ArtistSummary({
+    String? key,
     required this.name,
     required this.albumCount,
     required this.trackCount,
-  });
+  }) : key = key ?? name;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ArtistSummary &&
           runtimeType == other.runtimeType &&
+          key == other.key &&
           name == other.name &&
           albumCount == other.albumCount &&
           trackCount == other.trackCount;
 
   @override
-  int get hashCode => name.hashCode ^ albumCount.hashCode ^ trackCount.hashCode;
+  int get hashCode =>
+      key.hashCode ^ name.hashCode ^ albumCount.hashCode ^ trackCount.hashCode;
 
   @override
   String toString() =>
-      'ArtistSummary(name: $name, albumCount: $albumCount, trackCount: $trackCount)';
+      'ArtistSummary(key: $key, name: $name, albumCount: $albumCount, trackCount: $trackCount)';
+}
+
+/// An artist alias mapping an alternative spelling or name to a canonical artist.
+class ArtistAlias {
+  /// The normalized alias key being merged.
+  final String aliasKey;
+
+  /// The normalized canonical artist key merged into.
+  final String canonicalKey;
+
+  /// The display name of the canonical artist.
+  final String canonicalName;
+
+  /// Creates an immutable [ArtistAlias] instance.
+  const ArtistAlias({
+    required this.aliasKey,
+    required this.canonicalKey,
+    required this.canonicalName,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ArtistAlias &&
+          runtimeType == other.runtimeType &&
+          aliasKey == other.aliasKey &&
+          canonicalKey == other.canonicalKey &&
+          canonicalName == other.canonicalName;
+
+  @override
+  int get hashCode =>
+      aliasKey.hashCode ^ canonicalKey.hashCode ^ canonicalName.hashCode;
+
+  @override
+  String toString() =>
+      'ArtistAlias(aliasKey: $aliasKey, canonicalKey: $canonicalKey, canonicalName: $canonicalName)';
+}
+
+/// An artist rule preventing a specific string from being split.
+class ArtistNoSplit {
+  /// The normalized artist key that should never be split.
+  final String artistKey;
+
+  /// The display name of the artist.
+  final String artistName;
+
+  /// Creates an immutable [ArtistNoSplit] instance.
+  const ArtistNoSplit({
+    required this.artistKey,
+    required this.artistName,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ArtistNoSplit &&
+          runtimeType == other.runtimeType &&
+          artistKey == other.artistKey &&
+          artistName == other.artistName;
+
+  @override
+  int get hashCode => artistKey.hashCode ^ artistName.hashCode;
+
+  @override
+  String toString() =>
+      'ArtistNoSplit(artistKey: $artistKey, artistName: $artistName)';
 }
