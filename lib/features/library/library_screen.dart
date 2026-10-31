@@ -66,6 +66,8 @@ class _LibraryScreenState extends State<LibraryScreen>
   List<AlbumSummary> _searchAlbums = [];
   List<ArtistSummary> _searchArtists = [];
   bool _isSearching = false;
+  Timer? _searchDebounceTimer;
+  int _searchSequence = 0;
 
   // Paged tracks
   final List<Track> _tracks = [];
@@ -105,6 +107,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   @override
   void dispose() {
     _isDisposed = true;
+    _searchDebounceTimer?.cancel();
     widget.scanService.removeListener(_onScanUpdate);
     _tabController.dispose();
     _searchController.dispose();
@@ -283,9 +286,11 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   // ── Search ─────────────────────────────────────────────────────────
 
-  Future<void> _onSearchChanged(String query) async {
+  void _onSearchChanged(String query) {
+    _searchDebounceTimer?.cancel();
     final trimmed = query.trim();
     if (trimmed.isEmpty) {
+      _searchSequence++;
       setState(() {
         _searchQuery = '';
         _isSearching = false;
@@ -296,35 +301,27 @@ class _LibraryScreenState extends State<LibraryScreen>
       return;
     }
 
-    setState(() {
-      _searchQuery = trimmed;
-      _isSearching = true;
-    });
+    setState(() {});
 
-    await _performSearch(trimmed);
+    final seq = ++_searchSequence;
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 250), () {
+      _performSearch(trimmed, seq);
+    });
   }
 
-  Future<void> _performSearch(String query) async {
-    final lower = query.toLowerCase();
+  Future<void> _performSearch(String query, [int? sequence]) async {
+    final currentSeq = sequence ?? ++_searchSequence;
     final results = await widget.repository.search(query);
-    final allAlbums = await widget.repository.listAlbums();
-    final allArtists = await widget.repository.listArtists();
+    final albums = await widget.repository.searchAlbums(query, limit: 100);
+    final artists = await widget.repository.searchArtists(query, limit: 100);
 
-    final filteredAlbums = allAlbums
-        .where((a) =>
-            a.album.toLowerCase().contains(lower) ||
-            (a.albumArtist?.toLowerCase().contains(lower) ?? false))
-        .toList();
-
-    final filteredArtists = allArtists
-        .where((a) => a.name.toLowerCase().contains(lower))
-        .toList();
-
-    if (mounted) {
+    if (mounted && currentSeq == _searchSequence) {
       setState(() {
+        _searchQuery = query;
+        _isSearching = true;
         _searchResults = results;
-        _searchAlbums = filteredAlbums;
-        _searchArtists = filteredArtists;
+        _searchAlbums = albums;
+        _searchArtists = artists;
       });
     }
   }
@@ -519,7 +516,7 @@ class _LibraryScreenState extends State<LibraryScreen>
               decoration: InputDecoration(
                 hintText: 'Search albums, artists, tracks...',
                 prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searchQuery.isNotEmpty
+                suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear, size: 18),
                         onPressed: () {

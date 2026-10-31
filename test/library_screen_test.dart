@@ -198,6 +198,24 @@ void main() {
       expect(find.text('Night Sky'), findsOneWidget);
     });
 
+    testWidgets('search debounces 250ms before querying', (tester) async {
+      await seedTestData();
+      await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      final searchField = find.byKey(const Key('library_search_field'));
+      await tester.enterText(searchField, 'Night');
+      // Advance by 100ms: debounce timer has not fired yet
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Daybreak'), findsOneWidget);
+
+      // Advance by another 200ms (total 300ms > 250ms)
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpAndSettle();
+      expect(find.text('Daybreak'), findsNothing);
+      expect(find.text('Midnight'), findsOneWidget);
+    });
+
     testWidgets('tapping a track inside Tracks tab plays the current list at right index', (tester) async {
       await seedTestData();
       await tester.pumpWidget(createTestApp());

@@ -133,3 +133,13 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Step 1 establ
 2. **Future Schema Migrations:**
    - Increment `kLibrarySchemaVersion` in `lib/library/migrations.dart`.
    - Add incremental migration routines (`_migrateToV2(db)`, etc.) inside `SchemaMigrator.apply()`.
+
+---
+
+## Known Limitations
+
+- **Album merging across artists:** Albums without an `Album Artist` tag merge across different artists when album names match (grouped by `COALESCE(NULLIF(album, ''), 'Unknown Album'), album_artist`).
+- **Paged GROUP BY performance:** Derived aggregation via paged `GROUP BY` is O(n) per page; performance should be benchmarked and measured at 50k+ tracks.
+- **ASCII-only collation:** SQLite `COLLATE NOCASE` only folds ASCII characters (A-Z to a-z), leaving non-ASCII uppercase/lowercase variations unfolded unless pre-normalized via `TextNormalizer`.
+- **Nested parent and child folders:** Adding both a parent directory and a child directory together can cause tracks to reassign their parent `folder_id` between folders on consecutive rescans.
+- **Embedded cover reading:** Embedded cover artwork is read from metadata tags for every newly added or modified track.

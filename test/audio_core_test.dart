@@ -939,6 +939,36 @@ void main() {
         expect(queue.isEmpty, isTrue);
         expect(engine.state, PlaybackState.idle);
       });
+
+      test('queue [a,b,c], play a, clearUpcoming, simulate completion => engine ends idle, nothing else opens', () async {
+        final gapless = _GaplessFakeEngine();
+        await gapless.init();
+        final q = PlaybackQueue();
+        final ctrl = PlaybackController(engine: gapless, queue: q);
+        await ctrl.init();
+
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+
+        await ctrl.play(); // plays 'a'
+        expect(gapless.openCallCount, 1);
+        expect(gapless.openedSource?.uri, 'file:///a.flac');
+        expect(gapless.preloadedNext?.uri, 'file:///b.flac');
+
+        await ctrl.clearUpcoming();
+        expect(gapless.preloadedNext, isNull);
+
+        gapless.simulateCompletion();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(gapless.state, PlaybackState.idle);
+        expect(gapless.openCallCount, 1);
+        expect(ctrl.currentState, PlaybackState.idle);
+
+        await ctrl.dispose();
+        await gapless.dispose();
+      });
     });
 
     group('playQueue', () {

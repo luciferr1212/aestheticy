@@ -32,6 +32,9 @@ class ScanProgress {
   /// Number of corrupt or unreadable files encountered.
   final int errors;
 
+  /// Number of directories that could not be read due to permission or I/O errors.
+  final int unreadableDirs;
+
   /// Whether the scan operation has completed.
   final bool done;
 
@@ -46,6 +49,7 @@ class ScanProgress {
     this.updated = 0,
     this.removed = 0,
     this.errors = 0,
+    this.unreadableDirs = 0,
     this.done = false,
     this.corruptPaths = const [],
   });
@@ -58,6 +62,7 @@ class ScanProgress {
     int? updated,
     int? removed,
     int? errors,
+    int? unreadableDirs,
     bool? done,
     List<String>? corruptPaths,
   }) {
@@ -68,6 +73,7 @@ class ScanProgress {
       updated: updated ?? this.updated,
       removed: removed ?? this.removed,
       errors: errors ?? this.errors,
+      unreadableDirs: unreadableDirs ?? this.unreadableDirs,
       done: done ?? this.done,
       corruptPaths: corruptPaths ?? this.corruptPaths,
     );
@@ -84,6 +90,7 @@ class ScanProgress {
           updated == other.updated &&
           removed == other.removed &&
           errors == other.errors &&
+          unreadableDirs == other.unreadableDirs &&
           done == other.done;
 
   @override
@@ -94,11 +101,12 @@ class ScanProgress {
       updated.hashCode ^
       removed.hashCode ^
       errors.hashCode ^
+      unreadableDirs.hashCode ^
       done.hashCode;
 
   @override
   String toString() =>
-      'ScanProgress(found: $found, processed: $processed, added: $added, updated: $updated, removed: $removed, errors: $errors, done: $done)';
+      'ScanProgress(found: $found, processed: $processed, added: $added, updated: $updated, removed: $removed, errors: $errors, unreadableDirs: $unreadableDirs, done: $done)';
 }
 
 /// Discovers audio files, extracts tags in a background isolate, and synchronizes
@@ -137,12 +145,16 @@ class LibraryScanner {
   SendPort? _workerControlPort;
   bool _isCancelled = false;
 
+  /// Directory paths that simulate permission/IO errors during testing.
+  final List<String> unreadablePaths;
+
   /// Creates a [LibraryScanner].
   LibraryScanner({
     required this.repository,
     this.tagReader = const AudioMetadataTagReader(),
     this.coversDirectory,
     this.batchSize = 200,
+    this.unreadablePaths = const [],
   });
 
   /// Cancels any currently executing scan.
@@ -204,6 +216,7 @@ class LibraryScanner {
       tagReader: tagReader,
       coversDirectory: effectiveCoversDir,
       batchSize: batchSize,
+      unreadablePaths: unreadablePaths.map(p.normalize).toList(),
     );
 
     _activeIsolate = await Isolate.spawn(_scanWorkerEntry, config);
@@ -264,9 +277,13 @@ class LibraryScanner {
         );
         yield progress;
       } else if (message is _ScanCompleteMessage) {
-        if (message.missingPaths.isNotEmpty) {
+        if (message.unreadableDirs == 0 && message.missingPaths.isNotEmpty) {
           await repository.removeTracksByPath(message.missingPaths);
           totalRemoved = message.missingPaths.length;
+        }
+
+        if (!_isCancelled) {
+          await repository.markFolderScanned(folderId, DateTime.now().toUtc());
         }
 
         progress = progress.copyWith(
@@ -276,6 +293,7 @@ class LibraryScanner {
           updated: totalUpdated,
           removed: totalRemoved,
           errors: message.totalErrors,
+          unreadableDirs: message.unreadableDirs,
           corruptPaths: List.unmodifiable(message.corruptPaths),
           done: true,
         );
@@ -309,6 +327,7 @@ class _WorkerConfig {
   final TagReader tagReader;
   final String coversDirectory;
   final int batchSize;
+  final List<String> unreadablePaths;
 
   const _WorkerConfig({
     required this.sendPort,
@@ -318,6 +337,7 @@ class _WorkerConfig {
     required this.tagReader,
     required this.coversDirectory,
     required this.batchSize,
+    this.unreadablePaths = const [],
   });
 }
 
@@ -393,6 +413,7 @@ class _ScanCompleteMessage {
   final int totalFound;
   final int totalProcessed;
   final int totalErrors;
+  final int unreadableDirs;
   final List<String> corruptPaths;
 
   const _ScanCompleteMessage({
@@ -400,6 +421,7 @@ class _ScanCompleteMessage {
     required this.totalFound,
     required this.totalProcessed,
     required this.totalErrors,
+    this.unreadableDirs = 0,
     required this.corruptPaths,
   });
 }
@@ -442,6 +464,7 @@ void _scanWorkerEntry(_WorkerConfig config) async {
   int addedInBatch = 0;
   int updatedInBatch = 0;
   int errorCount = 0;
+  int unreadableDirsCount = 0;
 
   // Track albums that already have a cover key saved.
   final knownCoverKeys = <String, String>{};
@@ -451,9 +474,12 @@ void _scanWorkerEntry(_WorkerConfig config) async {
     List<FileSystemEntity> entities;
 
     try {
+      if (config.unreadablePaths.contains(p.normalize(currentDir.path))) {
+        throw const FileSystemException('Directory unreadable (simulated permission/IO error)');
+      }
       entities = currentDir.listSync(followLinks: false);
     } catch (_) {
-      // Unreadable directory permissions
+      unreadableDirsCount++;
       continue;
     }
 
@@ -632,15 +658,20 @@ void _scanWorkerEntry(_WorkerConfig config) async {
   }
 
   // Detect removed files: tracks in database whose files are no longer on disk.
-  final missingPaths = config.existingFiles.keys
-      .where((path) => !scannedPaths.contains(path))
-      .toList();
+  // If any directory listing failed (permission/IO error), skip the removal of
+  // missing tracks for that scan to protect existing library tracks.
+  final missingPaths = unreadableDirsCount > 0
+      ? const <String>[]
+      : config.existingFiles.keys
+          .where((path) => !scannedPaths.contains(path))
+          .toList();
 
   config.sendPort.send(_ScanCompleteMessage(
     missingPaths: missingPaths,
     totalFound: foundCount,
     totalProcessed: processedCount,
     totalErrors: errorCount,
+    unreadableDirs: unreadableDirsCount,
     corruptPaths: corruptPaths,
   ));
 

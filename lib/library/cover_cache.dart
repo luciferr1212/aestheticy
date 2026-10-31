@@ -51,14 +51,23 @@ abstract final class CoverCache {
     return p.join(root, '$coverKey.jpg');
   }
 
-  /// Checks whether a cover file exists on disk for [coverKey].
+  /// Checks whether a valid cover file exists on disk for [coverKey].
+  ///
+  /// Zero-length files are treated as missing.
   static bool hasCover(String coverKey, {String? coversDirectory}) {
-    return File(pathFor(coverKey, coversDirectory: coversDirectory)).existsSync();
+    final file = File(pathFor(coverKey, coversDirectory: coversDirectory));
+    try {
+      return file.existsSync() && file.lengthSync() > 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Saves album cover [bytes] synchronously if not already cached.
   ///
-  /// Returns the computed [coverKey].
+  /// Writes to a temporary file in the same directory first, then atomically
+  /// renames to avoid leaving corrupt or zero-length files. Zero-length files
+  /// are treated as missing and overwritten. Returns the computed [coverKey].
   static String saveCoverSync({
     String? albumArtist,
     required String album,
@@ -69,11 +78,31 @@ abstract final class CoverCache {
     final filePath = pathFor(key, coversDirectory: coversDirectory);
     final file = File(filePath);
 
-    if (!file.existsSync()) {
+    bool existsAndValid = false;
+    try {
+      existsAndValid = file.existsSync() && file.lengthSync() > 0;
+    } catch (_) {
+      existsAndValid = false;
+    }
+
+    if (!existsAndValid) {
       if (!file.parent.existsSync()) {
         file.parent.createSync(recursive: true);
       }
-      file.writeAsBytesSync(bytes, flush: true);
+      final tempFile = File(
+        p.join(file.parent.path, '$key.${DateTime.now().microsecondsSinceEpoch}.tmp'),
+      );
+      tempFile.writeAsBytesSync(bytes, flush: true);
+      try {
+        tempFile.renameSync(filePath);
+      } catch (_) {
+        if (file.existsSync()) {
+          try {
+            file.deleteSync();
+          } catch (_) {}
+        }
+        tempFile.renameSync(filePath);
+      }
     }
 
     return key;
@@ -81,7 +110,9 @@ abstract final class CoverCache {
 
   /// Saves album cover [bytes] asynchronously if not already cached.
   ///
-  /// Returns the computed [coverKey].
+  /// Writes to a temporary file in the same directory first, then atomically
+  /// renames to avoid leaving corrupt or zero-length files. Zero-length files
+  /// are treated as missing and overwritten. Returns the computed [coverKey].
   static Future<String> saveCover({
     String? albumArtist,
     required String album,
@@ -92,11 +123,31 @@ abstract final class CoverCache {
     final filePath = pathFor(key, coversDirectory: coversDirectory);
     final file = File(filePath);
 
-    if (!file.existsSync()) {
+    bool existsAndValid = false;
+    try {
+      existsAndValid = file.existsSync() && (await file.length()) > 0;
+    } catch (_) {
+      existsAndValid = false;
+    }
+
+    if (!existsAndValid) {
       if (!file.parent.existsSync()) {
         file.parent.createSync(recursive: true);
       }
-      await file.writeAsBytes(bytes, flush: true);
+      final tempFile = File(
+        p.join(file.parent.path, '$key.${DateTime.now().microsecondsSinceEpoch}.tmp'),
+      );
+      await tempFile.writeAsBytes(bytes, flush: true);
+      try {
+        await tempFile.rename(filePath);
+      } catch (_) {
+        if (file.existsSync()) {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+        await tempFile.rename(filePath);
+      }
     }
 
     return key;

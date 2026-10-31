@@ -271,8 +271,8 @@ class PlaybackController {
       final next = queue.advance();
       if (next == null) {
         _openedUri = null;
-        await engine.stop();
         _emitCurrent(null);
+        await engine.stop();
         return;
       }
       _openedUri = next.uri;

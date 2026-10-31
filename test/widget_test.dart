@@ -31,4 +31,20 @@ void main() {
     expect(find.textContaining('Test initialization error message'), findsOneWidget);
     expect(find.text('Copy Error Log'), findsOneWidget);
   });
+
+  testWidgets('LibraryInitErrorApp displays error message and copy button', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const LibraryInitErrorApp(
+        error: 'Database lock or corrupted file',
+        stackTrace: 'SqliteException(5): database is locked',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Library database failed to open'), findsOneWidget);
+    expect(find.textContaining('Database lock or corrupted file'), findsOneWidget);
+    expect(find.text('Copy Error Log'), findsOneWidget);
+  });
 }

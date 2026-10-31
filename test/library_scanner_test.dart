@@ -113,6 +113,10 @@ void main() {
       final tracks = await repo.listTracks();
       expect(tracks.length, equals(2));
 
+      final updatedFolder =
+          (await repo.listFolders()).firstWhere((f) => f.id == folder.id);
+      expect(updatedFolder.lastScanAt, isNotNull);
+
       final t1 = tracks.firstWhere((t) => t.path == f1.path);
       expect(t1.title, equals('Song One'));
       expect(t1.artist, equals('Band A'));
@@ -215,6 +219,42 @@ void main() {
       expect(remaining.first.path, equals(f1.path));
     });
 
+    test('if directory listing fails, skip removal of missing tracks and report in unreadableDirs', () async {
+      final f1 = createDummyFile('root_song.mp3');
+      final subDir = Directory(p.join(tempDir.path, 'subfolder'))..createSync();
+      final f2 = createDummyFile('subfolder/sub_song.mp3');
+
+      final fakeReader = FakeTagReader();
+      final initialScanner = LibraryScanner(
+        repository: repo,
+        tagReader: fakeReader,
+        coversDirectory: coversDir.path,
+      );
+
+      final folder = await repo.addFolder(tempDir.path);
+      await initialScanner.scan(folder).last;
+      expect(await repo.trackCount(), equals(2));
+
+      // Rescan with subfolder marked as unreadable (simulating permission / IO error)
+      final unreadableScanner = LibraryScanner(
+        repository: repo,
+        tagReader: fakeReader,
+        coversDirectory: coversDir.path,
+        unreadablePaths: [subDir.path],
+      );
+
+      final rescanProgress = await unreadableScanner.scan(folder).last;
+
+      expect(rescanProgress.done, isTrue);
+      expect(rescanProgress.unreadableDirs, equals(1));
+      expect(rescanProgress.removed, equals(0));
+
+      // f2 must NOT have been removed
+      final remaining = await repo.listTracks();
+      expect(remaining.length, equals(2));
+      expect(remaining.map((t) => t.path).toSet(), containsAll([f1.path, f2.path]));
+    });
+
     test('corrupt file does not stop the scan, is counted in errors and recorded', () async {
       final f1 = createDummyFile('valid.mp3');
       final f2 = createDummyFile('corrupt.mp3');
@@ -273,6 +313,10 @@ void main() {
       await sub.cancel();
       // Ensure no unhandled crashes
       expect(true, isTrue);
+
+      final updatedFolder =
+          (await repo.listFolders()).firstWhere((f) => f.id == folder.id);
+      expect(updatedFolder.lastScanAt, isNull);
     });
 
     test('filters supported extensions and skips hidden/system directories', () async {
@@ -375,6 +419,10 @@ void main() {
       final tracks = await repo.listTracks();
       expect(tracks.length, equals(2));
 
+      final updatedFolder =
+          (await repo.listFolders()).firstWhere((f) => f.id == folder.id);
+      expect(updatedFolder.lastScanAt, isNotNull);
+
       final t1 = tracks.firstWhere((t) => t.path == f1.path);
       final t2 = tracks.firstWhere((t) => t.path == f2.path);
 
@@ -392,6 +440,49 @@ void main() {
       // Verify only 1 cover was created for this album
       final coversOnDisk = coversDir.listSync().whereType<File>().toList();
       expect(coversOnDisk.length, equals(1));
+    });
+  });
+
+  group('CoverCache', () {
+    test('treats zero-length cover files as missing and overwrites them', () async {
+      final key = CoverCache.computeCoverKey(album: 'Empty Album');
+      final targetPath = CoverCache.pathFor(key, coversDirectory: coversDir.path);
+      final targetFile = File(targetPath)..createSync(recursive: true);
+
+      // File exists but is 0 bytes
+      expect(targetFile.existsSync(), isTrue);
+      expect(targetFile.lengthSync(), 0);
+      expect(CoverCache.hasCover(key, coversDirectory: coversDir.path), isFalse);
+
+      final validBytes = Uint8List.fromList([1, 2, 3, 4, 5]);
+      final savedKey = CoverCache.saveCoverSync(
+        album: 'Empty Album',
+        bytes: validBytes,
+        coversDirectory: coversDir.path,
+      );
+
+      expect(savedKey, key);
+      expect(CoverCache.hasCover(key, coversDirectory: coversDir.path), isTrue);
+      expect(targetFile.lengthSync(), 5);
+      expect(targetFile.readAsBytesSync(), validBytes);
+    });
+
+    test('saveCover (async) writes to temp file then renames', () async {
+      final key = CoverCache.computeCoverKey(album: 'Async Album');
+      final validBytes = Uint8List.fromList([10, 20, 30]);
+
+      final savedKey = await CoverCache.saveCover(
+        album: 'Async Album',
+        bytes: validBytes,
+        coversDirectory: coversDir.path,
+      );
+
+      expect(savedKey, key);
+      expect(CoverCache.hasCover(key, coversDirectory: coversDir.path), isTrue);
+
+      final targetFile = File(CoverCache.pathFor(key, coversDirectory: coversDir.path));
+      expect(targetFile.lengthSync(), 3);
+      expect(targetFile.readAsBytesSync(), validBytes);
     });
   });
 

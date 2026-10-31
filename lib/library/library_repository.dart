@@ -16,6 +16,9 @@ abstract class LibraryRepository {
   /// Lists all monitored library folders.
   Future<List<LibraryFolder>> listFolders();
 
+  /// Updates the [LibraryFolder.lastScanAt] timestamp for the folder identified by [folderId].
+  Future<void> markFolderScanned(int folderId, DateTime timestamp);
+
   /// Inserts or updates multiple tracks within a single database transaction.
   ///
   /// Existing tracks with matching paths are updated, preserving their original
@@ -60,6 +63,12 @@ abstract class LibraryRepository {
 
   /// Searches for tracks whose normalized title, artist, or album matches [query].
   Future<List<Track>> search(String query);
+
+  /// Searches for derived albums matching [query] with an optional [limit].
+  Future<List<AlbumSummary>> searchAlbums(String query, {int? limit});
+
+  /// Searches for derived artists matching [query] with an optional [limit].
+  Future<List<ArtistSummary>> searchArtists(String query, {int? limit});
 
   /// Returns the total number of tracks currently in the library.
   Future<int> trackCount();

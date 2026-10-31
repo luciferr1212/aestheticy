@@ -18,12 +18,27 @@ class SqliteLibraryRepository implements LibraryRepository {
 
   SqliteLibraryRepository._(this._db);
 
+  static void _initDb(Database db) {
+    SchemaMigrator.apply(db);
+    db.createFunction(
+      functionName: 'normalize_text',
+      argumentCount: const AllowedArgumentCount(1),
+      deterministic: true,
+      directOnly: false,
+      function: (args) {
+        final val = args[0];
+        if (val == null) return '';
+        return TextNormalizer.normalize(val.toString());
+      },
+    );
+  }
+
   /// Opens an in-memory SQLite database, applying schema migrations.
   ///
   /// Primarily intended for isolated unit testing.
   factory SqliteLibraryRepository.inMemory() {
     final db = sqlite3.openInMemory();
-    SchemaMigrator.apply(db);
+    _initDb(db);
     return SqliteLibraryRepository._(db);
   }
 
@@ -34,13 +49,13 @@ class SqliteLibraryRepository implements LibraryRepository {
       file.parent.createSync(recursive: true);
     }
     final db = sqlite3.open(filePath);
-    SchemaMigrator.apply(db);
+    _initDb(db);
     return SqliteLibraryRepository._(db);
   }
 
   /// Wraps an existing [Database] instance, applying schema migrations.
   factory SqliteLibraryRepository.fromDatabase(Database db) {
-    SchemaMigrator.apply(db);
+    _initDb(db);
     return SqliteLibraryRepository._(db);
   }
 
@@ -108,6 +123,14 @@ class SqliteLibraryRepository implements LibraryRepository {
             : null,
       );
     }).toList();
+  }
+
+  @override
+  Future<void> markFolderScanned(int folderId, DateTime timestamp) async {
+    _db.execute(
+      'UPDATE folders SET last_scan_at = ? WHERE id = ?;',
+      [timestamp.toUtc().millisecondsSinceEpoch, folderId],
+    );
   }
 
   @override
@@ -353,6 +376,13 @@ class SqliteLibraryRepository implements LibraryRepository {
     return rows.map(_mapTrackRow).toList();
   }
 
+  static String _escapeLike(String term) {
+    return term
+        .replaceAll(r'\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
+  }
+
   @override
   Future<List<Track>> search(String query) async {
     final normalized = TextNormalizer.normalize(query);
@@ -364,7 +394,8 @@ class SqliteLibraryRepository implements LibraryRepository {
         .toList();
     if (terms.isEmpty) return [];
 
-    final whereClauses = List.filled(terms.length, 'search_text LIKE ?');
+    final whereClauses =
+        List.filled(terms.length, "search_text LIKE ? ESCAPE '\\'");
     final sql = '''
       SELECT * FROM tracks
       WHERE ${whereClauses.join(' AND ')}
@@ -372,9 +403,101 @@ class SqliteLibraryRepository implements LibraryRepository {
       LIMIT 100;
     ''';
 
-    final params = terms.map((t) => '%$t%').toList();
+    final params = terms.map((t) => '%${_escapeLike(t)}%').toList();
     final rows = _db.select(sql, params);
     return rows.map(_mapTrackRow).toList();
+  }
+
+  @override
+  Future<List<AlbumSummary>> searchAlbums(String query, {int? limit}) async {
+    final normalized = TextNormalizer.normalize(query);
+    if (normalized.isEmpty) return [];
+
+    final terms = normalized
+        .split(' ')
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (terms.isEmpty) return [];
+
+    final whereClauses = terms.map((_) =>
+        "(normalize_text(COALESCE(NULLIF(album, ''), 'Unknown Album') || ' ' || COALESCE(album_artist, '')) LIKE ? ESCAPE '\\')"
+    ).join(' AND ');
+
+    final effectiveLimit = limit ?? 50;
+    final sql = '''
+      SELECT
+        COALESCE(NULLIF(album, ''), 'Unknown Album') AS album_name,
+        album_artist,
+        MAX(year) AS release_year,
+        COUNT(*) AS track_count,
+        MAX(cover_key) AS cover_key
+      FROM tracks
+      WHERE $whereClauses
+      GROUP BY album_name, album_artist
+      ORDER BY album_name COLLATE NOCASE ASC
+      LIMIT ?;
+    ''';
+
+    final params = <Object?>[];
+    for (final t in terms) {
+      params.add('%${_escapeLike(t)}%');
+    }
+    params.add(effectiveLimit);
+
+    final rows = _db.select(sql, params);
+    return rows.map((row) {
+      return AlbumSummary(
+        album: row['album_name'] as String,
+        albumArtist: row['album_artist'] as String?,
+        year: row['release_year'] as int?,
+        trackCount: row['track_count'] as int,
+        coverKey: row['cover_key'] as String?,
+      );
+    }).toList();
+  }
+
+  @override
+  Future<List<ArtistSummary>> searchArtists(String query, {int? limit}) async {
+    final normalized = TextNormalizer.normalize(query);
+    if (normalized.isEmpty) return [];
+
+    final terms = normalized
+        .split(' ')
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (terms.isEmpty) return [];
+
+    final whereClauses = terms.map((_) =>
+        "normalize_text(COALESCE(NULLIF(artist, ''), 'Unknown Artist')) LIKE ? ESCAPE '\\'"
+    ).join(' AND ');
+
+    final effectiveLimit = limit ?? 50;
+    final sql = '''
+      SELECT
+        COALESCE(NULLIF(artist, ''), 'Unknown Artist') AS artist_name,
+        COUNT(DISTINCT COALESCE(NULLIF(album, ''), 'Unknown Album')) AS album_count,
+        COUNT(*) AS track_count
+      FROM tracks
+      WHERE $whereClauses
+      GROUP BY artist_name
+      ORDER BY artist_name COLLATE NOCASE ASC
+      LIMIT ?;
+    ''';
+
+    final params = <Object?>[];
+    for (final t in terms) {
+      params.add('%${_escapeLike(t)}%');
+    }
+    params.add(effectiveLimit);
+
+    final rows = _db.select(sql, params);
+    return rows.map((row) {
+      return ArtistSummary(
+        name: row['artist_name'] as String,
+        albumCount: row['album_count'] as int,
+        trackCount: row['track_count'] as int,
+      );
+    }).toList();
   }
 
   @override

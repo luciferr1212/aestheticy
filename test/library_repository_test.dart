@@ -65,6 +65,18 @@ void main() {
       ]);
     });
 
+    test('markFolderScanned updates last_scan_at', () async {
+      final folder = await repo.addFolder('C:\\Music\\ScanTest');
+      expect(folder.lastScanAt, isNull);
+
+      final scanTime = DateTime.utc(2026, 10, 31, 12, 0, 0);
+      await repo.markFolderScanned(folder.id!, scanTime);
+
+      final folders = await repo.listFolders();
+      final updated = folders.firstWhere((f) => f.id == folder.id);
+      expect(updated.lastScanAt, scanTime);
+    });
+
     test('folder removal cascades to delete all its tracks', () async {
       final folder = await repo.addFolder('C:\\Music\\Deletable');
       final now = DateTime.now();
@@ -372,6 +384,55 @@ void main() {
       // 5. Empty query returns empty list
       expect(await repo.search(''), isEmpty);
       expect(await repo.search('   '), isEmpty);
+      expect(await repo.searchAlbums(''), isEmpty);
+      expect(await repo.searchArtists(''), isEmpty);
+
+      // 6. searchAlbums and searchArtists with Arabic query with diacritics
+      final albumResults = await repo.searchAlbums('أَغَانِي');
+      expect(albumResults.length, 1);
+      expect(albumResults.first.album, 'أغَانِي الصَّبَاح');
+
+      final artistResults = await repo.searchArtists('فَيْرُوزْ');
+      expect(artistResults.length, 1);
+      expect(artistResults.first.name, 'فَيْرُوز');
+
+      // 7. Search tracks, albums, and artists with literal '%' query
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\percent1.mp3',
+          folderId: folder.id!,
+          title: '100% Hits',
+          artist: 'Percent Band 100%',
+          album: 'Discount 50% Off',
+          durationMs: 120000,
+          mtimeMs: 20,
+          sizeBytes: 20,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\percent2.mp3',
+          folderId: folder.id!,
+          title: '1000 Hits',
+          artist: 'Percent Band 1000',
+          album: 'Discount 500 Off',
+          durationMs: 120000,
+          mtimeMs: 20,
+          sizeBytes: 20,
+          addedAt: now,
+        ),
+      ]);
+
+      final trackPercentResults = await repo.search('100%');
+      expect(trackPercentResults.length, 1);
+      expect(trackPercentResults.first.path, 'C:\\Music\\percent1.mp3');
+
+      final albumPercentResults = await repo.searchAlbums('50%');
+      expect(albumPercentResults.length, 1);
+      expect(albumPercentResults.first.album, 'Discount 50% Off');
+
+      final artistPercentResults = await repo.searchArtists('100%');
+      expect(artistPercentResults.length, 1);
+      expect(artistPercentResults.first.name, 'Percent Band 100%');
     });
 
     test('pagination and sorting work as expected', () async {

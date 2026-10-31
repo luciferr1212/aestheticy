@@ -460,6 +460,10 @@ class MpvAudioEngine extends AudioEngine {
 
     try {
       if (next == null) {
+        if (_preloadedUri != null) {
+          await p.remove(_lastMpvPlaylistIndex + 1);
+          _preloadedUri = null;
+        }
         // Disable prefetch  →  mpv property `prefetch-playlist=no`
         await p.setPrefetchPlaylist(false);
         return;
