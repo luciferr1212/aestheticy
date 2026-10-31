@@ -104,7 +104,7 @@ To implement smooth crossfading in a future phase:
 
 These are known and accepted for Phase 1. Revisit them when the queue UI is built.
 
-1. **Queue changes do not notify the controller.** After add, move, remove or a shuffle toggle, the track that mpv already preloaded is not refreshed, and removing the currently playing track does not stop it.
+1. **Individual item queue additions / mutations do not notify the controller.** After manual add, move, or remove of individual items, the track that mpv preloaded is not refreshed. Note: Clearing upcoming items (`PlaybackController.clearUpcoming()`) and replacing the queue (`PlaybackController.playQueue(...)`) explicitly refresh gapless preloading and preserve active playback.
 2. **Synthetic `completed` for gapless.** When mpv moves to the preloaded track by itself, `MpvAudioEngine` emits a `completed` event so the controller advances. This works as long as the package reports another state (for example `playing`) between two transitions. A dedicated `trackAdvanced` event would be cleaner.
 3. **Duplicate tracks in the queue.** The cursor is kept by track identity (the URI), so after an add or a shuffle toggle it can jump to the first copy of a track that appears twice.
 4. **Repeat one grows mpv's playlist.** Every repeat appends one more entry to mpv's internal playlist. The effect is tiny but it is never trimmed.

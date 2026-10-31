@@ -209,6 +209,7 @@ class FakeAudioEngine extends AudioEngine {
     _state = PlaybackState.idle;
     _position = Duration.zero;
     _openedSource = null;
+    _preloadedNext = null;
     _streamInfo = null;
     _playbackStateCtrl.add(_state);
     _positionCtrl.add(_position);

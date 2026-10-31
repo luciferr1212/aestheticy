@@ -120,10 +120,16 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Step 1 establ
 
 ## How to Extend
 
-1. **Phase 2, Step 3 (Library UI):**
-   - Consume `LibraryRepository.listAlbums()`, `listArtists()`, `listTracks()`, and `search()`.
-   - Bind track selection to `Track.toAudioSource()` and pass to `PlaybackController`.
-   - Bind `ScanService` to folder management and scan progress indicators in the UI.
+1. **Phase 2, Step 3 (Library UI — Completed):**
+   - `LibraryScreen` wired to `LibraryRepository` with three lazy, paged tabs (`Albums`, `Artists`, `Tracks`) using `ListView.builder` and `GridView.builder` to guarantee smooth 60fps scrolling with 10,000+ tracks.
+   - Multilingual search bar filtering albums, artists, and tracks dynamically using normalized text queries.
+   - Album artwork loaded via `CoverCache` with calm placeholder fallbacks when missing.
+   - Folder management sheet (`FolderManagementSheet`): directory picker via `file_picker`, folder listing, removal with cascaded track purge, rescan, and live progress indicators + cancellation via `ScanService`.
+   - Contextual playback via `PlaybackController.playQueue(sources, startIndex: index)`: tapping a track inside an album plays that album; tapping inside the Tracks tab plays the tracklist.
+   - Bottom now-playing bar and bi-directional navigation between Library and Audio Lab.
+2. **Future Phases:**
+   - **Phase 3:** Apple Music-like visual polish, true liquid-glass effects, and desktop responsiveness.
+   - **Phase 4:** Synced lyrics, interactive queue management UI, mini player, and listening statistics.
 2. **Future Schema Migrations:**
    - Increment `kLibrarySchemaVersion` in `lib/library/migrations.dart`.
    - Add incremental migration routines (`_migrateToV2(db)`, etc.) inside `SchemaMigrator.apply()`.

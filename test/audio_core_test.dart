@@ -314,6 +314,59 @@ void main() {
         expect(q.current, isNull);
       });
 
+      test('clearUpcoming removes items after cursor, keeping current and history', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.add(_src('d'));
+        q.next(); // cursor on 'b' (index 1)
+        expect(q.current?.uri, 'file:///b.flac');
+
+        q.clearUpcoming();
+        expect(q.length, 2);
+        expect(q.items.map((s) => s.uri), ['file:///a.flac', 'file:///b.flac']);
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(q.currentIndex, 1);
+        expect(q.peekNext(), isNull);
+      });
+
+      test('clearUpcoming clears entire queue if nothing is playing', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.clear();
+        q.clearUpcoming();
+        expect(q.isEmpty, isTrue);
+        expect(q.current, isNull);
+      });
+
+      test('clearUpcoming does nothing when current is already the last item', () {
+        final q = PlaybackQueue();
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.next(); // cursor on 'b'
+        q.clearUpcoming();
+        expect(q.length, 2);
+        expect(q.current?.uri, 'file:///b.flac');
+      });
+
+      test('clearUpcoming removes upcoming items correctly in shuffled mode', () {
+        final q = PlaybackQueue(random: _seededRandom());
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.add(_src('d'));
+        q.setShuffle(true);
+        final curr = q.current;
+        expect(curr, isNotNull);
+
+        q.clearUpcoming();
+        expect(q.length, 1);
+        expect(q.current, curr);
+        expect(q.items.single, curr);
+      });
+
       test('clear then navigate does not crash', () {
         final q = PlaybackQueue();
         q.add(_src('a'));
@@ -817,6 +870,133 @@ void main() {
       // Manual skipPrevious must move back to neighbouring track (song1)
       await controller.skipPrevious();
       expect(controller.queue.current?.uri, 'file:///song1.flac');
+    });
+
+    group('clearUpcoming', () {
+      test('current track is not reopened, upcoming items removed, preload refreshed', () async {
+        final gapless = _GaplessFakeEngine();
+        await gapless.init();
+        final q = PlaybackQueue();
+        final ctrl = PlaybackController(engine: gapless, queue: q);
+        await ctrl.init();
+
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+
+        await ctrl.play(); // opens 'a'
+        expect(gapless.openCallCount, 1);
+        expect(gapless.openedSource?.uri, 'file:///a.flac');
+        expect(gapless.preloadedNext?.uri, 'file:///b.flac');
+
+        // Clear upcoming
+        await ctrl.clearUpcoming();
+
+        // Current track 'a' must NOT be reopened
+        expect(gapless.openCallCount, 1);
+        expect(gapless.openedSource?.uri, 'file:///a.flac');
+        // Queue now only contains 'a'
+        expect(q.items.map((s) => s.uri), ['file:///a.flac']);
+        expect(q.current?.uri, 'file:///a.flac');
+        // Gapless preload is refreshed to null
+        expect(gapless.preloadedNext, isNull);
+
+        await ctrl.dispose();
+        await gapless.dispose();
+      });
+
+      test('refreshes gapless preload to wrap-around track under RepeatMode.all', () async {
+        final gapless = _GaplessFakeEngine();
+        await gapless.init();
+        final q = PlaybackQueue();
+        final ctrl = PlaybackController(engine: gapless, queue: q);
+        await ctrl.init();
+
+        q.add(_src('a'));
+        q.add(_src('b'));
+        q.add(_src('c'));
+        q.repeatMode = RepeatMode.all;
+
+        await ctrl.play(); // 'a'
+        await ctrl.skipNext(); // 'b'
+        expect(gapless.openedSource?.uri, 'file:///b.flac');
+        expect(gapless.preloadedNext?.uri, 'file:///c.flac');
+
+        await ctrl.clearUpcoming();
+        expect(q.items.map((s) => s.uri), ['file:///a.flac', 'file:///b.flac']);
+        expect(gapless.preloadedNext?.uri, 'file:///a.flac');
+
+        await ctrl.dispose();
+        await gapless.dispose();
+      });
+
+      test('clears entire queue and stops engine when nothing is playing', () async {
+        queue.add(_src('a'));
+        queue.add(_src('b'));
+
+        await controller.clearUpcoming();
+
+        expect(queue.isEmpty, isTrue);
+        expect(engine.state, PlaybackState.idle);
+      });
+    });
+
+    group('playQueue', () {
+      test('replaces queue, starts at startIndex, resets preload, keeps gapless working', () async {
+        final gapless = _GaplessFakeEngine();
+        await gapless.init();
+        final q = PlaybackQueue();
+        final ctrl = PlaybackController(engine: gapless, queue: q);
+        await ctrl.init();
+
+        q.add(_src('old1'));
+        q.add(_src('old2'));
+        await ctrl.play();
+        expect(gapless.openedSource?.uri, 'file:///old1.flac');
+
+        final newSources = [_src('newA'), _src('newB'), _src('newC')];
+        await ctrl.playQueue(newSources, startIndex: 1);
+
+        expect(q.current?.uri, 'file:///newB.flac');
+        expect(q.currentIndex, 1);
+        expect(q.items.map((s) => s.uri), [
+          'file:///newA.flac',
+          'file:///newB.flac',
+          'file:///newC.flac',
+        ]);
+        expect(gapless.openedSource?.uri, 'file:///newB.flac');
+        expect(gapless.preloadedNext?.uri, 'file:///newC.flac');
+
+        await ctrl.dispose();
+        await gapless.dispose();
+      });
+
+      test('starts at startIndex 0 by default', () async {
+        final gapless = _GaplessFakeEngine();
+        await gapless.init();
+        final q = PlaybackQueue();
+        final ctrl = PlaybackController(engine: gapless, queue: q);
+        await ctrl.init();
+
+        final sources = [_src('track1'), _src('track2')];
+        await ctrl.playQueue(sources);
+
+        expect(q.current?.uri, 'file:///track1.flac');
+        expect(gapless.openedSource?.uri, 'file:///track1.flac');
+        expect(gapless.preloadedNext?.uri, 'file:///track2.flac');
+
+        await ctrl.dispose();
+        await gapless.dispose();
+      });
+
+      test('empty list stops playback and empties queue', () async {
+        queue.add(_src('a'));
+        await controller.play();
+
+        await controller.playQueue([]);
+        expect(queue.isEmpty, isTrue);
+        expect(engine.state, PlaybackState.idle);
+      });
     });
   });
 }

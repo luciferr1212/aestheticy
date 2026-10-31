@@ -273,6 +273,7 @@ void main() {
       ]);
 
       // Albums query
+      expect(await repo.albumCount(), 3);
       final albums = await repo.listAlbums();
       expect(albums.length, 3);
       final kidA = albums.firstWhere((a) => a.album == 'Kid A');
@@ -282,6 +283,7 @@ void main() {
       expect(kidA.coverKey, 'art-kid-a');
 
       // Artists query
+      expect(await repo.artistCount(), 2);
       final artists = await repo.listArtists();
       expect(artists.length, 2);
       final radiohead = artists.firstWhere((a) => a.name == 'Radiohead');

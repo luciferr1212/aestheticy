@@ -208,8 +208,8 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<List<AlbumSummary>> listAlbums() async {
-    final rows = _db.select('''
+  Future<List<AlbumSummary>> listAlbums({int? limit, int? offset}) async {
+    final sql = StringBuffer('''
       SELECT
         COALESCE(NULLIF(album, ''), 'Unknown Album') AS album_name,
         album_artist,
@@ -218,8 +218,20 @@ class SqliteLibraryRepository implements LibraryRepository {
         MAX(cover_key) AS cover_key
       FROM tracks
       GROUP BY album_name, album_artist
-      ORDER BY album_name COLLATE NOCASE ASC;
+      ORDER BY album_name COLLATE NOCASE ASC
     ''');
+    final params = <Object?>[];
+    if (limit != null) {
+      sql.write(' LIMIT ?');
+      params.add(limit);
+      if (offset != null) {
+        sql.write(' OFFSET ?');
+        params.add(offset);
+      }
+    }
+    sql.write(';');
+
+    final rows = _db.select(sql.toString(), params);
 
     return rows.map((row) {
       return AlbumSummary(
@@ -233,16 +245,28 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<List<ArtistSummary>> listArtists() async {
-    final rows = _db.select('''
+  Future<List<ArtistSummary>> listArtists({int? limit, int? offset}) async {
+    final sql = StringBuffer('''
       SELECT
         COALESCE(NULLIF(artist, ''), 'Unknown Artist') AS artist_name,
         COUNT(DISTINCT COALESCE(NULLIF(album, ''), 'Unknown Album')) AS album_count,
         COUNT(*) AS track_count
       FROM tracks
       GROUP BY artist_name
-      ORDER BY artist_name COLLATE NOCASE ASC;
+      ORDER BY artist_name COLLATE NOCASE ASC
     ''');
+    final params = <Object?>[];
+    if (limit != null) {
+      sql.write(' LIMIT ?');
+      params.add(limit);
+      if (offset != null) {
+        sql.write(' OFFSET ?');
+        params.add(offset);
+      }
+    }
+    sql.write(';');
+
+    final rows = _db.select(sql.toString(), params);
 
     return rows.map((row) {
       return ArtistSummary(
@@ -351,6 +375,28 @@ class SqliteLibraryRepository implements LibraryRepository {
     final params = terms.map((t) => '%$t%').toList();
     final rows = _db.select(sql, params);
     return rows.map(_mapTrackRow).toList();
+  }
+
+  @override
+  Future<int> albumCount() async {
+    final row = _db.select('''
+      SELECT COUNT(*) AS total FROM (
+        SELECT 1 FROM tracks
+        GROUP BY COALESCE(NULLIF(album, ''), 'Unknown Album'), album_artist
+      );
+    ''').first;
+    return row['total'] as int;
+  }
+
+  @override
+  Future<int> artistCount() async {
+    final row = _db.select('''
+      SELECT COUNT(*) AS total FROM (
+        SELECT 1 FROM tracks
+        GROUP BY COALESCE(NULLIF(artist, ''), 'Unknown Artist')
+      );
+    ''').first;
+    return row['total'] as int;
   }
 
   @override

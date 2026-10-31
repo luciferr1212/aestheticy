@@ -130,6 +130,49 @@ class PlaybackController {
     unawaited(_preloadNext());
   }
 
+  /// Replaces the queue with [sources], starts playback at [startIndex],
+  /// resets preload state, and preloads the next track for gapless transitions.
+  Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) async {
+    _consecutiveFatalErrors = 0;
+    if (sources.isEmpty) {
+      queue.clear();
+      _openedUri = null;
+      await engine.stop();
+      _emitCurrent(null);
+      return;
+    }
+
+    queue.replaceAll(sources, startIndex: startIndex);
+    final source = queue.current;
+    if (source == null) {
+      _openedUri = null;
+      await engine.stop();
+      _emitCurrent(null);
+      return;
+    }
+
+    _openedUri = source.uri;
+    await engine.open(source, autoPlay: true);
+    _emitCurrent(source);
+    unawaited(_preloadNext());
+  }
+
+  /// Removes upcoming items from the queue while keeping the currently
+  /// playing track active without restart.
+  ///
+  /// If nothing is currently playing, clears the entire queue and stops playback.
+  /// Refreshes the gapless preload to reflect the new next track (or null).
+  Future<void> clearUpcoming() async {
+    if (_openedUri == null || queue.current == null) {
+      queue.clear();
+      await stop();
+      return;
+    }
+
+    queue.clearUpcoming();
+    await _preloadNext();
+  }
+
   /// Pauses playback.
   Future<void> pause() async {
     await engine.pause();

@@ -6,7 +6,10 @@ import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/mpv_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
-import 'package:aestheticy/features/audio_lab/audio_lab_screen.dart';
+import 'package:aestheticy/features/library/library_screen.dart';
+import 'package:aestheticy/library/library_repository.dart';
+import 'package:aestheticy/library/scan_service.dart';
+import 'package:aestheticy/library/sqlite_library_repository.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +19,14 @@ void main() async {
     final queue = PlaybackQueue();
     final controller = PlaybackController(engine: engine, queue: queue);
     await controller.init();
-    runApp(AestheticyApp(engine: engine, controller: controller));
+    final repository = await SqliteLibraryRepository.openDefault();
+    final scanService = ScanService(repository: repository);
+    runApp(AestheticyApp(
+      engine: engine,
+      controller: controller,
+      repository: repository,
+      scanService: scanService,
+    ));
   } catch (error, stackTrace) {
     runApp(AudioInitErrorApp(
       error: error.toString(),
@@ -139,11 +149,23 @@ class AestheticyApp extends StatelessWidget {
   /// The playback controller instance.
   final PlaybackController? controller;
 
+  /// The library storage repository.
+  final LibraryRepository? repository;
+
+  /// The library scanner service.
+  final ScanService? scanService;
+
+  /// Optional injected directory picker for tests.
+  final Future<String?> Function()? directoryPicker;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
     this.engine,
     this.controller,
+    this.repository,
+    this.scanService,
+    this.directoryPicker,
   });
 
   @override
@@ -154,6 +176,9 @@ class AestheticyApp extends StatelessWidget {
           engine: effectiveEngine,
           queue: PlaybackQueue(),
         );
+    final effectiveRepo = repository ?? SqliteLibraryRepository.inMemory();
+    final effectiveScanService =
+        scanService ?? ScanService(repository: effectiveRepo);
 
     return MaterialApp(
       title: 'Aestheticy',
@@ -167,9 +192,12 @@ class AestheticyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: AudioLabScreen(
+      home: LibraryScreen(
         engine: effectiveEngine,
         controller: effectiveController,
+        repository: effectiveRepo,
+        scanService: effectiveScanService,
+        directoryPicker: directoryPicker,
       ),
     );
   }

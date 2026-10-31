@@ -136,6 +136,46 @@ class PlaybackQueue {
     _orderIndex = -1;
   }
 
+  /// Replaces all items in the queue with [sources] in natural order,
+  /// resets shuffle to off, and sets the cursor to [startIndex].
+  void replaceAll(List<AudioSource> sources, {int startIndex = 0}) {
+    _items.clear();
+    _items.addAll(sources);
+    _shuffled = false;
+    _order = List<int>.generate(_items.length, (i) => i);
+    if (_items.isEmpty) {
+      _orderIndex = -1;
+    } else {
+      _orderIndex = startIndex.clamp(0, _items.length - 1);
+    }
+  }
+
+  /// Removes upcoming items from the queue.
+  ///
+  /// If an item is currently selected, all items after the cursor in active
+  /// playback order are removed; the current item and any preceding items in
+  /// the active order are preserved.
+  ///
+  /// If nothing is currently selected (or the queue is empty), the entire
+  /// queue is cleared.
+  void clearUpcoming() {
+    if (current == null || _orderIndex < 0 || _orderIndex >= _order.length) {
+      clear();
+      return;
+    }
+    if (_orderIndex + 1 >= _order.length) {
+      return;
+    }
+
+    final keptItems = [
+      for (var i = 0; i <= _orderIndex; i++) _items[_order[i]],
+    ];
+    _items.clear();
+    _items.addAll(keptItems);
+    _order = List<int>.generate(_items.length, (i) => i);
+    _orderIndex = _items.length - 1;
+  }
+
   // ── Shuffle ─────────────────────────────────────────────────────────
 
   /// Enables or disables shuffle.

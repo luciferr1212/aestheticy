@@ -290,6 +290,15 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Library',
+            icon: const Icon(Icons.library_music),
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+          IconButton(
             tooltip: 'Pick Audio Files',
             icon: const Icon(Icons.file_open),
             onPressed: _pickAudioFiles,
@@ -473,11 +482,10 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
                   onPressed: () => widget.controller.skipNext(),
                 ),
                 TextButton.icon(
-                  onPressed: () {
-                    widget.controller.queue.clear();
-                    widget.controller.stop();
+                  onPressed: () async {
+                    await widget.controller.clearUpcoming();
                     setState(() {});
-                    _log('Queue cleared');
+                    _log('Upcoming queue cleared (current track preserved if playing)');
                   },
                   icon: const Icon(Icons.clear_all, size: 18),
                   label: const Text('Clear'),

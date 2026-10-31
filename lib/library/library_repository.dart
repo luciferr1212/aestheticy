@@ -34,10 +34,16 @@ abstract class LibraryRepository {
   Future<void> removeTracksByPath(List<String> paths);
 
   /// Lists all derived albums with track counts and aggregated metadata.
-  Future<List<AlbumSummary>> listAlbums();
+  Future<List<AlbumSummary>> listAlbums({int? limit, int? offset});
 
   /// Lists all derived artists with album and track counts.
-  Future<List<ArtistSummary>> listArtists();
+  Future<List<ArtistSummary>> listArtists({int? limit, int? offset});
+
+  /// Returns the total number of unique derived albums.
+  Future<int> albumCount();
+
+  /// Returns the total number of unique derived artists.
+  Future<int> artistCount();
 
   /// Retrieves all tracks belonging to [album], optionally scoped to [albumArtist].
   Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist});
