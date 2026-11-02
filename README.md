@@ -5,7 +5,8 @@ Calm, minimal, and beautiful — by mido.
 
 ## Status
 
-Phase 1: Audio core (in progress).
+Phase 1: Audio core (in progress).  
+Phase 3a: UI foundation ([docs/ui.md](docs/ui.md)).
 
 ## Local Development
 

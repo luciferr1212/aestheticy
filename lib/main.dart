@@ -10,6 +10,11 @@ import 'package:aestheticy/features/library/library_screen.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/ui/gallery/design_gallery_screen.dart';
+import 'package:aestheticy/ui/glass/glass_scope.dart';
+import 'package:aestheticy/ui/l10n/locale_controller.dart';
+import 'package:aestheticy/ui/settings/settings_store.dart';
+import 'package:aestheticy/ui/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,11 +48,20 @@ void main() async {
     return;
   }
 
+  final settingsStore = SettingsStore();
+  await settingsStore.init();
+  final glassController = GlassController();
+  settingsStore.bindGlassController(glassController);
+  final localeController = LocaleController(settingsStore: settingsStore);
+
   runApp(AestheticyApp(
     engine: engine,
     controller: controller,
     repository: repository,
     scanService: scanService,
+    settingsStore: settingsStore,
+    glassController: glassController,
+    localeController: localeController,
   ));
 }
 
@@ -264,7 +278,7 @@ class LibraryInitErrorApp extends StatelessWidget {
 }
 
 /// Root widget for the Aestheticy music player.
-class AestheticyApp extends StatelessWidget {
+class AestheticyApp extends StatefulWidget {
   /// The audio engine instance (injected or defaults to [FakeAudioEngine]).
   final AudioEngine? engine;
 
@@ -280,6 +294,15 @@ class AestheticyApp extends StatelessWidget {
   /// Optional injected directory picker for tests.
   final Future<String?> Function()? directoryPicker;
 
+  /// Optional persistent settings store.
+  final SettingsStore? settingsStore;
+
+  /// Optional glass quality controller.
+  final GlassController? glassController;
+
+  /// Optional locale controller.
+  final LocaleController? localeController;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -288,39 +311,99 @@ class AestheticyApp extends StatelessWidget {
     this.repository,
     this.scanService,
     this.directoryPicker,
+    this.settingsStore,
+    this.glassController,
+    this.localeController,
   });
 
   @override
+  State<AestheticyApp> createState() => _AestheticyAppState();
+}
+
+class _AestheticyAppState extends State<AestheticyApp> {
+  late final SettingsStore _settingsStore;
+  late final GlassController _glassController;
+  late final LocaleController _localeController;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _settingsStore = widget.settingsStore ?? SettingsStore();
+    _glassController = widget.glassController ?? GlassController();
+    _settingsStore.bindGlassController(_glassController);
+    _localeController = widget.localeController ??
+        LocaleController(settingsStore: _settingsStore);
+  }
+
+  void _openDesignGallery() {
+    final nav = _navigatorKey.currentState;
+    if (nav != null) {
+      nav.push(
+        MaterialPageRoute<void>(
+          builder: (_) => DesignGalleryScreen(
+            glassController: _glassController,
+            localeController: _localeController,
+            settingsStore: _settingsStore,
+          ),
+        ),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final effectiveEngine = engine ?? FakeAudioEngine();
-    final effectiveController = controller ??
+    final effectiveEngine = widget.engine ?? FakeAudioEngine();
+    final effectiveController = widget.controller ??
         PlaybackController(
           engine: effectiveEngine,
           queue: PlaybackQueue(),
         );
-    final effectiveRepo = repository ?? SqliteLibraryRepository.inMemory();
+    final effectiveRepo =
+        widget.repository ?? SqliteLibraryRepository.inMemory();
     final effectiveScanService =
-        scanService ?? ScanService(repository: effectiveRepo);
+        widget.scanService ?? ScanService(repository: effectiveRepo);
 
-    return MaterialApp(
-      title: 'Aestheticy',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF121212),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6B5B7B),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      home: LibraryScreen(
-        engine: effectiveEngine,
-        controller: effectiveController,
-        repository: effectiveRepo,
-        scanService: effectiveScanService,
-        directoryPicker: directoryPicker,
-      ),
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        _settingsStore,
+        _localeController,
+        _glassController,
+      ]),
+      builder: (context, _) {
+        return GlassScope(
+          controller: _glassController,
+          child: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(
+                LogicalKeyboardKey.keyG,
+                control: true,
+                shift: true,
+              ): _openDesignGallery,
+            },
+            child: Focus(
+              autofocus: true,
+              child: MaterialApp(
+                navigatorKey: _navigatorKey,
+                title: 'Aestheticy',
+                debugShowCheckedModeBanner: false,
+                locale: _localeController.locale,
+                theme: buildAppTheme(),
+                home: Directionality(
+                  textDirection: _localeController.textDirection,
+                  child: LibraryScreen(
+                    engine: effectiveEngine,
+                    controller: effectiveController,
+                    repository: effectiveRepo,
+                    scanService: effectiveScanService,
+                    directoryPicker: widget.directoryPicker,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
