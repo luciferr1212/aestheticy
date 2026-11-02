@@ -6,7 +6,6 @@ import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/mpv_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
-import 'package:aestheticy/features/library/library_screen.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
@@ -14,6 +13,8 @@ import 'package:aestheticy/ui/gallery/design_gallery_screen.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/l10n/locale_controller.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
+import 'package:aestheticy/ui/shell/app_navigator.dart';
+import 'package:aestheticy/ui/shell/app_shell.dart';
 import 'package:aestheticy/ui/theme/app_theme.dart';
 
 void main() async {
@@ -324,6 +325,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final SettingsStore _settingsStore;
   late final GlassController _glassController;
   late final LocaleController _localeController;
+  late final AppNavigator _navigator;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
@@ -334,6 +336,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _settingsStore.bindGlassController(_glassController);
     _localeController = widget.localeController ??
         LocaleController(settingsStore: _settingsStore);
+    _navigator = AppNavigator();
   }
 
   void _openDesignGallery() {
@@ -389,15 +392,18 @@ class _AestheticyAppState extends State<AestheticyApp> {
                 debugShowCheckedModeBanner: false,
                 locale: _localeController.locale,
                 theme: buildAppTheme(),
-                home: Directionality(
+                builder: (context, child) => Directionality(
                   textDirection: _localeController.textDirection,
-                  child: LibraryScreen(
-                    engine: effectiveEngine,
-                    controller: effectiveController,
-                    repository: effectiveRepo,
-                    scanService: effectiveScanService,
-                    directoryPicker: widget.directoryPicker,
-                  ),
+                  child: child!,
+                ),
+                home: AppShell(
+                  engine: effectiveEngine,
+                  controller: effectiveController,
+                  repository: effectiveRepo,
+                  scanService: effectiveScanService,
+                  settingsStore: _settingsStore,
+                  navigator: _navigator,
+                  directoryPicker: widget.directoryPicker,
                 ),
               ),
             ),

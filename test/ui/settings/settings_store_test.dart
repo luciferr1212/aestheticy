@@ -96,6 +96,8 @@ void main() {
         'language': 'ar',
         'glassQuality': 'ultra_neon_4k', // invalid enum
         'libraryViewMode': 'invalid_mode', // invalid mode
+        'albumSort': 'invalid_album_sort',
+        'trackSort': 'invalid_track_sort',
         'userName': 'Hani',
       }));
 
@@ -107,6 +109,8 @@ void main() {
       // Invalid fields fell back to default
       expect(store.settings.glassQuality, equals(GlassQuality.full));
       expect(store.settings.libraryViewMode, equals('square'));
+      expect(store.settings.albumSort, equals('recentlyAdded'));
+      expect(store.settings.trackSort, equals('title'));
       store.dispose();
     });
 

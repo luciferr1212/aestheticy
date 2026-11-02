@@ -109,10 +109,22 @@ class AppSettings {
         : 'square';
 
     final rawAlbumSort = json['albumSort'];
-    final albumSort = rawAlbumSort is String ? rawAlbumSort : 'recentlyAdded';
+    final albumSort = (rawAlbumSort is String &&
+            (rawAlbumSort == 'recentlyAdded' ||
+                rawAlbumSort == 'title' ||
+                rawAlbumSort == 'artist' ||
+                rawAlbumSort == 'year'))
+        ? rawAlbumSort
+        : 'recentlyAdded';
 
     final rawTrackSort = json['trackSort'];
-    final trackSort = rawTrackSort is String ? rawTrackSort : 'title';
+    final trackSort = (rawTrackSort is String &&
+            (rawTrackSort == 'title' ||
+                rawTrackSort == 'artist' ||
+                rawTrackSort == 'album' ||
+                rawTrackSort == 'duration'))
+        ? rawTrackSort
+        : 'title';
 
     return AppSettings(
       language: language,

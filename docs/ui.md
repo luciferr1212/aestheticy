@@ -162,7 +162,45 @@ Two standard button widgets sit on top of glass surfaces (`GlassIconButton` and 
 
 ---
 
-## 8. Decisions
+## 8. App Shell Structure & Navigation
+
+### Shell Layout (`lib/ui/shell/`)
+The desktop shell orchestrates five core architectural components:
+1. **Ambient Background (`AmbientBackground`):** Static calm background painted with a single `CustomPainter` inside a dedicated `RepaintBoundary`. Combines base `#0F1115` with two soft radial gradients: muted purple `#6B5B7B` (45% alpha) and muted teal `#3F6C7A` (30% alpha) anchored at opposite corners.
+2. **Sidebar Navigation (`Sidebar`):** `GlassSurface` (blur slot 1). Expands to 208 dp and compacts to 64 dp with a 150ms animation (instant when `reduceMotion` is true). Compact state is persisted in `AppSettings.sidebarCompact`. Contains:
+   - Brand Header: "Aestheticy" with "by mido" credit.
+   - Section "Library": Albums, Artists, Tracks.
+   - Section "Yours": Playlists, Favorites, Recently played (disabled placeholders with "Soon" label).
+   - Section "Tools": Audio Lab (enabled, direct access to `AudioLabScreen`), Last.fm (disabled placeholder with "Soon" label, neutral icon, no external links).
+   - Bottom items: Folders (triggers folder management sheet) and Settings (disabled placeholder with "Soon" label).
+3. **Dynamic Content Area:** Switches between destinations without blur overhead or unnecessary rebuilds (120ms fade, instant when `reduceMotion` is true).
+4. **Scanning Progress Panel (`ScanningPanel`):** Floats at the top of content when `ScanService.isScanning` is true, displaying current phase, file counts, and an active Cancel button.
+5. **Bottom Now-Playing Bar (`BottomNowPlayingBar`):** Floating `GlassSurface` (blur slot 2, height 84 dp, radius 24 dp) anchored with 16 dp margins. Features:
+   - Start side: Cover thumbnail (52x52, radius 10), track title, artist name, directional expand chevron; whole area taps to stub SnackBar ("Soon").
+   - Center side: Directionality forced to LTR; previous, primary play/pause, next buttons, and an isolated seekbar with time labels. Seek position updates rebuild only the seek slider leaf.
+   - End side: Volume button (opens Glass popup with volume slider), lyrics (disabled), queue (disabled), equalizer (disabled), full screen (disabled).
+
+### Navigation Model (`AppNavigator`)
+Pure Dart `ChangeNotifier` managing `AppDestination`:
+`albums`, `artists`, `tracks`, `albumDetail`, `artistDetail`, `audioLab`, `folders`.
+Detail screens retain selected entity IDs and support back navigation returning cleanly to previous list states.
+
+---
+
+## 9. Library Screens (`lib/ui/library/`)
+
+All library screens consume the existing `LibraryRepository` and `ScanService` interfaces directly without mocking or fake datasets:
+1. **Welcome View (`WelcomeView`):** Displayed when library folders are empty. Greets the user, provides an optional name field (shown only when `userName` is empty; trimmed and clamped to 40 characters), and an "Add folder" button to initiate library scanning.
+2. **Library Header (`LibraryHeader`):** Common header for list views featuring dynamic greeting (calculated from `greetingKey(DateTime.now())`), display title, debounced search field (250ms debounce with Ctrl+K chip hint), item count badge, sort dropdown chip (persisted to settings), and view mode toggle on Albums view.
+3. **Albums View (`AlbumsView`):** Virtualized grid supporting `square` (cover tile with metadata below), `wide` (horizontal card with cover on start side), and `list` (compact table row). Retrieves decoded artwork from `CoverCache` and falls back to a calm gradient placeholder. Tapping an album navigates to `AlbumDetailView`.
+4. **Artists View (`ArtistsView`):** Virtualized grid of circular avatars with deterministic calm gradients derived from artist name hash. Displays merged badges for aliases and provides a context menu with "Merge into…", "Artist rules...", and disabled "Choose picture" stubs. Tapping an artist navigates to `ArtistDetailView`.
+5. **Tracks View (`TracksView`):** Virtualized fixed-height table rendering track title, artist, album, and duration. Currently playing track is highlighted with accent tint and animated 3-bar equalizer (static when paused or `reduceMotion` is true). Double-clicking starts playback from that track.
+6. **Album Detail (`AlbumDetailView`):** Large 220 dp artwork, album title, artist, release year, track count, primary Play and normal Shuffle buttons, and full album tracklist.
+7. **Artist Detail (`ArtistDetailView`):** Large circular avatar, artist name, track count, Play and Shuffle actions, back button, and complete artist tracklist.
+
+---
+
+## 10. Decisions
 
 - **D1:** All color tokens met or exceeded WCAG AAA and AA contrast ratios on `#0F1115` without requiring adjustments (`text` at 15.4:1, `textSecondary` at 7.8:1, `textMuted` at 5.6:1, `accent` at 12.3:1).
 - **D2:** `GlassController` binds to `SettingsStore` as the single source of truth, guaranteeing consistent quality across app restarts.
@@ -170,11 +208,18 @@ Two standard button widgets sit on top of glass surfaces (`GlassIconButton` and 
 - **D4:** Responsive `Wrap` layouts are used in `DesignGalleryScreen` to guarantee zero `RenderFlex` overflows on compact test or split viewports.
 - **D5:** `textDirectionFor()` ignores whitespace, punctuation, brackets, and digits to determine direction strictly from the first strong character.
 - **D6:** Flagship-first default: moved default glass quality to `GlassQuality.full` everywhere with saturation 1.5 boost composed with 30px blur, and expanded `GlassBlurBudget` capacity from 2 to 6 (`kMaxBlurredSurfaces = 6`). Beyond 6, surfaces fall back to `light`.
+- **D7:** Pure Dart navigation model with `AppNavigator` avoids heavy router dependencies and supports seamless back navigation from detail views to list screens.
+- **D8:** Overlay `Directionality` moved to `MaterialApp.builder` wrapping the root `Navigator`, ensuring tooltips, popup menus, dialogs, and snackbars automatically inherit RTL layout in Arabic.
+- **D9:** Leaf-level stream listeners (`ValueListenableBuilder`/`StreamBuilder`) for player seekbar isolate position ticks, ensuring 0 rebuilds for metadata and the parent now-playing bar.
+- **D10:** Disabled placeholders for upcoming features (Last.fm, Playlists, Favorites, Recently Played, Equalizer, Queue, Lyrics) retain accessible tooltips and 40% muted opacity without invoking external web browsers, processes, or network requests.
+- **D11:** First launch onboarding (`WelcomeView`) shows username entry only when `userName` is empty in settings, clamping to 40 characters and immediately updating the top greeting.
 
 ---
 
-## 9. Known Limitations
+## 11. Known Limitations
 
 - **Local Build Workload:** Local compilation of native Windows `.exe` binaries is disabled due to absence of Visual Studio C++ build tools; all native binaries are compiled via GitHub Actions CI.
 - **Headless Performance Benchmarks:** In unit and widget tests, frame timing callbacks operate within simulated clock dispatchers. Real GPU raster and build times must be evaluated directly on the Windows release executable using the Design Gallery.
+- **Glass Fallback Re-acquisition:** A GlassSurface that fell back to `light` because the blur budget was full does not re-acquire a slot until quality changes.
+- **Tools > Last.fm Placeholder:** Last.fm integration in the sidebar is currently a disabled placeholder with a neutral icon; no scrobbling, authentication, or external web browsing is active.
 - **System Font Reliance:** Typography relies on Windows desktop system fonts (`Segoe UI Variable` and `Segoe UI`); custom bundled web fonts are not yet bundled.

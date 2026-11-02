@@ -148,3 +148,9 @@ Artists tagged with different spellings or multilingual variations (e.g. Arabic 
 - **Paged GROUP BY performance:** Derived aggregation via paged `GROUP BY` is O(n) per page; performance should be benchmarked and measured at 50k+ tracks.
 - **ASCII-only collation:** SQLite `COLLATE NOCASE` only folds ASCII characters (A-Z to a-z), leaving non-ASCII uppercase/lowercase variations unfolded unless pre-normalized via `TextNormalizer`.
 - **Nested parent and child folders:** Adding both a parent directory and a child directory together can cause tracks to reassign their parent `folder_id` between folders on consecutive rescans.
+
+---
+
+## UI Integration
+
+The library presentation layer is built on top of `LibraryRepository` and `ScanService`, fully documented in [`docs/ui.md`](file:///e:/dev/aestheticy/docs/ui.md). All library screens (`AlbumsView`, `ArtistsView`, `TracksView`, `AlbumDetailView`, `ArtistDetailView`, `WelcomeView`) interact purely with the existing repository and scan service contracts without invoking direct SQLite queries or audio engine primitives.
