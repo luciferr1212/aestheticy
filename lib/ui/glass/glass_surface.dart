@@ -8,6 +8,15 @@ import 'glass_blur_budget.dart';
 import 'glass_quality.dart';
 import 'glass_scope.dart';
 
+/// Density mode for a [GlassSurface].
+enum GlassDensity {
+  /// Standard glass density with 30px blur and regular tint.
+  regular,
+
+  /// Lighter density with 22px blur and clearer tint for Now Playing / Full screen cards.
+  clear,
+}
+
 /// A layered glass surface widget adapting to the active [GlassQuality] tier.
 ///
 /// * [GlassQuality.full]: Real BackdropFilter blur with saturation boost and subtle highlight, strictly
@@ -33,6 +42,9 @@ class GlassSurface extends StatefulWidget {
   /// Optional fixed height.
   final double? height;
 
+  /// Density mode affecting blur sigma and tint opacity.
+  final GlassDensity density;
+
   /// Creates a [GlassSurface].
   const GlassSurface({
     super.key,
@@ -42,6 +54,7 @@ class GlassSurface extends StatefulWidget {
     this.margin,
     this.width,
     this.height,
+    this.density = GlassDensity.regular,
   });
 
   @override
@@ -97,6 +110,14 @@ class _GlassSurfaceState extends State<GlassSurface> {
     final Widget surface;
     switch (effectiveTier) {
       case GlassQuality.full:
+        final sigma = widget.density == GlassDensity.clear ? 22.0 : 30.0;
+        final innerTint = widget.density == GlassDensity.clear
+            ? const Color.fromRGBO(255, 255, 255, 0.08)
+            : const Color.fromRGBO(255, 255, 255, 0.16);
+        final topHighlight = widget.density == GlassDensity.clear
+            ? const Color(0x14FFFFFF)
+            : const Color(0x22FFFFFF);
+
         surface = RepaintBoundary(
           child: Container(
             width: widget.width,
@@ -122,21 +143,21 @@ class _GlassSurfaceState extends State<GlassSurface> {
                     -0.1065, -0.3575, 1.4640, 0.0, 0.0,
                     0.0, 0.0, 0.0, 1.0, 0.0,
                   ]),
-                  inner: ImageFilter.blur(sigmaX: 30.0, sigmaY: 30.0),
+                  inner: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
                 ),
                 child: Container(
                   decoration: BoxDecoration(
                     borderRadius: rrect,
                     border: Border.all(color: AppColors.border, width: 1.0),
-                    gradient: const LinearGradient(
+                    gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Color(0x22FFFFFF), // Subtle top inner highlight
-                        AppColors.fillGlass,
-                        AppColors.fillGlass,
+                        topHighlight,
+                        innerTint,
+                        innerTint,
                       ],
-                      stops: [0.0, 0.18, 1.0],
+                      stops: const [0.0, 0.18, 1.0],
                     ),
                   ),
                   child: content,
@@ -146,6 +167,16 @@ class _GlassSurfaceState extends State<GlassSurface> {
           ),
         );
       case GlassQuality.light:
+        final lightColors = widget.density == GlassDensity.clear
+            ? const [
+                Color.fromRGBO(52, 50, 62, 0.45),
+                Color.fromRGBO(32, 31, 40, 0.45),
+              ]
+            : const [
+                Color.fromRGBO(52, 50, 62, 0.84),
+                Color.fromRGBO(32, 31, 40, 0.88),
+              ];
+
         surface = RepaintBoundary(
           child: Container(
             width: widget.width,
@@ -154,13 +185,10 @@ class _GlassSurfaceState extends State<GlassSurface> {
             decoration: BoxDecoration(
               borderRadius: rrect,
               border: Border.all(color: const Color(0x1AFFFFFF), width: 1.0),
-              gradient: const LinearGradient(
+              gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  Color.fromRGBO(52, 50, 62, 0.84),
-                  Color.fromRGBO(32, 31, 40, 0.88),
-                ],
+                colors: lightColors,
               ),
               boxShadow: const [
                 BoxShadow(

@@ -8,8 +8,10 @@ import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/track_audio_source_mapper.dart';
+import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../l10n/app_strings.dart';
+import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -82,26 +84,6 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     }
   }
 
-  String _formatDuration(int ms) {
-    final d = Duration(milliseconds: ms);
-    final m = d.inMinutes;
-    final s = d.inSeconds % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
-  }
-
-  int get _totalDurationMs =>
-      _tracks.fold<int>(0, (sum, t) => sum + t.durationMs);
-
-  String get _totalDurationFormatted {
-    final d = Duration(milliseconds: _totalDurationMs);
-    final hours = d.inHours;
-    final minutes = d.inMinutes % 60;
-    if (hours > 0) {
-      return '$hours hr $minutes min';
-    }
-    return '$minutes min';
-  }
-
   @override
   Widget build(BuildContext context) {
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
@@ -151,23 +133,39 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                       style: AppTypography.display.copyWith(letterSpacing: -0.5),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      widget.album.albumArtist ?? 'Unknown Artist',
-                      textDirection:
-                          textDirectionFor(widget.album.albumArtist ?? ''),
-                      style: AppTypography.title.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    Builder(
+                      builder: (context) {
+                        final rawArtist = widget.album.albumArtist;
+                        final artist = rawArtist != null && rawArtist.isNotEmpty
+                            ? context.displayArtist(rawArtist)
+                            : context.t('library.unknownArtist');
+                        return Text(
+                          artist,
+                          textDirection: textDirectionFor(artist),
+                          style: AppTypography.title.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      '${widget.album.trackCount} ${context.t('album.tracksCount')}'
-                      '${widget.album.year != null ? ' • ${widget.album.year}' : ''}'
-                      '${_tracks.isNotEmpty ? ' • $_totalDurationFormatted' : ''}',
-                      style: AppTypography.body.copyWith(
-                        color: AppColors.textMuted,
-                      ),
+                    Builder(
+                      builder: (context) {
+                        final countStr = context.formatCountLocalized(widget.album.trackCount);
+                        final yearStr = widget.album.year != null
+                            ? ' • ${context.localizeDigitsText(widget.album.year.toString())}'
+                            : '';
+                        final durStr = _tracks.isNotEmpty
+                            ? ' • ${context.formatDurationLocalized(Duration(milliseconds: _tracks.fold(0, (sum, t) => sum + t.durationMs)))}'
+                            : '';
+                        return Text(
+                          '$countStr ${context.t('album.tracksCount')}$yearStr$durStr',
+                          style: AppTypography.body.copyWith(
+                            color: AppColors.textMuted,
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 20),
 
@@ -257,7 +255,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                                                       reduceMotion: reduceMotion,
                                                     )
                                                   : Text(
-                                                      '${track.trackNo ?? index + 1}',
+                                                      context.localizeDigitsText(
+                                                          '${track.trackNo ?? index + 1}'),
                                                       style: AppTypography.caption
                                                           .copyWith(
                                                         color: AppColors.textMuted,
@@ -268,7 +267,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Text(
-                                              track.title ?? 'Unknown Title',
+                                              track.title ??
+                                                  context.t('library.unknownTitle'),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               textDirection: textDirectionFor(
@@ -286,7 +286,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                                           SizedBox(
                                             width: 56,
                                             child: Text(
-                                              _formatDuration(track.durationMs),
+                                              context.formatDurationLocalized(
+                                                  Duration(milliseconds: track.durationMs)),
                                               textAlign: TextAlign.end,
                                               style: AppTypography.caption.copyWith(
                                                 color: AppColors.textMuted,

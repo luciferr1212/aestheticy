@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -7,20 +9,24 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/features/audio_lab/audio_lab_screen.dart';
 import 'package:aestheticy/features/library/folder_management_sheet.dart';
-import 'package:aestheticy/features/library/library_screen.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/ui/settings/settings_store.dart';
+import 'package:aestheticy/ui/shell/app_navigator.dart';
+import 'package:aestheticy/ui/shell/app_shell.dart';
 
 void main() {
-  group('LibraryScreen Widget Tests', () {
+  group('AppShell & Library Screens Migrated Tests', () {
     late FakeAudioEngine engine;
     late PlaybackQueue queue;
     late PlaybackController controller;
     late SqliteLibraryRepository repository;
     late ScanService scanService;
+    late Directory tempDir;
 
     setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('aestheticy_lib_test_');
       engine = FakeAudioEngine();
       await engine.init();
       queue = PlaybackQueue();
@@ -35,6 +41,9 @@ void main() {
       await repository.close();
       await controller.dispose();
       await engine.dispose();
+      if (tempDir.existsSync()) {
+        await tempDir.delete(recursive: true);
+      }
     });
 
     Future<void> seedTestData() async {
@@ -85,23 +94,38 @@ void main() {
       await repository.rebuildArtistLinks();
     }
 
-    Widget createTestApp({Future<String?> Function()? directoryPicker}) {
+    Widget createTestApp({
+      Future<String?> Function()? directoryPicker,
+      AppNavigator? navigator,
+      SettingsStore? settingsStore,
+    }) {
+      final nav = navigator ?? AppNavigator();
+      final store = settingsStore ?? SettingsStore(directory: tempDir);
       return MaterialApp(
         theme: ThemeData(
           brightness: Brightness.dark,
-          scaffoldBackgroundColor: const Color(0xFF121212),
+          scaffoldBackgroundColor: const Color(0xFF0F1115),
         ),
-        home: LibraryScreen(
+        home: AppShell(
           engine: engine,
           controller: controller,
           repository: repository,
           scanService: scanService,
+          settingsStore: store,
+          navigator: nav,
           directoryPicker: directoryPicker,
         ),
       );
     }
 
     testWidgets('empty-library state shows an Add folder prompt', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       String? pickedFolder;
       await tester.pumpWidget(
         createTestApp(
@@ -114,18 +138,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // Empty library prompt should be visible
-      expect(find.text('Your music library is empty'), findsOneWidget);
-      expect(
-        find.text('Add a folder containing audio files to start listening.'),
-        findsOneWidget,
-      );
-
-      final addFolderButton = find.byKey(const Key('empty_add_folder_button'));
-      expect(addFolderButton, findsOneWidget);
-      expect(find.text('Add folder'), findsOneWidget);
+      expect(find.text('Welcome to Aestheticy'), findsOneWidget);
+      expect(find.byKey(const Key('welcome_add_folder_button')), findsOneWidget);
 
       // Tapping Add folder invokes the directory picker
-      await tester.tap(addFolderButton);
+      await tester.tap(find.byKey(const Key('welcome_add_folder_button')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
@@ -134,14 +151,21 @@ void main() {
     });
 
     testWidgets('tabs render and can switch between Albums, Artists, Tracks', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       await seedTestData();
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
-      // Check all 3 tabs are present in AppBar
-      expect(find.text('Albums'), findsOneWidget);
-      expect(find.text('Artists'), findsOneWidget);
-      expect(find.text('Tracks'), findsOneWidget);
+      // Check all 3 navigation items are present in Sidebar
+      expect(find.byKey(const Key('sidebar_albums')), findsOneWidget);
+      expect(find.byKey(const Key('sidebar_artists')), findsOneWidget);
+      expect(find.byKey(const Key('sidebar_tracks')), findsOneWidget);
 
       // Credit "by mido" is visible
       expect(find.text('by mido'), findsWidgets);
@@ -150,14 +174,14 @@ void main() {
       expect(find.text('Daybreak'), findsOneWidget);
       expect(find.text('Midnight'), findsOneWidget);
 
-      // Switch to Artists tab
-      await tester.tap(find.text('Artists'));
+      // Switch to Artists view
+      await tester.tap(find.byKey(const Key('sidebar_artists')));
       await tester.pumpAndSettle();
       expect(find.text('Solaris'), findsOneWidget);
       expect(find.text('Luna'), findsOneWidget);
 
-      // Switch to Tracks tab
-      await tester.tap(find.text('Tracks'));
+      // Switch to Tracks view
+      await tester.tap(find.byKey(const Key('sidebar_tracks')));
       await tester.pumpAndSettle();
       expect(find.text('Morning Sun'), findsOneWidget);
       expect(find.text('Golden Horizon'), findsOneWidget);
@@ -165,6 +189,13 @@ void main() {
     });
 
     testWidgets('search filters tracks, albums, and artists', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       await seedTestData();
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
@@ -183,14 +214,19 @@ void main() {
       expect(find.text('Midnight'), findsOneWidget);
       expect(find.text('Daybreak'), findsNothing);
 
-      // Switch to Tracks tab: only "Night Sky" matches
-      await tester.tap(find.text('Tracks'));
+      // Switch to Tracks view: search for Night
+      await tester.tap(find.byKey(const Key('sidebar_tracks')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('library_search_field')), 'Night');
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
       expect(find.text('Night Sky'), findsOneWidget);
       expect(find.text('Morning Sun'), findsNothing);
 
       // Clear search
-      await tester.enterText(searchField, '');
+      final clearSearchField = find.byKey(const Key('library_search_field'));
+      await tester.enterText(clearSearchField, '');
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
       // All tracks back
@@ -200,6 +236,13 @@ void main() {
     });
 
     testWidgets('search debounces 250ms before querying', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       await seedTestData();
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
@@ -218,16 +261,26 @@ void main() {
     });
 
     testWidgets('tapping a track inside Tracks tab plays the current list at right index', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       await seedTestData();
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
       // Go to Tracks tab
-      await tester.tap(find.text('Tracks'));
+      await tester.tap(find.byKey(const Key('sidebar_tracks')));
       await tester.pumpAndSettle();
 
-      // Tap on track: "Morning Sun" (index 1 in titleAsc order)
-      await tester.tap(find.text('Morning Sun'));
+      // Double tap on track: "Morning Sun" (index 1 in titleAsc order)
+      final trackFinder = find.text('Morning Sun');
+      await tester.tap(trackFinder);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(trackFinder);
       await tester.pumpAndSettle();
 
       // Controller and engine should have opened "Morning Sun"
@@ -245,6 +298,13 @@ void main() {
     });
 
     testWidgets('context rule: tapping inside an album plays that album at right index', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       await seedTestData();
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
@@ -253,8 +313,7 @@ void main() {
       await tester.tap(find.text('Daybreak'));
       await tester.pumpAndSettle();
 
-      // We should now be in the AlbumDetailScreen
-      expect(find.text('Play Album'), findsOneWidget);
+      // We should now be in AlbumDetailView
       expect(find.text('Morning Sun'), findsOneWidget);
       expect(find.text('Golden Horizon'), findsOneWidget);
       // "Night Sky" is in album 2, so it shouldn't be here
@@ -276,6 +335,13 @@ void main() {
     });
 
     testWidgets('folder management sheet allows opening, adding, and rescanning', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       String? addedPath;
       await tester.pumpWidget(
         createTestApp(
@@ -287,8 +353,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Tap Manage Folders button in AppBar
-      final manageButton = find.byKey(const Key('manage_folders_button'));
+      // Tap Folders button in Sidebar
+      final manageButton = find.byKey(const Key('sidebar_folders'));
       expect(manageButton, findsOneWidget);
       await tester.tap(manageButton);
       await tester.pump();

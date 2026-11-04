@@ -14,7 +14,12 @@ import '../library/artist_detail_view.dart';
 import '../library/artists_view.dart';
 import '../library/tracks_view.dart';
 import '../library/welcome_view.dart';
+import '../now_playing/full_screen_view.dart';
+import '../now_playing/now_playing_view.dart';
+import '../artist_names/artist_name_store.dart';
+import '../settings/audio_settings_applier.dart';
 import '../settings/settings_store.dart';
+import '../settings/settings_view.dart';
 import 'ambient_background.dart';
 import 'app_navigator.dart';
 import 'bottom_now_playing_bar.dart';
@@ -45,6 +50,12 @@ class AppShell extends StatefulWidget {
   /// Optional injected directory picker for testing.
   final Future<String?> Function()? directoryPicker;
 
+  /// Optional audio settings applier.
+  final AudioSettingsApplier? audioSettingsApplier;
+
+  /// Optional artist display names store.
+  final ArtistNameStore? artistNameStore;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -55,6 +66,8 @@ class AppShell extends StatefulWidget {
     required this.settingsStore,
     required this.navigator,
     this.directoryPicker,
+    this.audioSettingsApplier,
+    this.artistNameStore,
   });
 
   @override
@@ -194,12 +207,26 @@ class _AppShellState extends State<AppShell> {
           engine: widget.engine,
           controller: widget.controller,
         );
+      case AppDestination.settings:
+        return SettingsView(
+          key: const ValueKey('view_settings'),
+          engine: widget.engine,
+          repository: widget.repository,
+          settingsStore: widget.settingsStore,
+          navigator: widget.navigator,
+          audioSettingsApplier: widget.audioSettingsApplier,
+          artistNameStore: widget.artistNameStore,
+          onOpenFolders: _openFolders,
+        );
       case AppDestination.folders:
         // Revert to albums and open modal
         WidgetsBinding.instance.addPostFrameCallback((_) {
           widget.navigator.navigateTo(AppDestination.albums);
           _openFolders();
         });
+        return const SizedBox.shrink();
+      case AppDestination.nowPlaying:
+      case AppDestination.fullScreen:
         return const SizedBox.shrink();
     }
   }
@@ -215,6 +242,34 @@ class _AppShellState extends State<AppShell> {
 
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
     final currentDestination = widget.navigator.current;
+
+    // Now Playing full-screen card view (releases sidebar and bottom bar blur slots)
+    if (currentDestination == AppDestination.nowPlaying) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: NowPlayingView(
+          key: const ValueKey('view_now_playing'),
+          controller: widget.controller,
+          engine: widget.engine,
+          navigator: widget.navigator,
+          settingsStore: widget.settingsStore,
+        ),
+      );
+    }
+
+    // In-app immersive Full Screen view
+    if (currentDestination == AppDestination.fullScreen) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: FullScreenView(
+          key: const ValueKey('view_full_screen'),
+          controller: widget.controller,
+          engine: widget.engine,
+          navigator: widget.navigator,
+          settingsStore: widget.settingsStore,
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -272,6 +327,7 @@ class _AppShellState extends State<AppShell> {
                         height: 84,
                         child: BottomNowPlayingBar(
                           controller: widget.controller,
+                          navigator: widget.navigator,
                         ),
                       ),
                     ],

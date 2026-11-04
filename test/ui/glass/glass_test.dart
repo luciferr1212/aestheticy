@@ -166,5 +166,67 @@ void main() {
 
       expect(backdrop.filter, equals(expectedFilter));
     });
+
+    testWidgets('GlassDensity.clear in full mode applies blur sigma 22', (
+      tester,
+    ) async {
+      final controller = GlassController(quality: GlassQuality.full);
+
+      await tester.pumpWidget(
+        GlassScope(
+          controller: controller,
+          child: const Directionality(
+            textDirection: TextDirection.ltr,
+            child: GlassSurface(
+              density: GlassDensity.clear,
+              child: Text('Clear Surface'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final backdrop =
+          tester.widget<BackdropFilter>(find.byType(BackdropFilter));
+      final expectedFilter = ImageFilter.compose(
+        outer: const ColorFilter.matrix(<double>[
+          1.3935, -0.3575, -0.0360, 0.0, 0.0,
+          -0.1065, 1.1425, -0.0360, 0.0, 0.0,
+          -0.1065, -0.3575, 1.4640, 0.0, 0.0,
+          0.0, 0.0, 0.0, 1.0, 0.0,
+        ]),
+        inner: ImageFilter.blur(sigmaX: 22.0, sigmaY: 22.0),
+      );
+
+      expect(backdrop.filter, equals(expectedFilter));
+    });
+
+    testWidgets('GlassDensity.clear in light mode builds Container with 0.45 alpha gradient', (
+      tester,
+    ) async {
+      final controller = GlassController(quality: GlassQuality.light);
+
+      await tester.pumpWidget(
+        GlassScope(
+          controller: controller,
+          child: const Directionality(
+            textDirection: TextDirection.ltr,
+            child: GlassSurface(
+              density: GlassDensity.clear,
+              child: Text('Light Clear Surface'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final containers = tester.widgetList<Container>(find.byType(Container));
+      final surfaceContainer = containers.firstWhere(
+        (c) => c.decoration is BoxDecoration && (c.decoration as BoxDecoration).gradient != null,
+      );
+      final gradient = (surfaceContainer.decoration as BoxDecoration).gradient as LinearGradient;
+      expect(gradient.colors[0], equals(const Color.fromRGBO(52, 50, 62, 0.45)));
+      expect(gradient.colors[1], equals(const Color.fromRGBO(32, 31, 40, 0.45)));
+    });
   });
 }

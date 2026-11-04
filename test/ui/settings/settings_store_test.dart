@@ -35,6 +35,15 @@ void main() {
       expect(store.settings.libraryViewMode, equals('square'));
       expect(store.settings.albumSort, equals('recentlyAdded'));
       expect(store.settings.trackSort, equals('title'));
+      expect(store.settings.fullScreenGlassShapes, isTrue);
+      expect(store.settings.arabicNumerals, isFalse);
+      expect(store.settings.textScale, equals('normal'));
+      expect(store.settings.uiFont, equals('system'));
+      expect(store.settings.artistNameMode, equals('followLanguage'));
+      expect(store.settings.outputDeviceId, equals('auto'));
+      expect(store.settings.exclusiveMode, isFalse);
+      expect(store.settings.replayGainMode, equals('off'));
+      expect(store.settings.replayGainPreampDb, equals(0.0));
 
       final file = File(p.join(tempDir.path, 'ui_settings.json'));
       expect(file.existsSync(), isFalse);
@@ -54,6 +63,15 @@ void main() {
             libraryViewMode: 'wide',
             albumSort: 'title',
             trackSort: 'artist',
+            fullScreenGlassShapes: false,
+            arabicNumerals: true,
+            textScale: 'large',
+            uiFont: 'Cairo',
+            artistNameMode: 'alwaysArabic',
+            outputDeviceId: 'device-123',
+            exclusiveMode: true,
+            replayGainMode: 'track',
+            replayGainPreampDb: 4.5,
           ));
       await store1.flush();
       store1.dispose();
@@ -70,6 +88,15 @@ void main() {
       expect(store2.settings.libraryViewMode, equals('wide'));
       expect(store2.settings.albumSort, equals('title'));
       expect(store2.settings.trackSort, equals('artist'));
+      expect(store2.settings.fullScreenGlassShapes, isFalse);
+      expect(store2.settings.arabicNumerals, isTrue);
+      expect(store2.settings.textScale, equals('large'));
+      expect(store2.settings.uiFont, equals('Cairo'));
+      expect(store2.settings.artistNameMode, equals('alwaysArabic'));
+      expect(store2.settings.outputDeviceId, equals('device-123'));
+      expect(store2.settings.exclusiveMode, isTrue);
+      expect(store2.settings.replayGainMode, equals('track'));
+      expect(store2.settings.replayGainPreampDb, equals(4.5));
       store2.dispose();
     });
 
@@ -98,6 +125,10 @@ void main() {
         'libraryViewMode': 'invalid_mode', // invalid mode
         'albumSort': 'invalid_album_sort',
         'trackSort': 'invalid_track_sort',
+        'textScale': 'huge',
+        'artistNameMode': 'invalid_artist_mode',
+        'replayGainMode': 'super_boost',
+        'replayGainPreampDb': 99.9,
         'userName': 'Hani',
       }));
 
@@ -111,7 +142,30 @@ void main() {
       expect(store.settings.libraryViewMode, equals('square'));
       expect(store.settings.albumSort, equals('recentlyAdded'));
       expect(store.settings.trackSort, equals('title'));
+      expect(store.settings.fullScreenGlassShapes, isTrue);
+      expect(store.settings.arabicNumerals, isFalse);
+      expect(store.settings.textScale, equals('normal'));
+      expect(store.settings.uiFont, equals('system'));
+      expect(store.settings.artistNameMode, equals('followLanguage'));
+      expect(store.settings.outputDeviceId, equals('auto'));
+      expect(store.settings.exclusiveMode, isFalse);
+      expect(store.settings.replayGainMode, equals('off'));
+      expect(store.settings.replayGainPreampDb, equals(15.0)); // clamped to 15.0
       store.dispose();
+    });
+
+    test('replayGainPreampDb clamps values to [-15.0, 15.0]', () {
+      const lower = AppSettings(replayGainPreampDb: -30.0);
+      expect(lower.replayGainPreampDb, equals(-15.0));
+
+      const upper = AppSettings(replayGainPreampDb: 30.0);
+      expect(upper.replayGainPreampDb, equals(15.0));
+
+      final copiedLower = const AppSettings().copyWith(replayGainPreampDb: -20.0);
+      expect(copiedLower.replayGainPreampDb, equals(-15.0));
+
+      final copiedUpper = const AppSettings().copyWith(replayGainPreampDb: 25.0);
+      expect(copiedUpper.replayGainPreampDb, equals(15.0));
     });
 
     test('debounce collapses rapid updates and atomic write leaves no .tmp file', () async {

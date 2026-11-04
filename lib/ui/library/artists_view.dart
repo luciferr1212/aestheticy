@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../features/library/artist_rules_sheet.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../artist_names/artist_name_scope.dart';
 import '../l10n/app_strings.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
@@ -112,8 +113,8 @@ class _ArtistsViewState extends State<ArtistsView> {
 
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No other artists available to merge into.'),
+        SnackBar(
+          content: Text(context.t('artists.mergeNoOther')),
         ),
       );
       return;
@@ -135,7 +136,9 @@ class _ArtistsViewState extends State<ArtistsView> {
 
             return AlertDialog(
               backgroundColor: const Color(0xFF1E1E22),
-              title: Text('Merge "${sourceArtist.name}" into…'),
+              title: Text(
+                dialogCtx.t('artists.mergeIntoTitle', args: {'name': sourceArtist.name}),
+              ),
               content: SizedBox(
                 width: 400,
                 height: 350,
@@ -143,9 +146,9 @@ class _ArtistsViewState extends State<ArtistsView> {
                   children: [
                     TextField(
                       key: const Key('merge_artist_search_field'),
-                      decoration: const InputDecoration(
-                        hintText: 'Search target artist...',
-                        prefixIcon: Icon(Icons.search, size: 18),
+                      decoration: InputDecoration(
+                        hintText: dialogCtx.t('artists.searchTargetHint'),
+                        prefixIcon: const Icon(Icons.search, size: 18),
                         isDense: true,
                       ),
                       onChanged: (val) => setDialogState(() => filter = val),
@@ -153,10 +156,10 @@ class _ArtistsViewState extends State<ArtistsView> {
                     const SizedBox(height: 8),
                     Expanded(
                       child: filtered.isEmpty
-                          ? const Center(
+                          ? Center(
                               child: Text(
-                                'No matching artists',
-                                style: TextStyle(color: Colors.grey),
+                                dialogCtx.t('artists.noMatchingArtists'),
+                                style: const TextStyle(color: Colors.grey),
                               ),
                             )
                           : ListView.builder(
@@ -168,7 +171,7 @@ class _ArtistsViewState extends State<ArtistsView> {
                                   key: Key('merge_target_${target.key}'),
                                   title: Text(target.name),
                                   subtitle: Text(
-                                    '${target.trackCount} tracks',
+                                    '${target.trackCount} ${targetItemCtx.t('tracks.count')}',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: Colors.grey,
@@ -181,16 +184,18 @@ class _ArtistsViewState extends State<ArtistsView> {
                                       builder: (c) => AlertDialog(
                                         backgroundColor:
                                             const Color(0xFF1E1E22),
-                                        title: const Text('Confirm merge'),
+                                        title: Text(c.t('artists.confirmMergeTitle')),
                                         content: Text(
-                                          'Merge "${sourceArtist.name}" into "${target.name}"?\n\n'
-                                          'Tracks performed by "${sourceArtist.name}" will appear under "${target.name}". Files will not be modified.',
+                                          c.t('artists.confirmMergePrompt', args: {
+                                            'source': sourceArtist.name,
+                                            'target': target.name,
+                                          }),
                                         ),
                                         actions: [
                                           TextButton(
                                             onPressed: () =>
                                                 Navigator.of(c).pop(false),
-                                            child: const Text('Cancel'),
+                                            child: Text(c.t('common.cancel')),
                                           ),
                                           ElevatedButton(
                                             key: const Key(
@@ -198,7 +203,7 @@ class _ArtistsViewState extends State<ArtistsView> {
                                             ),
                                             onPressed: () =>
                                                 Navigator.of(c).pop(true),
-                                            child: const Text('Merge'),
+                                            child: Text(c.t('artists.mergeAction')),
                                           ),
                                         ],
                                       ),
@@ -217,7 +222,10 @@ class _ArtistsViewState extends State<ArtistsView> {
                                           messenger.showSnackBar(
                                             SnackBar(
                                               content: Text(
-                                                'Merged ${sourceArtist.name} into ${target.name}',
+                                                context.t('artists.mergeSuccess', args: {
+                                                  'source': sourceArtist.name,
+                                                  'target': target.name,
+                                                }),
                                               ),
                                             ),
                                           );
@@ -226,7 +234,11 @@ class _ArtistsViewState extends State<ArtistsView> {
                                         if (mounted) {
                                           messenger.showSnackBar(
                                             SnackBar(
-                                              content: Text('Merge failed: $e'),
+                                              content: Text(
+                                                context.t('artists.mergeFailed', args: {
+                                                  'error': e.toString(),
+                                                }),
+                                              ),
                                             ),
                                           );
                                         }
@@ -240,6 +252,13 @@ class _ArtistsViewState extends State<ArtistsView> {
                   ],
                 ),
               ),
+              actions: [
+                TextButton(
+                  key: const Key('merge_dialog_cancel_button'),
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: Text(dialogCtx.t('common.cancel')),
+                ),
+              ],
             );
           },
         );
@@ -430,15 +449,20 @@ class _ArtistTile extends StatelessWidget {
               children: [
                 const SizedBox(width: 24),
                 Expanded(
-                  child: Text(
-                    artist.name,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textDirection: textDirectionFor(artist.name),
-                    style: AppTypography.bodyStrong.copyWith(
-                      color: AppColors.text,
-                    ),
+                  child: Builder(
+                    builder: (context) {
+                      final displayName = context.displayArtist(artist.name);
+                      return Text(
+                        displayName,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textDirection: textDirectionFor(displayName),
+                        style: AppTypography.bodyStrong.copyWith(
+                          color: AppColors.text,
+                        ),
+                      );
+                    },
                   ),
                 ),
                 // Context menu button "..."
@@ -485,7 +509,7 @@ class _ArtistContextMenuButton extends StatelessWidget {
         size: 18,
         color: AppColors.textMuted,
       ),
-      tooltip: 'Artist options',
+      tooltip: context.t('artists.optionsTooltip'),
       color: const Color(0xFF1D1C25),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppSpacing.r12),
@@ -507,7 +531,7 @@ class _ArtistContextMenuButton extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Merge into…',
+                  context.t('artist.mergeInto'),
                   style: AppTypography.body.copyWith(color: AppColors.text),
                 ),
               ),

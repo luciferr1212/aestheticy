@@ -58,6 +58,26 @@ void main() {
       expect(AppStrings.t('nav.library', language: 'ar'), equals('المكتبة'));
     });
 
+    test('Placeholder interpolation replaces arguments, leaves missing placeholders intact, and never throws', () {
+      expect(
+        AppStrings.t('artists.mergeIntoTitle', language: 'en', args: {'name': 'Fairouz'}),
+        equals('Merge "Fairouz" into…'),
+      );
+      expect(
+        AppStrings.t('artists.mergeIntoTitle', language: 'ar', args: {'name': 'فيروز'}),
+        equals('دمج "فيروز" في…'),
+      );
+      // Missing argument leaves placeholder intact
+      expect(
+        AppStrings.t('artists.mergeIntoTitle', language: 'en', args: {}),
+        equals('Merge "{name}" into…'),
+      );
+      expect(
+        AppStrings.t('artists.mergeIntoTitle', language: 'en'),
+        equals('Merge "{name}" into…'),
+      );
+    });
+
     test('textDirectionFor identifies first strong directional character', () {
       // Arabic string -> rtl
       expect(textDirectionFor('فيروز'), equals(TextDirection.rtl));

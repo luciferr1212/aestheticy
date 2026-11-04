@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../artist_names/artist_name_scope.dart';
 import '../l10n/app_strings.dart';
+import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -248,12 +250,20 @@ class _SquareAlbumTile extends StatelessWidget {
               style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
             ),
             const SizedBox(height: 2),
-            Text(
-              album.albumArtist ?? 'Unknown Artist',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textDirection: textDirectionFor(album.albumArtist ?? ''),
-              style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+            Builder(
+              builder: (context) {
+                final rawArtist = album.albumArtist;
+                final artist = rawArtist != null && rawArtist.isNotEmpty
+                    ? context.displayArtist(rawArtist)
+                    : context.t('library.unknownArtist');
+                return Text(
+                  artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textDirection: textDirectionFor(artist),
+                  style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                );
+              },
             ),
           ],
         ),
@@ -307,17 +317,33 @@ class _WideAlbumTile extends StatelessWidget {
                         style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
                       ),
                       const SizedBox(height: 3),
-                      Text(
-                        album.albumArtist ?? 'Unknown Artist',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textDirection: textDirectionFor(album.albumArtist ?? ''),
-                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                      Builder(
+                        builder: (context) {
+                          final rawArtist = album.albumArtist;
+                          final artist = rawArtist != null && rawArtist.isNotEmpty
+                              ? context.displayArtist(rawArtist)
+                              : context.t('library.unknownArtist');
+                          return Text(
+                            artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textDirection: textDirectionFor(artist),
+                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                          );
+                        },
                       ),
                       const SizedBox(height: 2),
-                      Text(
-                        '${album.trackCount} tracks${album.year != null ? ' • ${album.year}' : ''}',
-                        style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                      Builder(
+                        builder: (context) {
+                          final countStr = context.formatCountLocalized(album.trackCount);
+                          final yearStr = album.year != null
+                              ? ' • ${context.localizeDigitsText(album.year.toString())}'
+                              : '';
+                          return Text(
+                            '$countStr ${context.t('album.tracksCount')}$yearStr',
+                            style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -369,27 +395,47 @@ class _ListAlbumTile extends StatelessWidget {
               ),
               Expanded(
                 flex: 2,
-                child: Text(
-                  album.albumArtist ?? 'Unknown Artist',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: textDirectionFor(album.albumArtist ?? ''),
-                  style: AppTypography.body.copyWith(color: AppColors.textSecondary),
+                child: Builder(
+                  builder: (context) {
+                    final rawArtist = album.albumArtist;
+                    final artist = rawArtist != null && rawArtist.isNotEmpty
+                        ? context.displayArtist(rawArtist)
+                        : context.t('library.unknownArtist');
+                    return Text(
+                      artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textDirection: textDirectionFor(artist),
+                      style: AppTypography.body.copyWith(color: AppColors.textSecondary),
+                    );
+                  },
                 ),
               ),
               SizedBox(
                 width: 60,
-                child: Text(
-                  album.year != null ? '${album.year}' : '—',
-                  style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                child: Builder(
+                  builder: (context) {
+                    final yearStr = album.year != null
+                        ? context.localizeDigitsText(album.year.toString())
+                        : '—';
+                    return Text(
+                      yearStr,
+                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                    );
+                  },
                 ),
               ),
               SizedBox(
                 width: 70,
-                child: Text(
-                  '${album.trackCount} tracks',
-                  textAlign: TextAlign.end,
-                  style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                child: Builder(
+                  builder: (context) {
+                    final countStr = context.formatCountLocalized(album.trackCount);
+                    return Text(
+                      '$countStr ${context.t('album.tracksCount')}',
+                      textAlign: TextAlign.end,
+                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                    );
+                  },
                 ),
               ),
             ],

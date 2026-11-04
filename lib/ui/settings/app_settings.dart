@@ -26,6 +26,33 @@ class AppSettings {
   /// Track tab sort key (e.g. 'title', 'artist', 'recentlyAdded').
   final String trackSort;
 
+  /// Whether floating decorative glass shapes appear in full-screen view.
+  final bool fullScreenGlassShapes;
+
+  /// Whether Arabic-Indic digits (٠-٩) replace Western digits when language is 'ar'.
+  final bool arabicNumerals;
+
+  /// Interface text scaling tier ('small', 'normal', 'large').
+  final String textScale;
+
+  /// Chosen UI font family ('system' or a bundled family name).
+  final String uiFont;
+
+  /// Display mode for artist names ('asTagged', 'followLanguage', 'alwaysArabic').
+  final String artistNameMode;
+
+  /// Selected audio output device ID ('auto' for default).
+  final String outputDeviceId;
+
+  /// Whether exclusive audio output mode is enabled.
+  final bool exclusiveMode;
+
+  /// ReplayGain normalization mode ('off', 'track', 'album').
+  final String replayGainMode;
+
+  /// ReplayGain pre-amplification in dB (-15.0 to +15.0).
+  final double replayGainPreampDb;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -36,7 +63,25 @@ class AppSettings {
     this.libraryViewMode = 'square',
     this.albumSort = 'recentlyAdded',
     this.trackSort = 'title',
-  });
+    this.fullScreenGlassShapes = true,
+    this.arabicNumerals = false,
+    this.textScale = 'normal',
+    this.uiFont = 'system',
+    this.artistNameMode = 'followLanguage',
+    this.outputDeviceId = 'auto',
+    this.exclusiveMode = false,
+    this.replayGainMode = 'off',
+    double replayGainPreampDb = 0.0,
+  }) : replayGainPreampDb = replayGainPreampDb < -15.0
+            ? -15.0
+            : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb);
+
+  static double _clampPreamp(num? value) {
+    if (value == null) return 0.0;
+    final d = value.toDouble();
+    if (d.isNaN) return 0.0;
+    return d.clamp(-15.0, 15.0);
+  }
 
   /// Creates a copy of this settings instance with updated fields.
   AppSettings copyWith({
@@ -48,6 +93,15 @@ class AppSettings {
     String? libraryViewMode,
     String? albumSort,
     String? trackSort,
+    bool? fullScreenGlassShapes,
+    bool? arabicNumerals,
+    String? textScale,
+    String? uiFont,
+    String? artistNameMode,
+    String? outputDeviceId,
+    bool? exclusiveMode,
+    String? replayGainMode,
+    double? replayGainPreampDb,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -58,6 +112,18 @@ class AppSettings {
       libraryViewMode: libraryViewMode ?? this.libraryViewMode,
       albumSort: albumSort ?? this.albumSort,
       trackSort: trackSort ?? this.trackSort,
+      fullScreenGlassShapes:
+          fullScreenGlassShapes ?? this.fullScreenGlassShapes,
+      arabicNumerals: arabicNumerals ?? this.arabicNumerals,
+      textScale: textScale ?? this.textScale,
+      uiFont: uiFont ?? this.uiFont,
+      artistNameMode: artistNameMode ?? this.artistNameMode,
+      outputDeviceId: outputDeviceId ?? this.outputDeviceId,
+      exclusiveMode: exclusiveMode ?? this.exclusiveMode,
+      replayGainMode: replayGainMode ?? this.replayGainMode,
+      replayGainPreampDb: replayGainPreampDb != null
+          ? _clampPreamp(replayGainPreampDb)
+          : this.replayGainPreampDb,
     );
   }
 
@@ -72,6 +138,15 @@ class AppSettings {
       'libraryViewMode': libraryViewMode,
       'albumSort': albumSort,
       'trackSort': trackSort,
+      'fullScreenGlassShapes': fullScreenGlassShapes,
+      'arabicNumerals': arabicNumerals,
+      'textScale': textScale,
+      'uiFont': uiFont,
+      'artistNameMode': artistNameMode,
+      'outputDeviceId': outputDeviceId,
+      'exclusiveMode': exclusiveMode,
+      'replayGainMode': replayGainMode,
+      'replayGainPreampDb': replayGainPreampDb,
     };
   }
 
@@ -126,6 +201,55 @@ class AppSettings {
         ? rawTrackSort
         : 'title';
 
+    final rawGlassShapes = json['fullScreenGlassShapes'];
+    final fullScreenGlassShapes =
+        rawGlassShapes is bool ? rawGlassShapes : true;
+
+    final rawArabicNumerals = json['arabicNumerals'];
+    final arabicNumerals =
+        rawArabicNumerals is bool ? rawArabicNumerals : false;
+
+    final rawTextScale = json['textScale'];
+    final textScale = (rawTextScale is String &&
+            (rawTextScale == 'small' ||
+                rawTextScale == 'normal' ||
+                rawTextScale == 'large'))
+        ? rawTextScale
+        : 'normal';
+
+    final rawUiFont = json['uiFont'];
+    final uiFont =
+        rawUiFont is String && rawUiFont.isNotEmpty ? rawUiFont : 'system';
+
+    final rawArtistNameMode = json['artistNameMode'];
+    final artistNameMode = (rawArtistNameMode is String &&
+            (rawArtistNameMode == 'asTagged' ||
+                rawArtistNameMode == 'followLanguage' ||
+                rawArtistNameMode == 'alwaysArabic'))
+        ? rawArtistNameMode
+        : 'followLanguage';
+
+    final rawOutputDeviceId = json['outputDeviceId'];
+    final outputDeviceId =
+        rawOutputDeviceId is String && rawOutputDeviceId.isNotEmpty
+            ? rawOutputDeviceId
+            : 'auto';
+
+    final rawExclusive = json['exclusiveMode'];
+    final exclusiveMode = rawExclusive is bool ? rawExclusive : false;
+
+    final rawReplayGain = json['replayGainMode'];
+    final replayGainMode = (rawReplayGain is String &&
+            (rawReplayGain == 'off' ||
+                rawReplayGain == 'track' ||
+                rawReplayGain == 'album'))
+        ? rawReplayGain
+        : 'off';
+
+    final rawPreamp = json['replayGainPreampDb'];
+    final replayGainPreampDb =
+        rawPreamp is num ? _clampPreamp(rawPreamp) : 0.0;
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -135,6 +259,15 @@ class AppSettings {
       libraryViewMode: libraryViewMode,
       albumSort: albumSort,
       trackSort: trackSort,
+      fullScreenGlassShapes: fullScreenGlassShapes,
+      arabicNumerals: arabicNumerals,
+      textScale: textScale,
+      uiFont: uiFont,
+      artistNameMode: artistNameMode,
+      outputDeviceId: outputDeviceId,
+      exclusiveMode: exclusiveMode,
+      replayGainMode: replayGainMode,
+      replayGainPreampDb: replayGainPreampDb,
     );
   }
 
@@ -150,10 +283,19 @@ class AppSettings {
           sidebarCompact == other.sidebarCompact &&
           libraryViewMode == other.libraryViewMode &&
           albumSort == other.albumSort &&
-          trackSort == other.trackSort;
+          trackSort == other.trackSort &&
+          fullScreenGlassShapes == other.fullScreenGlassShapes &&
+          arabicNumerals == other.arabicNumerals &&
+          textScale == other.textScale &&
+          uiFont == other.uiFont &&
+          artistNameMode == other.artistNameMode &&
+          outputDeviceId == other.outputDeviceId &&
+          exclusiveMode == other.exclusiveMode &&
+          replayGainMode == other.replayGainMode &&
+          replayGainPreampDb == other.replayGainPreampDb;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
         language,
         userName,
         glassQuality,
@@ -162,5 +304,14 @@ class AppSettings {
         libraryViewMode,
         albumSort,
         trackSort,
-      );
+        fullScreenGlassShapes,
+        arabicNumerals,
+        textScale,
+        uiFont,
+        artistNameMode,
+        outputDeviceId,
+        exclusiveMode,
+        replayGainMode,
+        replayGainPreampDb,
+      ]);
 }

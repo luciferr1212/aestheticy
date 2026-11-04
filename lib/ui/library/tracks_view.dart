@@ -8,7 +8,9 @@ import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/track_audio_source_mapper.dart';
+import '../artist_names/artist_name_scope.dart';
 import '../l10n/app_strings.dart';
+import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -133,13 +135,6 @@ class _TracksViewState extends State<TracksView> {
     await widget.controller.playQueue(sources, startIndex: index);
   }
 
-  String _formatDuration(int ms) {
-    final d = Duration(milliseconds: ms);
-    final m = d.inMinutes;
-    final s = d.inSeconds % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -214,7 +209,8 @@ class _TracksViewState extends State<TracksView> {
                                 isCurrent: isCurrent,
                                 reduceMotion: reduceMotion,
                                 formattedDuration:
-                                    _formatDuration(track.durationMs),
+                                    context.formatDurationLocalized(
+                                        Duration(milliseconds: track.durationMs)),
                                 onPlay: () => _playTrackAt(index),
                               );
                             },
@@ -307,9 +303,12 @@ class _TrackRowTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = track.title ?? 'Unknown Title';
-    final artist = track.artist ?? 'Unknown Artist';
-    final album = track.album ?? 'Unknown Album';
+    final title = track.title ?? context.t('library.unknownTitle');
+    final rawArtist = track.artist;
+    final artist = rawArtist != null && rawArtist.isNotEmpty
+        ? context.displayArtist(rawArtist)
+        : context.t('library.unknownArtist');
+    final album = track.album ?? context.t('library.unknownAlbum');
 
     return RepaintBoundary(
       child: Container(
@@ -336,7 +335,7 @@ class _TrackRowTile extends StatelessWidget {
                             reduceMotion: reduceMotion,
                           )
                         : Text(
-                            '${index + 1}',
+                            context.formatCountLocalized(index + 1),
                             style: AppTypography.caption.copyWith(
                               color: AppColors.textMuted,
                             ),

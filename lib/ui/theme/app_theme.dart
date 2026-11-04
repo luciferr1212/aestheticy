@@ -5,7 +5,13 @@ import 'app_spacing.dart';
 import 'app_typography.dart';
 
 /// Builds the default dark Material 3 theme for Aestheticy using design tokens.
-ThemeData buildAppTheme() {
+ThemeData buildAppTheme({String uiFont = 'system'}) {
+  final isSystem = uiFont == 'system' || uiFont.isEmpty;
+  final effectiveFamily = isSystem ? 'Segoe UI Variable' : uiFont;
+  final effectiveFallback = isSystem
+      ? AppTypography.fontFamilyFallback
+      : ['Segoe UI Variable', ...AppTypography.fontFamilyFallback];
+
   const colorScheme = ColorScheme.dark(
     brightness: Brightness.dark,
     surface: AppColors.surface,
@@ -30,15 +36,33 @@ ThemeData buildAppTheme() {
     splashFactory: NoSplash.splashFactory,
     highlightColor: const Color(0x0AFFFFFF),
     focusColor: const Color(0x33D3C9EA),
-    fontFamily: 'Segoe UI Variable',
-    fontFamilyFallback: AppTypography.fontFamilyFallback,
-    textTheme: const TextTheme(
-      displayLarge: AppTypography.display,
-      titleLarge: AppTypography.title,
-      bodyLarge: AppTypography.bodyStrong,
-      bodyMedium: AppTypography.body,
-      bodySmall: AppTypography.caption,
-      labelSmall: AppTypography.micro,
+    fontFamily: effectiveFamily,
+    fontFamilyFallback: effectiveFallback,
+    textTheme: TextTheme(
+      displayLarge: AppTypography.display.copyWith(
+        fontFamily: effectiveFamily,
+        fontFamilyFallback: effectiveFallback,
+      ),
+      titleLarge: AppTypography.title.copyWith(
+        fontFamily: effectiveFamily,
+        fontFamilyFallback: effectiveFallback,
+      ),
+      bodyLarge: AppTypography.bodyStrong.copyWith(
+        fontFamily: effectiveFamily,
+        fontFamilyFallback: effectiveFallback,
+      ),
+      bodyMedium: AppTypography.body.copyWith(
+        fontFamily: effectiveFamily,
+        fontFamilyFallback: effectiveFallback,
+      ),
+      bodySmall: AppTypography.caption.copyWith(
+        fontFamily: effectiveFamily,
+        fontFamilyFallback: effectiveFallback,
+      ),
+      labelSmall: AppTypography.micro.copyWith(
+        fontFamily: effectiveFamily,
+        fontFamilyFallback: effectiveFallback,
+      ),
     ),
     scrollbarTheme: ScrollbarThemeData(
       thickness: const WidgetStatePropertyAll<double>(6.0),

@@ -9,9 +9,13 @@ import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
+import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/gallery/design_gallery_screen.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/l10n/locale_controller.dart';
+import 'package:aestheticy/ui/settings/audio_settings_applier.dart';
+import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
@@ -55,6 +59,15 @@ void main() async {
   settingsStore.bindGlassController(glassController);
   final localeController = LocaleController(settingsStore: settingsStore);
 
+  final audioSettingsApplier = AudioSettingsApplier(
+    engine: engine,
+    settingsStore: settingsStore,
+  );
+  await audioSettingsApplier.applyAll();
+
+  final artistNameStore = ArtistNameStore();
+  await artistNameStore.init();
+
   runApp(AestheticyApp(
     engine: engine,
     controller: controller,
@@ -63,6 +76,8 @@ void main() async {
     settingsStore: settingsStore,
     glassController: glassController,
     localeController: localeController,
+    audioSettingsApplier: audioSettingsApplier,
+    artistNameStore: artistNameStore,
   ));
 }
 
@@ -304,6 +319,12 @@ class AestheticyApp extends StatefulWidget {
   /// Optional locale controller.
   final LocaleController? localeController;
 
+  /// Optional audio settings applier.
+  final AudioSettingsApplier? audioSettingsApplier;
+
+  /// Optional artist display names store.
+  final ArtistNameStore? artistNameStore;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -315,6 +336,8 @@ class AestheticyApp extends StatefulWidget {
     this.settingsStore,
     this.glassController,
     this.localeController,
+    this.audioSettingsApplier,
+    this.artistNameStore,
   });
 
   @override
@@ -325,6 +348,8 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final SettingsStore _settingsStore;
   late final GlassController _glassController;
   late final LocaleController _localeController;
+  late final ArtistNameStore _artistNameStore;
+  late final AudioSettingsApplier _audioSettingsApplier;
   late final AppNavigator _navigator;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
@@ -336,6 +361,12 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _settingsStore.bindGlassController(_glassController);
     _localeController = widget.localeController ??
         LocaleController(settingsStore: _settingsStore);
+    _artistNameStore = widget.artistNameStore ?? ArtistNameStore();
+    _audioSettingsApplier = widget.audioSettingsApplier ??
+        AudioSettingsApplier(
+          engine: widget.engine ?? FakeAudioEngine(),
+          settingsStore: _settingsStore,
+        );
     _navigator = AppNavigator();
   }
 
@@ -372,8 +403,15 @@ class _AestheticyAppState extends State<AestheticyApp> {
         _settingsStore,
         _localeController,
         _glassController,
+        _artistNameStore,
       ]),
       builder: (context, _) {
+        final scaleFactor = switch (_settingsStore.settings.textScale) {
+          'small' => 0.92,
+          'large' => 1.10,
+          _ => 1.0,
+        };
+
         return GlassScope(
           controller: _glassController,
           child: CallbackShortcuts(
@@ -391,10 +429,21 @@ class _AestheticyAppState extends State<AestheticyApp> {
                 title: 'Aestheticy',
                 debugShowCheckedModeBanner: false,
                 locale: _localeController.locale,
-                theme: buildAppTheme(),
-                builder: (context, child) => Directionality(
-                  textDirection: _localeController.textDirection,
-                  child: child!,
+                theme: buildAppTheme(uiFont: _settingsStore.settings.uiFont),
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(scaleFactor),
+                  ),
+                  child: Directionality(
+                    textDirection: _localeController.textDirection,
+                    child: SettingsScope(
+                      store: _settingsStore,
+                      child: ArtistNameScope(
+                        store: _artistNameStore,
+                        child: child!,
+                      ),
+                    ),
+                  ),
                 ),
                 home: AppShell(
                   engine: effectiveEngine,
@@ -404,6 +453,8 @@ class _AestheticyAppState extends State<AestheticyApp> {
                   settingsStore: _settingsStore,
                   navigator: _navigator,
                   directoryPicker: widget.directoryPicker,
+                  audioSettingsApplier: _audioSettingsApplier,
+                  artistNameStore: _artistNameStore,
                 ),
               ),
             ),

@@ -6,6 +6,7 @@ import '../../features/library/artist_rules_sheet.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/track_audio_source_mapper.dart';
+import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../l10n/app_strings.dart';
 import '../settings/settings_store.dart';
@@ -167,10 +168,15 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.artist.name,
-                      textDirection: textDirectionFor(widget.artist.name),
-                      style: AppTypography.display.copyWith(letterSpacing: -0.5),
+                    Builder(
+                      builder: (context) {
+                        final displayName = context.displayArtist(widget.artist.name);
+                        return Text(
+                          displayName,
+                          textDirection: textDirectionFor(displayName),
+                          style: AppTypography.display.copyWith(letterSpacing: -0.5),
+                        );
+                      },
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -272,7 +278,8 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Text(
-                                          track.title ?? 'Unknown Title',
+                                          track.title ??
+                                              context.t('library.unknownTitle'),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           textDirection: textDirectionFor(
@@ -289,7 +296,8 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                                       ),
                                       Expanded(
                                         child: Text(
-                                          track.album ?? 'Unknown Album',
+                                          track.album ??
+                                              context.t('library.unknownAlbum'),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           textDirection: textDirectionFor(
@@ -309,6 +317,49 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                                           ),
                                         ),
                                       ),
+                                      if (track.id != null &&
+                                          track.artist != null &&
+                                          track.artist!.trim().isNotEmpty)
+                                        PopupMenuButton<String>(
+                                          key: Key('track_menu_${track.id}'),
+                                          icon: const Icon(
+                                            Icons.more_horiz,
+                                            size: 16,
+                                            color: AppColors.textMuted,
+                                          ),
+                                          tooltip: context.t('artists.optionsTooltip'),
+                                          color: const Color(0xFF1D1C25),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(AppSpacing.r12),
+                                            side: const BorderSide(color: AppColors.border),
+                                          ),
+                                          onSelected: (val) async {
+                                            if (val == 'no_split' && track.artist != null) {
+                                              final messenger = ScaffoldMessenger.of(context);
+                                              final treatedMsg = context.t(
+                                                'artist.treatingAsOne',
+                                                args: {'artist': track.artist!},
+                                              );
+                                              await widget.repository.addNoSplit(track.artist!);
+                                              if (mounted) {
+                                                messenger.showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(treatedMsg),
+                                                  ),
+                                                );
+                                                await _loadTracks();
+                                              }
+                                            }
+                                          },
+                                          itemBuilder: (ctx) => [
+                                            PopupMenuItem(
+                                              value: 'no_split',
+                                              child: Text(
+                                                ctx.t('artist.treatAsOne', args: {'artist': track.artist!}),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                     ],
                                   ),
                                 ),

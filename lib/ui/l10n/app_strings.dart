@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../settings/settings_scope.dart';
+
 /// Bidirectional text direction resolver.
 ///
 /// Determines [TextDirection] by scanning for the first strong directional character.
@@ -97,10 +99,11 @@ abstract final class AppStrings {
     'common.queue': 'Queue',
     'common.lyrics': 'Lyrics',
     'common.equalizer': 'Equalizer',
-    'common.fullScreen': 'Full Screen',
+    'common.fullScreen': 'Full screen',
     'common.back': 'Back',
     'common.close': 'Close',
     'common.searchShortcut': 'Ctrl K',
+    'sidebar.toggleTooltip': 'Toggle sidebar',
     'greeting.morning': 'Good morning',
     'greeting.afternoon': 'Good afternoon',
     'greeting.evening': 'Good evening',
@@ -125,10 +128,38 @@ abstract final class AppStrings {
     'view.wide': 'Wide',
     'view.list': 'List',
     'artist.mergedBadge': 'Merged',
-    'artist.mergeInto': 'Merge into...',
+    'artist.mergeInto': 'Merge into…',
     'artist.rules': 'Artist rules...',
     'artist.choosePicture': 'Choose picture...',
     'artist.refreshPicture': 'Refresh picture',
+    'artists.mergeNoOther': 'No other artists available to merge into.',
+    'artists.mergeIntoTitle': 'Merge "{name}" into…',
+    'artists.confirmMergeTitle': 'Confirm merge',
+    'artists.mergeAction': 'Merge',
+    'artists.mergeFailed': 'Merge failed: {error}',
+    'artists.searchTargetHint': 'Search target artist...',
+    'artists.noMatchingArtists': 'No matching artists',
+    'artists.confirmMergePrompt':
+        'Merge "{source}" into "{target}"?\n\nTracks performed by "{source}" will appear under "{target}". Files will not be modified.',
+    'artists.mergeSuccess': 'Merged {source} into {target}',
+    'artists.optionsTooltip': 'Artist options',
+    'artist.treatAsOne': 'Treat "{artist}" as one artist',
+    'artist.treatingAsOne': 'Treating "{artist}" as one artist',
+    'nowPlaying.title': 'Now Playing',
+    'nowPlaying.upNext': 'Up next',
+    'nowPlaying.lyrics': 'Lyrics',
+    'nowPlaying.clearUpcoming': 'Clear upcoming',
+    'nowPlaying.nothingQueued': 'Nothing is queued next',
+    'nowPlaying.queue': 'Queue',
+    'nowPlaying.standardAudio': 'Standard audio',
+    'nowPlaying.lossless': 'Lossless',
+    'player.shuffle': 'Shuffle',
+    'player.repeatOff': 'Repeat: Off',
+    'player.repeatAll': 'Repeat: All',
+    'player.repeatOne': 'Repeat: One',
+    'fullScreen.lyricsPlaceholder': 'Lyrics will appear here',
+    'fullScreen.glassShapesTooltip': 'Show or hide glass shapes',
+    'fullScreen.exitTooltip': 'Exit full screen',
     'player.openNowPlaying': 'Open Now Playing',
     'player.noTrack': 'No track playing',
     'tracks.headerNumber': '#',
@@ -142,6 +173,73 @@ abstract final class AppStrings {
     'album.playAlbum': 'Play',
     'album.shuffleAlbum': 'Shuffle',
     'album.tracksCount': 'tracks',
+    'library.unknownArtist': 'Unknown Artist',
+    'library.unknownTitle': 'Unknown Title',
+    'library.unknownAlbum': 'Unknown Album',
+    'settings.title': 'Settings',
+    'settings.sectionLanguageProfile': 'Language and profile',
+    'settings.interfaceLanguage': 'Interface language',
+    'settings.arabicNumerals': 'Arabic numerals',
+    'settings.arabicNumeralsHint':
+        'Use Arabic-Indic digits (٠-٩) in Arabic interface',
+    'settings.yourName': 'Your name',
+    'settings.yourNameHint': 'Used for greetings (maximum 40 characters)',
+    'settings.sectionAppearance': 'Appearance',
+    'settings.glassQuality': 'Glass quality',
+    'settings.glassQualityFull': 'Full',
+    'settings.glassQualityLight': 'Light',
+    'settings.glassQualityOff': 'Off',
+    'settings.glassQualityFullHint': 'Full blur and saturation boost',
+    'settings.glassQualityLightHint':
+        'Simulated glass gradient, zero GPU blur',
+    'settings.glassQualityOffHint':
+        'Flat opaque surfaces for maximum compatibility',
+    'settings.reduceMotion': 'Reduce motion',
+    'settings.reduceMotionHint':
+        'Disables animations and background motion',
+    'settings.fullScreenGlassShapes': 'Glass shapes in full screen',
+    'settings.fullScreenGlassShapesHint':
+        'Floating decorative glass shapes',
+    'settings.textSize': 'Text size',
+    'settings.textSizeSmall': 'Small',
+    'settings.textSizeNormal': 'Normal',
+    'settings.textSizeLarge': 'Large',
+    'settings.sectionFonts': 'Fonts',
+    'settings.fontSystem': 'System default',
+    'settings.sectionArtistNames': 'Artist names',
+    'settings.artistModeAsTagged': 'As tagged',
+    'settings.artistModeFollowLanguage': 'Follow interface language',
+    'settings.artistModeAlwaysArabic': 'Always Arabic',
+    'settings.artistNamesHint':
+        'Display-only artist name localization',
+    'settings.artistAddTranslation': 'Add translation',
+    'settings.artistOriginalName': 'Original name',
+    'settings.artistArabicName': 'Arabic name',
+    'settings.artistEnglishName': 'English name',
+    'settings.artistSave': 'Save',
+    'settings.sectionAudio': 'Audio',
+    'settings.outputDevice': 'Output device',
+    'settings.refreshDevices': 'Refresh devices',
+    'settings.exclusiveMode': 'Exclusive mode',
+    'settings.exclusiveUnsupported':
+        'Exclusive mode is not supported by your audio backend',
+    'settings.replayGainMode': 'ReplayGain mode',
+    'settings.replayGainOff': 'Off',
+    'settings.replayGainTrack': 'Track',
+    'settings.replayGainAlbum': 'Album',
+    'settings.replayGainPreamp': 'ReplayGain preamp',
+    'settings.crossfade': 'Crossfade',
+    'settings.sectionLibrary': 'Library',
+    'settings.musicFolders': 'Music folders',
+    'settings.manage': 'Manage',
+    'settings.libraryStats': '{folders} folders, {tracks} tracks',
+    'settings.sectionShortcuts': 'Shortcuts',
+    'shortcuts.playPause': 'Play / Pause',
+    'shortcuts.back': 'Back / Dismiss',
+    'shortcuts.seekBackward': 'Seek backward 5 seconds',
+    'shortcuts.seekForward': 'Seek forward 5 seconds',
+    'shortcuts.gallery': 'Design Gallery',
+    'settings.sectionAbout': 'About',
   };
 
   /// Modern Standard Arabic (العربية الفصحى) dictionary.
@@ -173,12 +271,13 @@ abstract final class AppStrings {
     'common.repeat': 'تكرار',
     'common.volume': 'مستوى الصوت',
     'common.queue': 'قائمة الانتظار',
-    'common.lyrics': 'كلمات الأغاني',
+    'common.lyrics': 'الكلمات',
     'common.equalizer': 'معادل الصوت',
     'common.fullScreen': 'ملء الشاشة',
     'common.back': 'رجوع',
     'common.close': 'إغلاق',
     'common.searchShortcut': 'Ctrl K',
+    'sidebar.toggleTooltip': 'إظهار أو إخفاء الشريط الجانبي',
     'greeting.morning': 'صباح الخير',
     'greeting.afternoon': 'مساء الخير',
     'greeting.evening': 'مساء الخير',
@@ -203,10 +302,38 @@ abstract final class AppStrings {
     'view.wide': 'عريض',
     'view.list': 'قائمة',
     'artist.mergedBadge': 'مدمج',
-    'artist.mergeInto': 'دمج مع...',
+    'artist.mergeInto': 'دمج في…',
     'artist.rules': 'قواعد الفنانين...',
     'artist.choosePicture': 'اختيار صورة...',
     'artist.refreshPicture': 'تحديث الصورة',
+    'artists.mergeNoOther': 'لا يوجد فنانون آخرون للدمج معهم',
+    'artists.mergeIntoTitle': 'دمج "{name}" في…',
+    'artists.confirmMergeTitle': 'تأكيد الدمج',
+    'artists.mergeAction': 'دمج',
+    'artists.mergeFailed': 'فشل الدمج: {error}',
+    'artists.searchTargetHint': 'البحث عن الفنان الهدف...',
+    'artists.noMatchingArtists': 'لا يوجد فنانون مطابقون',
+    'artists.confirmMergePrompt':
+        'هل تريد دمج "{source}" في "{target}"؟\n\nستظهر الأغاني التي يؤديها "{source}" تحت اسم "{target}". لن يتم تعديل أي ملفات.',
+    'artists.mergeSuccess': 'تم دمج {source} في {target}',
+    'artists.optionsTooltip': 'خيارات الفنان',
+    'artist.treatAsOne': 'معاملة "{artist}" كفنان واحد',
+    'artist.treatingAsOne': 'تتم معاملة "{artist}" كفنان واحد',
+    'nowPlaying.title': 'قيد التشغيل',
+    'nowPlaying.upNext': 'التالي',
+    'nowPlaying.lyrics': 'الكلمات',
+    'nowPlaying.clearUpcoming': 'مسح القادم',
+    'nowPlaying.nothingQueued': 'لا شيء في قائمة الانتظار',
+    'nowPlaying.queue': 'قائمة الانتظار',
+    'nowPlaying.standardAudio': 'صوت قياسي',
+    'nowPlaying.lossless': 'Lossless',
+    'player.shuffle': 'عشوائي',
+    'player.repeatOff': 'التكرار: معطل',
+    'player.repeatAll': 'التكرار: الكل',
+    'player.repeatOne': 'التكرار: أغنية واحدة',
+    'fullScreen.lyricsPlaceholder': 'ستظهر الكلمات هنا',
+    'fullScreen.glassShapesTooltip': 'إظهار أو إخفاء الأشكال الزجاجية',
+    'fullScreen.exitTooltip': 'الخروج من ملء الشاشة',
     'player.openNowPlaying': 'فتح المشغل',
     'player.noTrack': 'لا يوجد مقطع قيد التشغيل',
     'tracks.headerNumber': '#',
@@ -220,43 +347,118 @@ abstract final class AppStrings {
     'album.playAlbum': 'تشغيل',
     'album.shuffleAlbum': 'عشوائي',
     'album.tracksCount': 'أغنية',
+    'library.unknownArtist': 'فنان غير معروف',
+    'library.unknownTitle': 'عنوان غير معروف',
+    'library.unknownAlbum': 'ألبوم غير معروف',
+    'settings.title': 'الإعدادات',
+    'settings.sectionLanguageProfile': 'اللغة والملف الشخصي',
+    'settings.interfaceLanguage': 'لغة الواجهة',
+    'settings.arabicNumerals': 'الأرقام العربية',
+    'settings.arabicNumeralsHint':
+        'استخدام الأرقام العربية المشرقية (٠-٩) في الواجهة العربية',
+    'settings.yourName': 'اسمك',
+    'settings.yourNameHint':
+        'تُستخدم للترحيب بك (بحد أقصى 40 حرفاً)',
+    'settings.sectionAppearance': 'المظهر',
+    'settings.glassQuality': 'جودة الزجاج',
+    'settings.glassQualityFull': 'كامل',
+    'settings.glassQualityLight': 'خفيف',
+    'settings.glassQualityOff': 'معطل',
+    'settings.glassQualityFullHint': 'ضبابية كاملة مع تعزيز التشبع',
+    'settings.glassQualityLightHint':
+        'تدرج زجاجي محاكى بدون استهلاك للمعالج الرسومي',
+    'settings.glassQualityOffHint':
+        'أسطح معتمة مسطحة لأقصى توافق',
+    'settings.reduceMotion': 'تقليل الحركة',
+    'settings.reduceMotionHint':
+        'تعطيل الحركات والتأثيرات المتحركة في الخلفية',
+    'settings.fullScreenGlassShapes': 'الأشكال الزجاجية في ملء الشاشة',
+    'settings.fullScreenGlassShapesHint':
+        'أشكال زجاجية زخرفية طافية',
+    'settings.textSize': 'حجم النص',
+    'settings.textSizeSmall': 'صغير',
+    'settings.textSizeNormal': 'عادي',
+    'settings.textSizeLarge': 'كبير',
+    'settings.sectionFonts': 'الخطوط',
+    'settings.fontSystem': 'افتراضي النظام',
+    'settings.sectionArtistNames': 'أسماء الفنانين',
+    'settings.artistModeAsTagged': 'كما في الملفات',
+    'settings.artistModeFollowLanguage': 'اتباع لغة الواجهة',
+    'settings.artistModeAlwaysArabic': 'العربية دائماً',
+    'settings.artistNamesHint':
+        'توطين عرض أسماء الفنانين دون تعديل الملفات',
+    'settings.artistAddTranslation': 'إضافة ترجمة',
+    'settings.artistOriginalName': 'الاسم الأصلي',
+    'settings.artistArabicName': 'الاسم بالعربية',
+    'settings.artistEnglishName': 'الاسم بالإنجليزية',
+    'settings.artistSave': 'حفظ',
+    'settings.sectionAudio': 'الصوت',
+    'settings.outputDevice': 'جهاز الإخراج',
+    'settings.refreshDevices': 'تحديث الأجهزة',
+    'settings.exclusiveMode': 'الوضع الحصري',
+    'settings.exclusiveUnsupported':
+        'الوضع الحصري غير مدعوم في مشغل الصوت الحالي',
+    'settings.replayGainMode': 'وضع موازنة الصوت (ReplayGain)',
+    'settings.replayGainOff': 'معطل',
+    'settings.replayGainTrack': 'مقطع',
+    'settings.replayGainAlbum': 'ألبوم',
+    'settings.replayGainPreamp': 'التضخيم المسبق (Pre-amp)',
+    'settings.crossfade': 'التلاشي المتبادل',
+    'settings.sectionLibrary': 'المكتبة',
+    'settings.musicFolders': 'مجلدات الموسيقى',
+    'settings.manage': 'إدارة',
+    'settings.libraryStats': '{folders} مجلدات، {tracks} أغنية',
+    'settings.sectionShortcuts': 'الاختصارات',
+    'shortcuts.playPause': 'تشغيل / إيقاف مؤقت',
+    'shortcuts.back': 'رجوع / إغلاق',
+    'shortcuts.seekBackward': 'تقديم للخلف 5 ثوانٍ',
+    'shortcuts.seekForward': 'تقديم للأمام 5 ثوانٍ',
+    'shortcuts.gallery': 'معرض التصميم',
+    'settings.sectionAbout': 'حول',
   };
 
   /// Resolves [key] for [language].
   ///
   /// Fallback hierarchy: requested language -> 'en' -> the key itself.
-  /// Never throws.
-  static String t(String key, {String language = 'en'}) {
+  /// Replaces {placeholder} with corresponding value from [args].
+  /// Missing arguments leave the placeholder text unchanged. Never throws.
+  static String t(
+    String key, {
+    String language = 'en',
+    Map<String, String>? args,
+  }) {
     final Map<String, String> targetMap = switch (language) {
       'ar' => ar,
       _ => en,
     };
 
     final value = targetMap[key];
+    String result;
     if (value != null && value.isNotEmpty) {
-      return value;
+      result = value;
+    } else if (language != 'en' && en[key] != null && en[key]!.isNotEmpty) {
+      result = en[key]!;
+    } else {
+      result = key;
     }
 
-    // Fallback to English if not found in requested language
-    if (language != 'en') {
-      final fallback = en[key];
-      if (fallback != null && fallback.isNotEmpty) {
-        return fallback;
+    if (args != null && args.isNotEmpty) {
+      for (final entry in args.entries) {
+        result = result.replaceAll('{${entry.key}}', entry.value);
       }
     }
 
-    // Fallback to key itself
-    return key;
+    return result;
   }
 }
 
 /// Convenience localization extension on [BuildContext].
 extension AppStringsContextExtension on BuildContext {
-  /// Translates [key] using the ambient locale from [Localizations] or [Directionality].
-  String t(String key) {
-    final locale = Localizations.maybeLocaleOf(this);
-    final language = locale?.languageCode ??
-        (Directionality.maybeOf(this) == TextDirection.rtl ? 'ar' : 'en');
-    return AppStrings.t(key, language: language);
+  /// Translates [key] using [SettingsScope], the ambient locale, or [Directionality].
+  String t(String key, {Map<String, String>? args}) {
+    final language = SettingsScope.maybeOf(this)?.settings.language ??
+        (Localizations.maybeLocaleOf(this)?.languageCode ??
+            (Directionality.maybeOf(this) == TextDirection.rtl ? 'ar' : 'en'));
+    return AppStrings.t(key, language: language, args: args);
   }
 }

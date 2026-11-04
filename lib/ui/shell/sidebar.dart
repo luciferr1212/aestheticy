@@ -172,10 +172,11 @@ class Sidebar extends StatelessWidget {
                 _SidebarTile(
                   key: const Key('sidebar_settings'),
                   icon: Icons.settings_outlined,
+                  selectedIcon: Icons.settings,
                   title: context.t('nav.settings'),
                   isCompact: isCompact,
-                  isSoon: true,
-                  onTap: null,
+                  isSelected: navigator.current == AppDestination.settings,
+                  onTap: () => navigator.navigateTo(AppDestination.settings),
                 ),
               ],
             ),
@@ -240,7 +241,7 @@ class _SidebarHeader extends StatelessWidget {
           ),
           IconButton(
             key: const Key('sidebar_toggle_compact'),
-            tooltip: 'Toggle sidebar',
+            tooltip: context.t('sidebar.toggleTooltip'),
             icon: const Icon(
               Icons.menu_open_outlined,
               color: AppColors.textSecondary,

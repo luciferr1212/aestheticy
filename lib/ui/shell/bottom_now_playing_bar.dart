@@ -6,9 +6,12 @@ import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
 import '../../library/cover_cache.dart';
+import 'app_navigator.dart';
+import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
+import '../l10n/number_format.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
@@ -19,6 +22,9 @@ class BottomNowPlayingBar extends StatelessWidget {
   /// The audio playback controller coordinating queue and engine.
   final PlaybackController controller;
 
+  /// Optional navigation coordinator.
+  final AppNavigator? navigator;
+
   /// Optional callback invoked when the track info area is built (for test counters).
   final VoidCallback? onTrackInfoBuild;
 
@@ -26,6 +32,7 @@ class BottomNowPlayingBar extends StatelessWidget {
   const BottomNowPlayingBar({
     super.key,
     required this.controller,
+    this.navigator,
     this.onTrackInfoBuild,
   });
 
@@ -42,6 +49,7 @@ class BottomNowPlayingBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 120, maxWidth: 170),
             child: _TrackInfoArea(
               controller: controller,
+              navigator: navigator,
               onTrackInfoBuild: onTrackInfoBuild,
             ),
           ),
@@ -57,7 +65,10 @@ class BottomNowPlayingBar extends StatelessWidget {
           const SizedBox(width: 8),
 
           // End side: Auxiliary icon buttons (volume, lyrics, queue, etc.)
-          _EndControlsArea(controller: controller),
+          _EndControlsArea(
+            controller: controller,
+            navigator: navigator,
+          ),
         ],
       ),
     );
@@ -69,10 +80,12 @@ class BottomNowPlayingBar extends StatelessWidget {
 /// Isolated so seek position ticks do NOT trigger rebuilds here.
 class _TrackInfoArea extends StatelessWidget {
   final PlaybackController controller;
+  final AppNavigator? navigator;
   final VoidCallback? onTrackInfoBuild;
 
   const _TrackInfoArea({
     required this.controller,
+    this.navigator,
     this.onTrackInfoBuild,
   });
 
@@ -88,10 +101,13 @@ class _TrackInfoArea extends StatelessWidget {
         final hasTrack = current != null;
 
         final title = hasTrack
-            ? (current.extras?['title'] ?? 'Unknown Title')
+            ? (current.extras?['title'] ?? context.t('library.unknownTitle'))
             : context.t('player.noTrack');
+        final rawArtist = current?.extras?['artist'];
         final artist = hasTrack
-            ? (current.extras?['artist'] ?? 'Unknown Artist')
+            ? (rawArtist != null && rawArtist.isNotEmpty
+                ? context.displayArtist(rawArtist)
+                : context.t('library.unknownArtist'))
             : '—';
         final coverKey = current?.extras?['coverKey'];
 
@@ -101,12 +117,16 @@ class _TrackInfoArea extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(AppSpacing.r12),
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(context.t('common.soon')),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
+              if (navigator != null) {
+                navigator!.openNowPlaying();
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(context.t('common.soon')),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -286,12 +306,6 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
     required this.hasTrack,
   });
 
-  String _formatTime(Duration d) {
-    final m = d.inMinutes;
-    final s = d.inSeconds % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
-  }
-
   @override
   Widget build(BuildContext context) {
     if (!hasTrack) {
@@ -299,7 +313,7 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
         height: 18,
         child: Row(
           children: [
-            Text('0:00', style: AppTypography.micro.copyWith(color: AppColors.textMuted)),
+            Text(context.formatDurationLocalized(Duration.zero), style: AppTypography.micro.copyWith(color: AppColors.textMuted)),
             const Expanded(
               child: SliderTheme(
                 data: SliderThemeData(
@@ -314,7 +328,7 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
                 ),
               ),
             ),
-            Text('0:00', style: AppTypography.micro.copyWith(color: AppColors.textMuted)),
+            Text(context.formatDurationLocalized(Duration.zero), style: AppTypography.micro.copyWith(color: AppColors.textMuted)),
           ],
         ),
       );
@@ -342,7 +356,7 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
                   SizedBox(
                     width: 32,
                     child: Text(
-                      _formatTime(position),
+                      context.formatDurationLocalized(position),
                       textAlign: TextAlign.end,
                       style: AppTypography.micro.copyWith(color: AppColors.textMuted),
                     ),
@@ -369,7 +383,7 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
                   SizedBox(
                     width: 32,
                     child: Text(
-                      _formatTime(totalDuration),
+                      context.formatDurationLocalized(totalDuration),
                       textAlign: TextAlign.start,
                       style: AppTypography.micro.copyWith(color: AppColors.textMuted),
                     ),
@@ -387,8 +401,12 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
 /// End side auxiliary controls (volume, lyrics, queue, equalizer, fullscreen).
 class _EndControlsArea extends StatelessWidget {
   final PlaybackController controller;
+  final AppNavigator? navigator;
 
-  const _EndControlsArea({required this.controller});
+  const _EndControlsArea({
+    required this.controller,
+    this.navigator,
+  });
 
   void _showVolumePopup(BuildContext context) {
     showDialog<void>(
@@ -468,13 +486,15 @@ class _EndControlsArea extends StatelessWidget {
         ),
         const SizedBox(width: 4),
 
-        // Queue (disabled)
+        // Queue (opens Now Playing)
         GlassIconButton(
+          key: const Key('player_queue_button'),
           icon: Icons.queue_music,
           tooltip: context.t('common.queue'),
           semanticLabel: context.t('common.queue'),
           size: GlassButtonSize.small,
-          onPressed: null,
+          onPressed:
+              navigator != null ? () => navigator!.openNowPlaying() : null,
         ),
         const SizedBox(width: 4),
 
@@ -499,13 +519,15 @@ class _EndControlsArea extends StatelessWidget {
         ),
         const SizedBox(width: 4),
 
-        // Full Screen (disabled)
+        // Full Screen
         GlassIconButton(
+          key: const Key('player_fullscreen_button'),
           icon: Icons.fullscreen,
           tooltip: context.t('common.fullScreen'),
           semanticLabel: context.t('common.fullScreen'),
           size: GlassButtonSize.small,
-          onPressed: null,
+          onPressed:
+              navigator != null ? () => navigator!.openFullScreen() : null,
         ),
       ],
     );
