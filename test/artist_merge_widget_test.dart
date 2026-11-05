@@ -117,6 +117,34 @@ class FailingMergeRepository implements LibraryRepository {
   Future<int> trackCount() => _inner.trackCount();
 
   @override
+  Future<int> insertPlayEvent(PlayEvent e) => _inner.insertPlayEvent(e);
+
+  @override
+  Future<void> updatePlayEvent(
+    int id, {
+    required int listenedMs,
+    required bool counted,
+    required bool completed,
+  }) =>
+      _inner.updatePlayEvent(
+        id,
+        listenedMs: listenedMs,
+        counted: counted,
+        completed: completed,
+      );
+
+  @override
+  Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) =>
+      _inner.recentPlayEvents(limit: limit);
+
+  @override
+  Future<int> playEventCount({bool countedOnly = false}) =>
+      _inner.playEventCount(countedOnly: countedOnly);
+
+  @override
+  Future<void> clearPlayEvents() => _inner.clearPlayEvents();
+
+  @override
   Future<void> close() => _inner.close();
 }
 

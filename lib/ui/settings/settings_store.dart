@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../diagnostics/app_logger.dart';
 import '../glass/glass_scope.dart';
 import 'app_settings.dart';
 
@@ -92,6 +93,10 @@ class SettingsStore extends ChangeNotifier {
 
   void _handleCorruptFile(File file) {
     _settings = const AppSettings();
+    AppLogger.instance.warning(
+      'Settings',
+      'Corrupt ui_settings.json backed up to ui_settings.json.bad',
+    );
     try {
       final badPath = p.join(_directory!.path, 'ui_settings.json.bad');
       final badFile = File(badPath);

@@ -30,6 +30,8 @@ class PlaybackController {
   Duration _currentPosition = Duration.zero;
   String? _openedUri;
   String? _lastEmittedUri;
+  Duration? _armedResumePosition;
+  String? _armedResumeUri;
   int _consecutiveFatalErrors = 0;
   bool _isAdvancing = false;
   bool _disposed = false;
@@ -48,6 +50,17 @@ class PlaybackController {
       _currentPosition = pos;
       if (pos > Duration.zero) {
         _consecutiveFatalErrors = 0;
+      }
+    }));
+    _subs.add(engine.durationStream.listen((dur) {
+      if (_armedResumePosition != null &&
+          _openedUri != null &&
+          _openedUri == _armedResumeUri &&
+          dur > Duration.zero) {
+        final pos = _armedResumePosition!;
+        _armedResumePosition = null;
+        _armedResumeUri = null;
+        unawaited(engine.seek(pos));
       }
     }));
     _subs.add(engine.errorStream.listen(_onError));
@@ -79,6 +92,15 @@ class PlaybackController {
 
   /// Errors that occurred during playback.
   Stream<AudioError> get errorStream => _errorCtrl.stream;
+
+  /// Arms a lazy seek to [position] when the current track is next opened.
+  void armResume(Duration position) {
+    _armedResumePosition = position;
+    _armedResumeUri = queue.current?.uri;
+  }
+
+  /// The currently armed lazy seek position, if any.
+  Duration? get armedResumePosition => _armedResumePosition;
 
   // ── Transport ───────────────────────────────────────────────────────
 
@@ -121,6 +143,10 @@ class PlaybackController {
   Future<void> playTrack(int index) async {
     _consecutiveFatalErrors = 0;
     if (index < 0 || index >= queue.length) return;
+    if (_armedResumeUri != null && queue.items[index].uri != _armedResumeUri) {
+      _armedResumePosition = null;
+      _armedResumeUri = null;
+    }
     queue.jumpTo(index);
     final source = queue.current;
     if (source == null) return;
@@ -134,6 +160,8 @@ class PlaybackController {
   /// resets preload state, and preloads the next track for gapless transitions.
   Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) async {
     _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
     if (sources.isEmpty) {
       queue.clear();
       _openedUri = null;
@@ -181,6 +209,8 @@ class PlaybackController {
   /// Stops playback and clears the active track.
   Future<void> stop() async {
     _openedUri = null;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
     await engine.stop();
     _emitCurrent(null);
   }
@@ -188,6 +218,8 @@ class PlaybackController {
   /// Skips to the next track.
   Future<void> skipNext() async {
     _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
     final next = queue.next();
     if (next == null) {
       _openedUri = null;
@@ -204,6 +236,8 @@ class PlaybackController {
   /// Skips to the previous track, or restarts current track if played past 3 seconds.
   Future<void> skipPrevious() async {
     _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
     if (_currentPosition > const Duration(seconds: 3)) {
       _currentPosition = Duration.zero;
       await engine.seek(Duration.zero);

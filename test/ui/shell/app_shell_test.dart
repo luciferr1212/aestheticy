@@ -163,6 +163,26 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
   Future<void> removeTracksByPath(List<String> paths) async {}
 
   @override
+  Future<int> insertPlayEvent(PlayEvent e) async => 1;
+
+  @override
+  Future<void> updatePlayEvent(
+    int id, {
+    required int listenedMs,
+    required bool counted,
+    required bool completed,
+  }) async {}
+
+  @override
+  Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async => [];
+
+  @override
+  Future<int> playEventCount({bool countedOnly = false}) async => 0;
+
+  @override
+  Future<void> clearPlayEvents() async {}
+
+  @override
   Future<void> close() async {}
 }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,7 +8,13 @@ import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/mpv_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
+import 'package:aestheticy/features/history/play_recorder.dart';
+import 'package:aestheticy/features/session/session_restorer.dart';
+import 'package:aestheticy/features/session/session_saver.dart';
+import 'package:aestheticy/features/session/session_store.dart';
 import 'package:aestheticy/library/library_repository.dart';
+import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
@@ -26,70 +34,171 @@ import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
 import 'package:aestheticy/ui/theme/app_theme.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await AppLogger.instance.init();
 
-  final AudioEngine engine;
-  final PlaybackController controller;
-  try {
-    engine = MpvAudioEngine();
-    await engine.init();
-    final queue = PlaybackQueue();
-    controller = PlaybackController(engine: engine, queue: queue);
-    await controller.init();
-  } catch (error, stackTrace) {
-    runApp(AudioInitErrorApp(
-      error: error.toString(),
-      stackTrace: stackTrace.toString(),
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      AppLogger.instance.error(
+        'Flutter',
+        'FlutterError: ${details.exceptionAsString()}',
+      );
+    };
+
+    PlatformDispatcher.instance.onError = (error, stack) {
+      AppLogger.instance.error(
+        'Platform',
+        'PlatformDispatcher error: $error',
+        error,
+        stack,
+      );
+      return true;
+    };
+
+    final AudioEngine engine;
+    final PlaybackController controller;
+    try {
+      engine = MpvAudioEngine();
+      await engine.init();
+      final queue = PlaybackQueue();
+      controller = PlaybackController(engine: engine, queue: queue);
+      await controller.init();
+      AppLogger.instance.info('Audio', 'Audio engine initialized');
+    } catch (error, stackTrace) {
+      AppLogger.instance.error(
+        'Audio',
+        'Audio engine init failed: $error',
+        error,
+        stackTrace,
+      );
+      runApp(AudioInitErrorApp(
+        error: error.toString(),
+        stackTrace: stackTrace.toString(),
+      ));
+      return;
+    }
+
+    controller.errorStream.listen((err) {
+      AppLogger.instance.warning('Playback', 'Playback error: $err');
+    });
+
+    final SqliteLibraryRepository repository;
+    final ScanService scanService;
+    try {
+      repository = await SqliteLibraryRepository.openDefault();
+      scanService = ScanService(repository: repository);
+      AppLogger.instance.info(
+        'Library',
+        'Library opened successfully at schema v$kLibrarySchemaVersion',
+      );
+    } catch (error, stackTrace) {
+      AppLogger.instance.error(
+        'Library',
+        'Library init failed: $error',
+        error,
+        stackTrace,
+      );
+      runApp(LibraryInitErrorApp(
+        error: error.toString(),
+        stackTrace: stackTrace.toString(),
+      ));
+      return;
+    }
+
+    scanService.progressStream.listen((p) {
+      if (p.done) {
+        AppLogger.instance.info(
+          'Scan',
+          'Scan finished: found ${p.found}, added ${p.added}, updated ${p.updated}',
+        );
+      } else if (p.errors > 0 || p.unreadableDirs > 0) {
+        AppLogger.instance.warning(
+          'Scan',
+          'Scan errors: errors ${p.errors}, unreadable ${p.unreadableDirs}',
+        );
+      }
+    });
+
+    final settingsStore = SettingsStore();
+    await settingsStore.init();
+    final glassController = GlassController();
+    settingsStore.bindGlassController(glassController);
+    final localeController = LocaleController(settingsStore: settingsStore);
+
+    final audioSettingsApplier = AudioSettingsApplier(
+      engine: engine,
+      settingsStore: settingsStore,
+    );
+    try {
+      await audioSettingsApplier.applyAll();
+    } catch (error, stackTrace) {
+      AppLogger.instance.warning(
+        'Audio',
+        'AudioSettingsApplier failed: $error',
+        error,
+        stackTrace,
+      );
+    }
+
+    final eqStore = EqStore();
+    await eqStore.init();
+    final eqController = EqController(engine: engine, store: eqStore);
+    await eqController.applyAll();
+
+    final artistNameStore = ArtistNameStore();
+    await artistNameStore.init();
+
+    final sessionStore = SessionStore();
+    await sessionStore.init();
+
+    if (settingsStore.settings.resumeSession) {
+      final restoreResult = await restoreSession(
+        controller: controller,
+        sessionStore: sessionStore,
+        settingsStore: settingsStore,
+      );
+      AppLogger.instance.info(
+        'Session',
+        'Session restore: restored ${restoreResult.restoredCount}, dropped ${restoreResult.droppedCount}',
+      );
+    }
+
+    final sessionSaver = SessionSaver(
+      controller: controller,
+      sessionStore: sessionStore,
+      settingsStore: settingsStore,
+    );
+
+    final playRecorder = PlayRecorder(
+      controller: controller,
+      repository: repository,
+    );
+
+    runApp(AestheticyApp(
+      engine: engine,
+      controller: controller,
+      repository: repository,
+      scanService: scanService,
+      settingsStore: settingsStore,
+      glassController: glassController,
+      localeController: localeController,
+      audioSettingsApplier: audioSettingsApplier,
+      artistNameStore: artistNameStore,
+      eqController: eqController,
+      sessionStore: sessionStore,
+      sessionSaver: sessionSaver,
+      playRecorder: playRecorder,
     ));
-    return;
-  }
-
-  final SqliteLibraryRepository repository;
-  final ScanService scanService;
-  try {
-    repository = await SqliteLibraryRepository.openDefault();
-    scanService = ScanService(repository: repository);
-  } catch (error, stackTrace) {
-    runApp(LibraryInitErrorApp(
-      error: error.toString(),
-      stackTrace: stackTrace.toString(),
-    ));
-    return;
-  }
-
-  final settingsStore = SettingsStore();
-  await settingsStore.init();
-  final glassController = GlassController();
-  settingsStore.bindGlassController(glassController);
-  final localeController = LocaleController(settingsStore: settingsStore);
-
-  final audioSettingsApplier = AudioSettingsApplier(
-    engine: engine,
-    settingsStore: settingsStore,
-  );
-  await audioSettingsApplier.applyAll();
-
-  final eqStore = EqStore();
-  await eqStore.init();
-  final eqController = EqController(engine: engine, store: eqStore);
-  await eqController.applyAll();
-
-  final artistNameStore = ArtistNameStore();
-  await artistNameStore.init();
-
-  runApp(AestheticyApp(
-    engine: engine,
-    controller: controller,
-    repository: repository,
-    scanService: scanService,
-    settingsStore: settingsStore,
-    glassController: glassController,
-    localeController: localeController,
-    audioSettingsApplier: audioSettingsApplier,
-    artistNameStore: artistNameStore,
-    eqController: eqController,
-  ));
+  }, (error, stack) {
+    AppLogger.instance.error(
+      'Zone',
+      'Unhandled zone error: $error',
+      error,
+      stack,
+    );
+  });
 }
 
 /// Fallback screen shown when the audio engine fails to initialize.
@@ -339,6 +448,15 @@ class AestheticyApp extends StatefulWidget {
   /// Optional equalizer controller.
   final EqController? eqController;
 
+  /// Optional listening history recorder.
+  final PlayRecorder? playRecorder;
+
+  /// Optional session storage.
+  final SessionStore? sessionStore;
+
+  /// Optional session saver.
+  final SessionSaver? sessionSaver;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -353,6 +471,9 @@ class AestheticyApp extends StatefulWidget {
     this.audioSettingsApplier,
     this.artistNameStore,
     this.eqController,
+    this.sessionStore,
+    this.sessionSaver,
+    this.playRecorder,
   });
 
   @override
@@ -367,6 +488,9 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final EqController _eqController;
   late final AudioSettingsApplier _audioSettingsApplier;
   late final AppNavigator _navigator;
+  late final SessionStore _sessionStore;
+  PlayRecorder? _playRecorder;
+  SessionSaver? _sessionSaver;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
@@ -389,6 +513,17 @@ class _AestheticyAppState extends State<AestheticyApp> {
           settingsStore: _settingsStore,
         );
     _navigator = AppNavigator();
+    _sessionStore = widget.sessionStore ?? SessionStore();
+    _sessionSaver = widget.sessionSaver;
+    _playRecorder = widget.playRecorder;
+  }
+
+  @override
+  void dispose() {
+    _playRecorder?.dispose();
+    _sessionSaver?.dispose();
+    _sessionStore.dispose();
+    super.dispose();
   }
 
   void _openDesignGallery() {

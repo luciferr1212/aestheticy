@@ -53,6 +53,9 @@ class AppSettings {
   /// ReplayGain pre-amplification in dB (-15.0 to +15.0).
   final double replayGainPreampDb;
 
+  /// Whether to save and restore playback queue, position, and modes across app restarts.
+  final bool resumeSession;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -72,6 +75,7 @@ class AppSettings {
     this.exclusiveMode = false,
     this.replayGainMode = 'off',
     double replayGainPreampDb = 0.0,
+    this.resumeSession = true,
   }) : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb);
@@ -102,6 +106,7 @@ class AppSettings {
     bool? exclusiveMode,
     String? replayGainMode,
     double? replayGainPreampDb,
+    bool? resumeSession,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -124,6 +129,7 @@ class AppSettings {
       replayGainPreampDb: replayGainPreampDb != null
           ? _clampPreamp(replayGainPreampDb)
           : this.replayGainPreampDb,
+      resumeSession: resumeSession ?? this.resumeSession,
     );
   }
 
@@ -147,6 +153,7 @@ class AppSettings {
       'exclusiveMode': exclusiveMode,
       'replayGainMode': replayGainMode,
       'replayGainPreampDb': replayGainPreampDb,
+      'resumeSession': resumeSession,
     };
   }
 
@@ -250,6 +257,9 @@ class AppSettings {
     final replayGainPreampDb =
         rawPreamp is num ? _clampPreamp(rawPreamp) : 0.0;
 
+    final rawResume = json['resumeSession'];
+    final resumeSession = rawResume is bool ? rawResume : true;
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -268,6 +278,7 @@ class AppSettings {
       exclusiveMode: exclusiveMode,
       replayGainMode: replayGainMode,
       replayGainPreampDb: replayGainPreampDb,
+      resumeSession: resumeSession,
     );
   }
 
@@ -292,7 +303,8 @@ class AppSettings {
           outputDeviceId == other.outputDeviceId &&
           exclusiveMode == other.exclusiveMode &&
           replayGainMode == other.replayGainMode &&
-          replayGainPreampDb == other.replayGainPreampDb;
+          replayGainPreampDb == other.replayGainPreampDb &&
+          resumeSession == other.resumeSession;
 
   @override
   int get hashCode => Object.hashAll([
@@ -313,5 +325,6 @@ class AppSettings {
         exclusiveMode,
         replayGainMode,
         replayGainPreampDb,
+        resumeSession,
       ]);
 }

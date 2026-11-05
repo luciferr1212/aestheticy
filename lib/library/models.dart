@@ -381,3 +381,120 @@ class ArtistNoSplit {
   String toString() =>
       'ArtistNoSplit(artistKey: $artistKey, artistName: $artistName)';
 }
+
+/// An immutable record of a playback session in listening history.
+class PlayEvent {
+  /// Unique database row ID, or null if not yet persisted.
+  final int? id;
+
+  /// Audio track resource URI (file path).
+  final String uri;
+
+  /// Track title at the time of playback.
+  final String? title;
+
+  /// Primary artist at the time of playback.
+  final String? artist;
+
+  /// Album title at the time of playback.
+  final String? album;
+
+  /// Album artist at the time of playback.
+  final String? albumArtist;
+
+  /// Track total duration in milliseconds, if known.
+  final int? durationMs;
+
+  /// Playback session start time in UTC.
+  final DateTime startedAt;
+
+  /// Total accumulated listening time in milliseconds.
+  final int listenedMs;
+
+  /// Whether this session qualified as a counted play.
+  final bool counted;
+
+  /// Whether the track played completely to its natural end.
+  final bool completed;
+
+  /// Creates an immutable [PlayEvent] instance.
+  const PlayEvent({
+    this.id,
+    required this.uri,
+    this.title,
+    this.artist,
+    this.album,
+    this.albumArtist,
+    this.durationMs,
+    required this.startedAt,
+    required this.listenedMs,
+    required this.counted,
+    required this.completed,
+  });
+
+  /// Creates a copy of this [PlayEvent] with the given fields replaced.
+  PlayEvent copyWith({
+    int? id,
+    String? uri,
+    String? title,
+    String? artist,
+    String? album,
+    String? albumArtist,
+    int? durationMs,
+    DateTime? startedAt,
+    int? listenedMs,
+    bool? counted,
+    bool? completed,
+  }) {
+    return PlayEvent(
+      id: id ?? this.id,
+      uri: uri ?? this.uri,
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+      albumArtist: albumArtist ?? this.albumArtist,
+      durationMs: durationMs ?? this.durationMs,
+      startedAt: startedAt ?? this.startedAt,
+      listenedMs: listenedMs ?? this.listenedMs,
+      counted: counted ?? this.counted,
+      completed: completed ?? this.completed,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlayEvent &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          uri == other.uri &&
+          title == other.title &&
+          artist == other.artist &&
+          album == other.album &&
+          albumArtist == other.albumArtist &&
+          durationMs == other.durationMs &&
+          startedAt == other.startedAt &&
+          listenedMs == other.listenedMs &&
+          counted == other.counted &&
+          completed == other.completed;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        uri,
+        title,
+        artist,
+        album,
+        albumArtist,
+        durationMs,
+        startedAt,
+        listenedMs,
+        counted,
+        completed,
+      );
+
+  @override
+  String toString() =>
+      'PlayEvent(id: $id, uri: $uri, title: $title, artist: $artist, '
+      'startedAt: $startedAt, listenedMs: $listenedMs, counted: $counted, completed: $completed)';
+}

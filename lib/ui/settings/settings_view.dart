@@ -1,8 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
+import '../../diagnostics/app_logger.dart';
+import '../../diagnostics/diagnostic_report.dart';
 import '../../library/library_repository.dart';
+import '../../library/migrations.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../artist_names/artist_name_store.dart';
 import '../glass/glass_button.dart';
@@ -68,6 +74,10 @@ class _SettingsViewState extends State<SettingsView> {
   AudioSettingsError? _audioError;
   int _folderCount = 0;
   int _trackCount = 0;
+  int _albumCount = 0;
+  int _artistCount = 0;
+  int _playEventCount = 0;
+  bool _isConfirmingClear = false;
   bool _isLoadingStats = true;
 
   @override
@@ -103,10 +113,16 @@ class _SettingsViewState extends State<SettingsView> {
     try {
       final folders = await widget.repository.listFolders();
       final tracks = await widget.repository.trackCount();
+      final albums = await widget.repository.albumCount();
+      final artists = await widget.repository.artistCount();
+      final plays = await widget.repository.playEventCount();
       if (mounted) {
         setState(() {
           _folderCount = folders.length;
           _trackCount = tracks;
+          _albumCount = albums;
+          _artistCount = artists;
+          _playEventCount = plays;
           _isLoadingStats = false;
         });
       }
@@ -193,15 +209,27 @@ class _SettingsViewState extends State<SettingsView> {
                             _buildAudioSection(context, settings),
                             const SizedBox(height: 20),
 
-                            // 6. Library
+                            // 6. Playback
+                            _buildPlaybackSection(context, settings),
+                            const SizedBox(height: 20),
+
+                            // 7. Library
                             _buildLibrarySection(context),
                             const SizedBox(height: 20),
 
-                            // 7. Shortcuts
+                            // 8. Listening history
+                            _buildHistorySection(context),
+                            const SizedBox(height: 20),
+
+                            // 9. Shortcuts
                             _buildShortcutsSection(context),
                             const SizedBox(height: 20),
 
-                            // 8. About
+                            // 10. Diagnostics
+                            _buildDiagnosticsSection(context, settings),
+                            const SizedBox(height: 20),
+
+                            // 11. About
                             _buildAboutSection(context),
                           ],
                         ),
@@ -745,7 +773,29 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
-  // ── 6. Library ────────────────────────────────────────────────────────
+  // ── 6. Playback ───────────────────────────────────────────────────────
+  Widget _buildPlaybackSection(BuildContext context, AppSettings settings) {
+    return _SettingsCard(
+      title: context.t('settings.sectionPlayback'),
+      children: [
+        _SettingsRow(
+          title: context.t('settings.resumeSession'),
+          description: context.t('settings.resumeSessionHint'),
+          control: Switch(
+            key: const Key('settings_resume_session_switch'),
+            value: settings.resumeSession,
+            activeThumbColor: AppColors.accent,
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(resumeSession: val));
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── 7. Library ────────────────────────────────────────────────────────
   Widget _buildLibrarySection(BuildContext context) {
     return _SettingsCard(
       title: context.t('settings.sectionLibrary'),
@@ -773,7 +823,76 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
-  // ── 7. Shortcuts ──────────────────────────────────────────────────────
+  // ── 8. Listening History ──────────────────────────────────────────────
+  Widget _buildHistorySection(BuildContext context) {
+    return _SettingsCard(
+      title: context.t('settings.sectionHistory'),
+      children: [
+        _SettingsRow(
+          title: context.t('settings.playsRecorded'),
+          description: _isLoadingStats
+              ? '…'
+              : context.formatCountLocalized(_playEventCount),
+          control: _isConfirmingClear
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      context.t('settings.clearHistoryConfirm'),
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GlassPillButton(
+                      key: const Key('settings_clear_history_cancel_button'),
+                      label: context.t('common.cancel'),
+                      onPressed: () {
+                        setState(() => _isConfirmingClear = false);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    GlassPillButton(
+                      key: const Key('settings_clear_history_confirm_button'),
+                      label: context.t('settings.clearHistoryAction'),
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final clearedText = context.t('settings.historyCleared');
+                        try {
+                          await widget.repository.clearPlayEvents();
+                          if (mounted) {
+                            setState(() {
+                              _playEventCount = 0;
+                              _isConfirmingClear = false;
+                            });
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(clearedText),
+                              ),
+                            );
+                          }
+                        } catch (_) {
+                          if (mounted) {
+                            setState(() => _isConfirmingClear = false);
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                )
+              : GlassPillButton(
+                  key: const Key('settings_clear_history_button'),
+                  label: context.t('settings.clearHistory'),
+                  onPressed: () {
+                    setState(() => _isConfirmingClear = true);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ── 9. Shortcuts ──────────────────────────────────────────────────────
   Widget _buildShortcutsSection(BuildContext context) {
     return _SettingsCard(
       title: context.t('settings.sectionShortcuts'),
@@ -834,7 +953,103 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
-  // ── 8. About ──────────────────────────────────────────────────────────
+  // ── 10. Diagnostics ───────────────────────────────────────────────────
+  Widget _buildDiagnosticsSection(BuildContext context, AppSettings settings) {
+    return _SettingsCard(
+      title: context.t('settings.sectionDiagnostics'),
+      children: [
+        _SettingsRow(
+          title: context.t('settings.copyDiagnostics'),
+          control: GlassPillButton(
+            key: const Key('settings_copy_diagnostics_button'),
+            label: context.t('settings.copyDiagnostics'),
+            onPressed: () async {
+              try {
+                final messenger = ScaffoldMessenger.of(context);
+                final copiedText = context.t('settings.diagnosticsCopied');
+                final logLines =
+                    await AppLogger.instance.readRecentLines(limit: 100);
+                final activeDevice = widget.engine.devices.firstWhere(
+                  (d) => d.id == settings.outputDeviceId,
+                  orElse: () => AudioDevice.auto,
+                );
+                final report = buildDiagnosticReport(
+                  appName: 'Aestheticy',
+                  osVersion: Platform.operatingSystemVersion,
+                  dartVersion: Platform.version,
+                  engineName: widget.engine.runtimeType.toString(),
+                  capabilities: widget.engine.capabilities,
+                  outputDeviceName: activeDevice.name,
+                  exclusiveMode: settings.exclusiveMode,
+                  eqEnabled: false,
+                  replayGainMode: switch (settings.replayGainMode) {
+                    'track' => ReplayGainMode.track,
+                    'album' => ReplayGainMode.album,
+                    _ => ReplayGainMode.off,
+                  },
+                  glassQuality: settings.glassQuality,
+                  language: settings.language,
+                  textScale: settings.textScale,
+                  trackCount: _trackCount,
+                  albumCount: _albumCount,
+                  artistCount: _artistCount,
+                  folderCount: _folderCount,
+                  schemaVersion: kLibrarySchemaVersion,
+                  resumeSession: settings.resumeSession,
+                  playEventsCount: _playEventCount,
+                  logLines: logLines,
+                  userNameToScrub: settings.userName,
+                );
+
+                try {
+                  await Clipboard.setData(ClipboardData(text: report));
+                } catch (_) {}
+                if (mounted) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(copiedText),
+                    ),
+                  );
+                }
+              } catch (e, st) {
+                AppLogger.instance.error(
+                  'Settings',
+                  'Copy diagnostics failed: $e',
+                  e,
+                  st,
+                );
+              }
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+        _SettingsRow(
+          title: context.t('settings.copyLogPath'),
+          control: GlassPillButton(
+            key: const Key('settings_copy_log_path_button'),
+            label: context.t('settings.copyLogPath'),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final copiedText = context.t('settings.logPathCopied');
+              final logDir = AppLogger.instance.logDirectory?.path ?? '';
+              try {
+                await Clipboard.setData(ClipboardData(text: logDir));
+              } catch (_) {}
+              if (mounted) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(copiedText),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── 11. About ──────────────────────────────────────────────────────────
   Widget _buildAboutSection(BuildContext context) {
     return _SettingsCard(
       title: context.t('settings.sectionAbout'),

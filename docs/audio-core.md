@@ -66,6 +66,15 @@ Aestheticy's Phase 1 introduces a decoupled, robust audio architecture. High-lev
 
 ---
 
+## PlaybackController Resume Hook (`armResume`)
+
+To support non-intrusive session resuming:
+- `armResume(Duration position)`: Registers a target playback position for the currently armed track without triggering immediate playback, loading, or seeking.
+- **Lazy Execution:** When the user initiates playback for the restored track and the audio engine notifies that the track is loaded (duration is non-null and greater than zero), `PlaybackController` seeks to the armed position once and disarms.
+- **Auto-Cancellation:** If the user initiates playback of a different track or clears the queue before playing the restored track, the armed position is discarded, ensuring stale positions never leak across track boundaries.
+
+---
+
 ## Known Limitations
 
 1. **WASAPI Exclusive Mode Sample Rate Switching:** When transitioning between tracks with different sample rates in WASAPI exclusive mode, an unavoidable hardware handshake gap occurs as the DAC re-clocks.
@@ -100,7 +109,7 @@ To implement smooth crossfading in a future phase:
 
 ---
 
-## Known Limitations
+## Queue Known Limitations
 
 These are known and accepted for Phase 1. Revisit them when the queue UI is built.
 

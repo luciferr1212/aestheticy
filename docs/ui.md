@@ -333,6 +333,9 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
 - **D25:** Signal path strict fidelity: Only verified engine getters and nullable `AudioStreamInfo` fields are displayed. Resampling and output device formats are explicitly documented as engine-managed and not reported. The summary verdict never claims "bit-perfect" or "unaltered" to maintain complete technical honesty.
 - **D26:** Quick Search token discard: Fast typing uses an incrementing `_activeQueryToken` to discard out-of-order asynchronous responses, guaranteeing that stale search results never overwrite current input.
 - **D27:** Display-only translated artist search: Searching for an artist's Arabic display name inspects `ArtistNameStore` first to locate original tagged names, then queries the library repository with original keys, keeping SQLite database contents completely untouched.
+- **D28:** Play tracking & scrobbling rules: A playback session is counted (`counted = 1`) when listened duration reaches $\min(0.50 \times \text{duration}, 240\text{s})$ on tracks with duration $\ge 30\text{s}$. Uncounted short sessions are persisted on session close only if listened duration $\ge 5000\text{ms}$. Loops via repeat-one or replaying the same track generate isolated independent sessions.
+- **D29:** Non-blocking session persistence & lazy resume: `session.json` is debounced (1s), saves playback position at most every 10s while playing, and applies saved position lazily via `armResume()` on the first load of the identical track without any audible burst or auto-playback.
+- **D30:** Diagnostics logging & privacy sanitization: `AppLogger` records to `logs/aestheticy.log` with automatic 1 MB log rotation preserving up to 3 archive files (`.1.log`..`.3.log`). Usernames, filesystem directories, API keys, and sensitive tokens are strictly scrubbed, and messages are truncated to 500 characters.
 
 ---
 
@@ -381,7 +384,23 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
 
 ---
 
-## 21. Known Limitations
+## 21. Playback, History & Diagnostics Settings
+
+- **Playback Resume:**
+  - Configured via `resumeSession` boolean setting in `AppSettings`.
+  - When enabled, player queue, current track index, position, repeat mode, and shuffle state are automatically saved to `session.json` and restored on next app launch.
+  - When disabled, session saving is completely bypassed and previous saved sessions are ignored.
+- **Listening History Card:**
+  - Displays total scrobbled tracks count using `LibraryRepository.playEventCount(countedOnly: true)`.
+  - "Clear history" triggers inline two-stage confirmation (`Cancel` / `Clear now`), preventing accidental data loss.
+  - Upon confirmation, calls `clearPlayEvents()` and displays a localized SnackBar confirmation.
+- **Diagnostics Card:**
+  - "Copy diagnostic report": Generates and copies a comprehensive, PII-sanitized markdown diagnostic report (`buildDiagnosticReport`) including application version, OS platform, audio engine capabilities, active output device, library counts, settings state, and recent log tail.
+  - "Copy log folder path": Resolves and copies the absolute filesystem directory path containing rotating logs (`aestheticy.log`).
+
+---
+
+## 22. Known Limitations
 
 - **Local Build Workload:** Local compilation of native Windows `.exe` binaries is disabled due to absence of Visual Studio C++ build tools; all native binaries are compiled via GitHub Actions CI.
 - **Headless Performance Benchmarks:** In unit and widget tests, frame timing callbacks operate within simulated clock dispatchers. Real GPU raster and build times must be evaluated directly on the Windows release executable using the Design Gallery.

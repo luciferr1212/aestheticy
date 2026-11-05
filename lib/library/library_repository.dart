@@ -101,6 +101,26 @@ abstract class LibraryRepository {
   /// Returns the total number of tracks currently in the library.
   Future<int> trackCount();
 
+  /// Inserts a new playback event into history and returns its generated row ID.
+  Future<int> insertPlayEvent(PlayEvent e);
+
+  /// Updates an existing playback event with accumulated listening time and completion status.
+  Future<void> updatePlayEvent(
+    int id, {
+    required int listenedMs,
+    required bool counted,
+    required bool completed,
+  });
+
+  /// Retrieves the most recent playback events ordered from newest to oldest.
+  Future<List<PlayEvent>> recentPlayEvents({int limit = 50});
+
+  /// Returns the total count of playback events, optionally restricted to counted plays.
+  Future<int> playEventCount({bool countedOnly = false});
+
+  /// Clears all recorded playback events from history.
+  Future<void> clearPlayEvents();
+
   /// Closes the underlying database connection and releases resources.
   Future<void> close();
 }

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aestheticy/audio/audio_models.dart';
@@ -21,6 +22,9 @@ import 'package:aestheticy/ui/shell/app_navigator.dart';
 class _FakeLibraryRepository extends Fake implements LibraryRepository {
   final List<LibraryFolder> folders;
   final int count;
+  int playCount = 42;
+  final int albums = 5;
+  final int artists = 3;
 
   _FakeLibraryRepository({
     this.folders = const [],
@@ -32,6 +36,20 @@ class _FakeLibraryRepository extends Fake implements LibraryRepository {
 
   @override
   Future<int> trackCount() async => count;
+
+  @override
+  Future<int> albumCount() async => albums;
+
+  @override
+  Future<int> artistCount() async => artists;
+
+  @override
+  Future<int> playEventCount({bool countedOnly = false}) async => playCount;
+
+  @override
+  Future<void> clearPlayEvents() async {
+    playCount = 0;
+  }
 }
 
 class _FailingAudioEngine extends FakeAudioEngine {
@@ -164,11 +182,20 @@ void main() {
     await tester.scrollUntilVisible(find.text('Audio'), 100.0, scrollable: scrollFinder);
     expect(find.text('Audio'), findsOneWidget);
 
+    await tester.scrollUntilVisible(find.text('Playback'), 100.0, scrollable: scrollFinder);
+    expect(find.text('Playback'), findsOneWidget);
+
     await tester.scrollUntilVisible(find.text('Library'), 100.0, scrollable: scrollFinder);
     expect(find.text('Library'), findsOneWidget);
 
+    await tester.scrollUntilVisible(find.text('Listening history'), 100.0, scrollable: scrollFinder);
+    expect(find.text('Listening history'), findsOneWidget);
+
     await tester.scrollUntilVisible(find.text('Shortcuts'), 100.0, scrollable: scrollFinder);
     expect(find.text('Shortcuts'), findsOneWidget);
+
+    await tester.scrollUntilVisible(find.text('Diagnostics'), 100.0, scrollable: scrollFinder);
+    expect(find.text('Diagnostics'), findsOneWidget);
 
     await tester.scrollUntilVisible(find.text('About'), 100.0, scrollable: scrollFinder);
     expect(find.text('About'), findsOneWidget);
@@ -417,5 +444,165 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(navigator.current, equals(AppDestination.albums));
+  });
+
+  testWidgets('S5: Playback resume switch toggles and persists', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+    final resumeSwitch = find.byKey(const Key('settings_resume_session_switch'));
+    await tester.scrollUntilVisible(resumeSwitch, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(resumeSwitch);
+    await tester.pumpAndSettle();
+
+    expect(resumeSwitch, findsOneWidget);
+    expect(settingsStore.settings.resumeSession, isTrue);
+
+    // Toggle switch off
+    await tester.tap(resumeSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.resumeSession, isFalse);
+
+    // Toggle switch on
+    await tester.tap(resumeSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.resumeSession, isTrue);
+  });
+
+  testWidgets('S5: Listening history count, cancel confirmation leaves count, confirm clears count to 0', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+    final clearBtn = find.byKey(const Key('settings_clear_history_button'));
+    await tester.scrollUntilVisible(clearBtn, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(clearBtn);
+    await tester.pumpAndSettle();
+
+    // Initial count is 42
+    expect(find.text('42'), findsOneWidget);
+
+    // Tap clear button to enter inline confirmation
+    await tester.tap(clearBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Are you sure?'), findsOneWidget);
+    final cancelBtn = find.byKey(const Key('settings_clear_history_cancel_button'));
+    final confirmBtn = find.byKey(const Key('settings_clear_history_confirm_button'));
+    expect(cancelBtn, findsOneWidget);
+    expect(confirmBtn, findsOneWidget);
+
+    // Cancel leaves count unchanged
+    await tester.tap(cancelBtn);
+    await tester.pumpAndSettle();
+    expect(find.text('42'), findsOneWidget);
+    expect(repository.playCount, equals(42));
+
+    // Tap clear button again and confirm
+    final clearAgainBtn = find.byKey(const Key('settings_clear_history_button'));
+    await tester.ensureVisible(clearAgainBtn);
+    await tester.tap(clearAgainBtn);
+    await tester.pumpAndSettle();
+
+    final confirmAgainBtn = find.byKey(const Key('settings_clear_history_confirm_button'));
+    await tester.ensureVisible(confirmAgainBtn);
+    await tester.tap(confirmAgainBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    // Verify count is 0 and SnackBar is displayed
+    expect(find.text('0'), findsOneWidget);
+    expect(repository.playCount, equals(0));
+    expect(find.text('Listening history cleared'), findsOneWidget);
+  });
+
+  testWidgets('S6: Diagnostics copy report and copy log path work with SnackBars', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    String? copiedClipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          copiedClipboardText = (methodCall.arguments as Map)['text'] as String?;
+          return null;
+        }
+        return null;
+      },
+    );
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+    final copyDiagBtn = find.byKey(const Key('settings_copy_diagnostics_button'));
+    await tester.scrollUntilVisible(copyDiagBtn, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(copyDiagBtn);
+    await tester.pumpAndSettle();
+
+    expect(copyDiagBtn, findsOneWidget);
+    await tester.tap(copyDiagBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Diagnostic report copied to clipboard'), findsOneWidget);
+    expect(copiedClipboardText, contains('=== Aestheticy Diagnostic Report ==='));
+
+    // Wait for first SnackBar to dismiss
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    final copyLogBtn = find.byKey(const Key('settings_copy_log_path_button'));
+    await tester.scrollUntilVisible(copyLogBtn, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(copyLogBtn);
+    await tester.pumpAndSettle();
+
+    expect(copyLogBtn, findsOneWidget);
+    await tester.tap(copyLogBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Log folder path copied to clipboard'), findsOneWidget);
   });
 }

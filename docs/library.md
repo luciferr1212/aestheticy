@@ -10,7 +10,7 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
 
 ---
 
-## SQLite Database Schema (Version 2)
+## SQLite Database Schema (Version 3)
 
 ```text
 ┌───────────────────────────────┐
@@ -47,6 +47,22 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
                                          │ artist_key  TEXT PRIMARY KEY      │
                                          │ artist_name TEXT NOT NULL         │
                                          └───────────────────────────────────┘
+
+┌────────────────────────────────────────┐
+│              play_events               │
+├────────────────────────────────────────┤
+│ id             INTEGER PK AUTOINCREMENT│
+│ uri            TEXT NOT NULL (INDEX)   │
+│ title          TEXT                    │
+│ artist         TEXT                    │
+│ album          TEXT                    │
+│ album_artist   TEXT                    │
+│ duration_ms    INTEGER                 │
+│ started_at_ms  INTEGER NOT NULL (INDEX)│
+│ listened_ms    INTEGER NOT NULL        │
+│ counted        INTEGER NOT NULL (0/1)  │
+│ completed      INTEGER NOT NULL (0/1)  │
+└────────────────────────────────────────┘
 ```
 
 ### Tables
@@ -83,11 +99,21 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
    - `artist_key`: Normalized artist string that must never be split (`PRIMARY KEY`).
    - `artist_name`: Original casing/display name.
 
+6. **`play_events`** (Introduced in Schema v3)
+   - `id`: Auto-incrementing primary key.
+   - `uri`: Audio source identifier / path (`NOT NULL`).
+   - `title`, `artist`, `album`, `album_artist`: Snapshot of track metadata at the time of playback. Preserved independently so history remains accurate even if tracks are moved, edited, or rescanned.
+   - `duration_ms`: Track duration in milliseconds (nullable for unknown stream lengths).
+   - `started_at_ms`: UTC epoch milliseconds timestamp when playback session started.
+   - `listened_ms`: Cumulative playback time in milliseconds (excluding pauses, seeks, and skips).
+   - `counted`: Integer boolean flag (`1` if scrobble/play threshold reached, `0` otherwise).
+   - `completed`: Integer boolean flag (`1` if playback reached natural track completion, `0` otherwise).
+
 ### Indexes & Pragmas
 
 - **Pragmas:**
   - `PRAGMA foreign_keys = ON;` enforced on every opened connection to guarantee relational integrity.
-  - `PRAGMA user_version = 2` tracks the applied schema migration.
+  - `PRAGMA user_version = 3` tracks the applied schema migration.
 - **Indexes:**
   - `idx_tracks_folder_id` on `tracks(folder_id)`: Accelerates cascaded operations and folder-scoped queries.
   - `idx_tracks_album` on `tracks(album)`: Speeds up album aggregation and filtering.
@@ -95,6 +121,8 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
   - `idx_tracks_search_text` on `tracks(search_text)`: Optimizes normalized search queries.
   - `idx_tracks_added_at` on `tracks(added_at)`: Enables efficient sorting by newly added tracks.
   - `idx_track_artists_artist_key` on `track_artists(artist_key)`: Accelerates artist lookups and track aggregations.
+  - `idx_play_events_started_at` on `play_events(started_at_ms)`: Fast retrieval of recent play history.
+  - `idx_play_events_uri` on `play_events(uri)`: Accelerated history lookup by track URI.
 
 ---
 
@@ -128,6 +156,18 @@ Artists tagged with different spellings or multilingual variations (e.g. Arabic 
 - **Cycle Rejection:** Circular aliases (e.g. merging C into A when A already points to C) and self-merges are rejected with `ArgumentError`.
 - **Non-Destructive & Rescan-Resilient:** Aliases are stored in `artist_aliases` and never touch local audio files. Rebuilding or rescanning preserves merges.
 - **Unmerging:** Calling `unmergeArtist(aliasKey)` removes the alias and restores the original separate artist entries.
+
+---
+
+## Listening History API (`play_events`)
+
+Phase 3c introduces playback tracking and scrobbled history persisted via `LibraryRepository`:
+
+- `insertPlayEvent(PlayEvent e)`: Inserts a newly active or scrobbled play event, returning the generated row id.
+- `updatePlayEvent(int id, {required int listenedMs, required bool counted, required bool completed})`: Atomically updates duration listened and completion status when a playback session closes.
+- `recentPlayEvents({int limit = 50})`: Retrieves recent listening sessions in reverse chronological order (`ORDER BY started_at_ms DESC`).
+- `playEventCount({bool countedOnly = false})`: Returns total event count or scrobbled play count (`counted = 1`).
+- `clearPlayEvents()`: Clears all historical playback records atomically within a transaction.
 
 ---
 

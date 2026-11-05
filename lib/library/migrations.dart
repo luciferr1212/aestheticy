@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'package:aestheticy/library/artist_splitter.dart';
 
 /// Target schema version.
-const int kLibrarySchemaVersion = 2;
+const int kLibrarySchemaVersion = 3;
 
 /// Runs database migrations up to [kLibrarySchemaVersion].
 class SchemaMigrator {
@@ -23,6 +23,9 @@ class SchemaMigrator {
     }
     if (currentVersion < 2) {
       _migrateToV2(db);
+    }
+    if (currentVersion < 3) {
+      _migrateToV3(db);
     }
   }
 
@@ -122,6 +125,39 @@ class SchemaMigrator {
       rebuildArtistLinksSync(db, inTransaction: true);
 
       db.execute('PRAGMA user_version = 2;');
+      db.execute('COMMIT;');
+    } catch (e) {
+      db.execute('ROLLBACK;');
+      rethrow;
+    }
+  }
+
+  static void _migrateToV3(Database db) {
+    db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS play_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          uri TEXT NOT NULL,
+          title TEXT,
+          artist TEXT,
+          album TEXT,
+          album_artist TEXT,
+          duration_ms INTEGER,
+          started_at_ms INTEGER NOT NULL,
+          listened_ms INTEGER NOT NULL,
+          counted INTEGER NOT NULL,
+          completed INTEGER NOT NULL
+        );
+      ''');
+      db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_play_events_started_at_ms ON play_events(started_at_ms);',
+      );
+      db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_play_events_uri ON play_events(uri);',
+      );
+
+      db.execute('PRAGMA user_version = 3;');
       db.execute('COMMIT;');
     } catch (e) {
       db.execute('ROLLBACK;');

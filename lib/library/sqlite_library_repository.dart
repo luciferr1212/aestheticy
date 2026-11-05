@@ -734,8 +734,103 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
+  Future<int> insertPlayEvent(PlayEvent e) async {
+    _db.execute(
+      '''
+      INSERT INTO play_events (
+        uri, title, artist, album, album_artist,
+        duration_ms, started_at_ms, listened_ms, counted, completed
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      ''',
+      [
+        e.uri,
+        e.title,
+        e.artist,
+        e.album,
+        e.albumArtist,
+        e.durationMs,
+        e.startedAt.toUtc().millisecondsSinceEpoch,
+        e.listenedMs,
+        e.counted ? 1 : 0,
+        e.completed ? 1 : 0,
+      ],
+    );
+    return _db.lastInsertRowId;
+  }
+
+  @override
+  Future<void> updatePlayEvent(
+    int id, {
+    required int listenedMs,
+    required bool counted,
+    required bool completed,
+  }) async {
+    _db.execute(
+      '''
+      UPDATE play_events
+      SET listened_ms = ?, counted = ?, completed = ?
+      WHERE id = ?;
+      ''',
+      [
+        listenedMs,
+        counted ? 1 : 0,
+        completed ? 1 : 0,
+        id,
+      ],
+    );
+  }
+
+  @override
+  Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async {
+    final rows = _db.select(
+      '''
+      SELECT id, uri, title, artist, album, album_artist,
+             duration_ms, started_at_ms, listened_ms, counted, completed
+      FROM play_events
+      ORDER BY started_at_ms DESC, id DESC
+      LIMIT ?;
+      ''',
+      [limit],
+    );
+    return rows.map(_mapPlayEventRow).toList();
+  }
+
+  @override
+  Future<int> playEventCount({bool countedOnly = false}) async {
+    final sql = countedOnly
+        ? 'SELECT COUNT(*) AS total FROM play_events WHERE counted = 1;'
+        : 'SELECT COUNT(*) AS total FROM play_events;';
+    final row = _db.select(sql).first;
+    return row['total'] as int;
+  }
+
+  @override
+  Future<void> clearPlayEvents() async {
+    _db.execute('DELETE FROM play_events;');
+  }
+
+  @override
   Future<void> close() async {
     _db.close();
+  }
+
+  static PlayEvent _mapPlayEventRow(Row row) {
+    return PlayEvent(
+      id: row['id'] as int,
+      uri: row['uri'] as String,
+      title: row['title'] as String?,
+      artist: row['artist'] as String?,
+      album: row['album'] as String?,
+      albumArtist: row['album_artist'] as String?,
+      durationMs: row['duration_ms'] as int?,
+      startedAt: DateTime.fromMillisecondsSinceEpoch(
+        row['started_at_ms'] as int,
+        isUtc: true,
+      ),
+      listenedMs: row['listened_ms'] as int,
+      counted: (row['counted'] as int) == 1,
+      completed: (row['completed'] as int) == 1,
+    );
   }
 
   static Track _mapTrackRow(Row row) {
