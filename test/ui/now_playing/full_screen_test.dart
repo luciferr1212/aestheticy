@@ -226,6 +226,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(engine.lastSeekTarget, isNotNull);
 
+      // Right arrow: seek +5s
+      engine.lastSeekTarget = null;
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(engine.lastSeekTarget, isNotNull);
+
       // Esc: go back
       bool wentBack = false;
       navigator.addListener(() => wentBack = true);

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
@@ -66,7 +65,7 @@ class _SettingsViewState extends State<SettingsView> {
   final FocusNode _focusNode = FocusNode();
 
   List<FontOption> _fontOptions = [FontOption.system];
-  String? _audioError;
+  AudioSettingsError? _audioError;
   int _folderCount = 0;
   int _trackCount = 0;
   bool _isLoadingStats = true;
@@ -128,7 +127,7 @@ class _SettingsViewState extends State<SettingsView> {
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.escape): () {
+        shortcutById(AppShortcutId.back).activator: () {
           widget.navigator.goBack();
         },
       },
@@ -422,8 +421,8 @@ class _SettingsViewState extends State<SettingsView> {
                     flex: 2,
                     child: Text(
                       font.id == 'system'
-                          ? context.t('settings.fontSystem')
-                          : font.displayName,
+                          ? context.t('settings.font.system')
+                          : (font.displayName ?? font.id),
                       style: AppTypography.bodyStrong,
                     ),
                   ),
@@ -568,7 +567,12 @@ class _SettingsViewState extends State<SettingsView> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _audioError!,
+                    switch (_audioError!) {
+                      AudioSettingsError.unsupported =>
+                        context.t('settings.audio.errorUnsupported'),
+                      AudioSettingsError.failed =>
+                        context.t('settings.audio.errorFailed'),
+                    },
                     style: AppTypography.caption
                         .copyWith(color: AppColors.danger),
                   ),
@@ -726,6 +730,17 @@ class _SettingsViewState extends State<SettingsView> {
             onPressed: null,
           ),
         ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // Equalizer and signal path
+        _SettingsRow(
+          title: context.t('settings.audio.panelsRow'),
+          control: GlassPillButton(
+            key: const Key('settings_open_audio_panels_button'),
+            label: context.t('settings.audio.panelsOpen'),
+            onPressed: () => widget.navigator.openAudioPanels(),
+          ),
+        ),
       ],
     );
   }
@@ -774,6 +789,25 @@ class _SettingsViewState extends State<SettingsView> {
                     style: AppTypography.body,
                   ),
                 ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.fillGlass,
+                    borderRadius: BorderRadius.circular(AppSpacing.r10),
+                    border: Border.all(color: AppColors.borderSubtle),
+                  ),
+                  child: Text(
+                    context.t(shortcut.scope == AppShortcutScope.global
+                        ? 'shortcuts.scopeGlobal'
+                        : 'shortcuts.scopeNowPlaying'),
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

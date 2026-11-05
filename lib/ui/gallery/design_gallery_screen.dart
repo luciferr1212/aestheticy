@@ -13,6 +13,7 @@ import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/locale_controller.dart';
 import '../settings/settings_store.dart';
+import '../settings/app_shortcuts.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
@@ -133,7 +134,7 @@ class _DesignGalleryScreenState extends State<DesignGalleryScreen>
 
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.escape): () {
+        shortcutById(AppShortcutId.back).activator: () {
           Navigator.of(context).maybePop();
         },
       },

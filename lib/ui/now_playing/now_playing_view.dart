@@ -15,6 +15,7 @@ import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
+import '../settings/app_shortcuts.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -120,19 +121,19 @@ class _NowPlayingViewState extends State<NowPlayingView> {
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
+    if (matchesShortcut(event, AppShortcutId.back)) {
       widget.navigator.goBack();
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.space) {
+    if (matchesShortcut(event, AppShortcutId.playPause)) {
       widget.controller.togglePlayPause();
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    if (matchesShortcut(event, AppShortcutId.seekBackward)) {
       _seekRelative(-const Duration(seconds: 5));
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+    if (matchesShortcut(event, AppShortcutId.seekForward)) {
       _seekRelative(const Duration(seconds: 5));
       return KeyEventResult.handled;
     }
@@ -570,7 +571,28 @@ class _NowPlayingViewState extends State<NowPlayingView> {
             child: Row(
               children: [
                 // Isolated stream info pill
-                _StreamInfoPill(engine: widget.engine),
+                InkWell(
+                  key: const Key('now_playing_stream_info_pill'),
+                  borderRadius: BorderRadius.circular(AppSpacing.pill),
+                  onTap: () => widget.navigator.openAudioPanels(),
+                  child: _StreamInfoPill(engine: widget.engine),
+                ),
+                const SizedBox(width: 8),
+                GlassIconButton(
+                  key: const Key('now_playing_eq_button'),
+                  icon: Icons.equalizer,
+                  tooltip: context.t('nowPlaying.equalizer'),
+                  semanticLabel: context.t('nowPlaying.equalizer'),
+                  onPressed: () => widget.navigator.openAudioPanels(),
+                ),
+                const SizedBox(width: 8),
+                GlassIconButton(
+                  key: const Key('now_playing_signal_path_button'),
+                  icon: Icons.alt_route,
+                  tooltip: context.t('nowPlaying.signalPath'),
+                  semanticLabel: context.t('nowPlaying.signalPath'),
+                  onPressed: () => widget.navigator.openAudioPanels(),
+                ),
                 const SizedBox(width: 16),
                 // Volume slider
                 _VolumeControl(engine: widget.engine),

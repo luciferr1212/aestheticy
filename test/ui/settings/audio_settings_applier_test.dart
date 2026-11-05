@@ -137,24 +137,24 @@ void main() {
       // 1. Device failure
       failingEngine.failDevice = true;
       final devErr = await applier.setDevice('new_device');
-      expect(devErr, isNotNull);
+      expect(devErr, equals(AudioSettingsError.failed));
       expect(store.settings.outputDeviceId, equals('auto'));
 
       // 2. Exclusive unsupported
       final exclErr = await applier.setExclusive(true);
-      expect(exclErr, isNotNull);
+      expect(exclErr, equals(AudioSettingsError.unsupported));
       expect(store.settings.exclusiveMode, isFalse);
 
       // 3. ReplayGain failure
       failingEngine.failReplayGain = true;
       final rgErr = await applier.setReplayGainMode(ReplayGainMode.album);
-      expect(rgErr, isNotNull);
+      expect(rgErr, equals(AudioSettingsError.failed));
       expect(store.settings.replayGainMode, equals('off'));
 
       // 4. Preamp failure
       failingEngine.failPreamp = true;
       final preErr = await applier.setReplayGainPreamp(8.0);
-      expect(preErr, isNotNull);
+      expect(preErr, equals(AudioSettingsError.failed));
       expect(store.settings.replayGainPreampDb, equals(0.0));
 
       await failingEngine.dispose();

@@ -7,15 +7,14 @@ class FontOption {
   /// Font family identifier stored in settings ('system' or bundled family name).
   final String id;
 
-  /// User-visible display name.
-  final String displayName;
+  /// User-visible display name for bundled fonts (null for [system]).
+  final String? displayName;
 
   /// Creates an immutable [FontOption].
-  const FontOption({required this.id, required this.displayName});
+  const FontOption({required this.id, this.displayName});
 
   /// Default system font stack option ('Segoe UI Variable').
-  static const system =
-      FontOption(id: 'system', displayName: 'System default');
+  static const system = FontOption(id: 'system');
 
   @override
   bool operator ==(Object other) =>

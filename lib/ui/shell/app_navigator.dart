@@ -33,12 +33,16 @@ enum AppDestination {
 
   /// Application settings and preferences screen.
   settings,
+
+  /// Equalizer and Signal Path audio panels screen.
+  audioPanels,
 }
 
 /// Navigation state coordinator managing active destination and detail selection.
 class AppNavigator extends ChangeNotifier {
   AppDestination _current = AppDestination.albums;
   AppDestination _previousList = AppDestination.albums;
+  AppDestination _audioPanelsPrevious = AppDestination.albums;
 
   // Stored state for returning from nowPlaying or fullScreen
   AppDestination _savedDestination = AppDestination.albums;
@@ -80,6 +84,10 @@ class AppNavigator extends ChangeNotifier {
   void navigateTo(AppDestination destination) {
     if (_current == destination) return;
 
+    if (destination == AppDestination.audioPanels) {
+      _audioPanelsPrevious = _current;
+    }
+
     if (destination == AppDestination.nowPlaying) {
       if (_current != AppDestination.fullScreen) {
         _saveCurrentState();
@@ -102,13 +110,15 @@ class AppNavigator extends ChangeNotifier {
     _current = destination;
     if (destination != AppDestination.albumDetail &&
         destination != AppDestination.nowPlaying &&
-        destination != AppDestination.fullScreen) {
+        destination != AppDestination.fullScreen &&
+        destination != AppDestination.audioPanels) {
       _selectedAlbumId = null;
       _selectedAlbum = null;
     }
     if (destination != AppDestination.artistDetail &&
         destination != AppDestination.nowPlaying &&
-        destination != AppDestination.fullScreen) {
+        destination != AppDestination.fullScreen &&
+        destination != AppDestination.audioPanels) {
       _selectedArtistId = null;
       _selectedArtist = null;
     }
@@ -163,11 +173,18 @@ class AppNavigator extends ChangeNotifier {
   /// Opens the application Settings screen.
   void openSettings() => navigateTo(AppDestination.settings);
 
+  /// Opens the Equalizer and Signal Path panels screen.
+  void openAudioPanels() => navigateTo(AppDestination.audioPanels);
+
   /// Navigates back from detail or immersive screens.
   ///
   /// Returns `true` if handled, `false` otherwise.
   bool goBack() {
-    if (_current == AppDestination.fullScreen) {
+    if (_current == AppDestination.audioPanels) {
+      _current = _audioPanelsPrevious;
+      notifyListeners();
+      return true;
+    } else if (_current == AppDestination.fullScreen) {
       if (_fullScreenCameFromNowPlaying) {
         _current = AppDestination.nowPlaying;
       } else {

@@ -15,6 +15,7 @@ import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
+import '../settings/app_shortcuts.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -164,19 +165,19 @@ class FullScreenViewState extends State<FullScreenView>
 
     _resetControlsTimer();
 
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
+    if (matchesShortcut(event, AppShortcutId.back)) {
       widget.navigator.goBack();
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.space) {
+    if (matchesShortcut(event, AppShortcutId.playPause)) {
       widget.controller.togglePlayPause();
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    if (matchesShortcut(event, AppShortcutId.seekBackward)) {
       _seekRelative(-const Duration(seconds: 5));
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+    if (matchesShortcut(event, AppShortcutId.seekForward)) {
       _seekRelative(const Duration(seconds: 5));
       return KeyEventResult.handled;
     }

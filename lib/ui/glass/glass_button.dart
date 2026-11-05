@@ -364,7 +364,14 @@ class _GlassPillButtonState extends State<GlassPillButton> {
                 ),
                 const SizedBox(width: AppSpacing.s8),
               ],
-              Text(widget.label, style: textStyle),
+              Flexible(
+                child: Text(
+                  widget.label,
+                  style: textStyle,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
             ],
           ),
         ),

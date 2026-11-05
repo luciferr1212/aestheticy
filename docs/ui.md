@@ -10,6 +10,15 @@ Phase 3a establishes the design system, theme tokens, glass rendering system, se
 
 ```text
 lib/ui/
+├── artist_names/
+│   ├── artist_name_scope.dart        # Inherited notifier exposing ArtistNameStore
+│   └── artist_name_store.dart        # User translations store & display resolver
+├── audio_panels/
+│   ├── audio_panels_view.dart        # Combined side-by-side / stacked EQ & Signal Path
+│   ├── eq_controller.dart            # Equalizer controller with 50ms trailing engine throttle
+│   ├── eq_scope.dart                 # Inherited notifier exposing EqController
+│   ├── eq_store.dart                 # eq_settings.json persistence with built-in presets
+│   └── signal_path_model.dart        # Pure 4-stage pipeline builder and text export
 ├── gallery/
 │   ├── design_gallery_screen.dart    # Full-screen developer gallery (Ctrl+Shift+G)
 │   └── performance_metrics.dart      # Pure calculations for frame timings & export
@@ -21,15 +30,30 @@ lib/ui/
 │   └── glass_surface.dart            # Adaptive surface widget (BackdropFilter in full)
 ├── l10n/
 │   ├── app_strings.dart              # Pure Dart EN & AR dictionary & textDirectionFor()
-│   └── locale_controller.dart        # Ambient Locale & TextDirection coordinator
+│   ├── locale_controller.dart        # Ambient Locale & TextDirection coordinator
+│   └── number_format.dart            # Digit localizer, duration and count formatting
+├── now_playing/
+│   ├── cover_palette.dart            # 12-hue bin palette extractor with LRU caching
+│   ├── full_screen_view.dart         # Immersive window fill with ambient canvas blobs
+│   └── now_playing_view.dart         # Desktop two-column player with isolated seekbar
+├── quick_search/
+│   └── quick_search_overlay.dart     # Global floating Ctrl+K overlay with section caps
 ├── settings/
 │   ├── app_settings.dart             # Immutable settings model with tolerant parser
-│   └── settings_store.dart           # Debounced atomic JSON persistence
+│   ├── app_shortcuts.dart            # Single source of truth for keyboard shortcuts
+│   ├── audio_settings_applier.dart   # Audio settings applier with typed error enum
+│   ├── settings_scope.dart           # Inherited notifier exposing SettingsStore
+│   ├── settings_store.dart           # Debounced atomic JSON persistence
+│   └── settings_view.dart            # Central configuration screen (max 1 blur surface)
+├── shell/
+│   ├── app_navigator.dart            # Pure Dart hierarchical navigation controller
+│   └── app_shell.dart                # Desktop application shell with adaptive glass
 └── theme/
     ├── app_colors.dart               # Static WCAG-compliant color palette
     ├── app_spacing.dart              # Standard spacing and border radii
     ├── app_theme.dart                # Material 3 dark theme builder
-    └── app_typography.dart           # Windows desktop font family & text scale
+    ├── app_typography.dart           # Windows desktop font family & text scale
+    └── font_manager.dart             # Runtime FontManifest parser with system fallback
 ```
 
 ---
@@ -250,7 +274,7 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
   4. **Artist Names:** Display name mode selector: `asTagged` (raw tag strings), `followLanguage` (Arabic replacement if Arabic interface, raw otherwise), or `alwaysArabic` (uses Arabic replacement if known). Includes list of custom mappings with add/edit dialog, diacritic/case-insensitive exact whole-name matching, and delete actions.
   5. **Audio:** Output device dropdown populated from `engine.devices` with refresh button; Exclusive mode toggle (disabled with helpful explanation when `engine.capabilities.exclusiveMode` is false); ReplayGain mode segmented selector (Off / Track / Album); ReplayGain preamp slider (-15 to +15 dB, clamped, displaying dB value); Crossfade row disabled with "Soon" badge. All audio adjustments go through `AudioSettingsApplier` and surface localized inline errors on failure.
   6. **Library:** Music folders row with "Manage" button navigating to the folder manager; live read-only folder count and track count badges.
-  7. **Shortcuts:** Canonical read-only list derived from `kAppShortcuts` representing only implemented key bindings in the app (`Space`, `Esc`, `←`, `→`, `Ctrl + Shift + G`).
+  7. **Shortcuts:** Canonical read-only list derived from `kAppShortcuts` representing only implemented key bindings in the app (`Space`, `Esc`, `←`, `→`, `Ctrl + Shift + G`, `Ctrl + K`). Each shortcut displays its localized scope badge (`Global` vs `Now Playing`).
   8. **About:** Minimalist branding card with "Aestheticy" and "by mido" credit text.
 
 ---
@@ -303,14 +327,64 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
 - **D19:** Font discovery dynamically parses `FontManifest.json` at runtime instead of hardcoding available fonts. If the asset manifest is missing or empty, it strictly defaults to `FontOption.system`.
 - **D20:** Artist display name translation is strictly decoupled from the library repository and database; it operates as an in-memory display resolver using `TextNormalizer` to ensure original tag integrity while providing personalized multilingual names.
 - **D21:** `BuildContext.t` prioritizes `SettingsScope.maybeOf(context)?.settings.language` to allow instantaneous live switching between English and Arabic throughout all views without requiring full application restarts.
+- **D22:** Localized audio errors: `AudioSettingsError { unsupported, failed }` standardizes engine error feedback, allowing the UI to present localized explanations (`settings.audio.errorUnsupported` and `settings.audio.errorFailed`) in both English and Arabic without leaking raw technical strings or persisting unapplied states.
+- **D23:** Centralized shortcuts: `app_shortcuts.dart` serves as the sole authoritative source of truth for keyboard shortcuts across the application. Handlers match events using `matchesShortcut()` or helper functions (`isArrowUpKey`, `isArrowDownKey`, `isEnterKey`). A dedicated test verifies no files under `lib/ui/` reference `LogicalKeyboardKey` directly outside `app_shortcuts.dart`.
+- **D24:** Equalizer trailing throttle & safe revert: Band adjustment throttles engine communication with a 50ms trailing timer to ensure rapid mouse drags never saturate the audio thread while guaranteeing the final value always reaches the engine. If the engine reports failure, the in-memory slider reverts to the last good gain without saving to disk.
+- **D25:** Signal path strict fidelity: Only verified engine getters and nullable `AudioStreamInfo` fields are displayed. Resampling and output device formats are explicitly documented as engine-managed and not reported. The summary verdict never claims "bit-perfect" or "unaltered" to maintain complete technical honesty.
+- **D26:** Quick Search token discard: Fast typing uses an incrementing `_activeQueryToken` to discard out-of-order asynchronous responses, guaranteeing that stale search results never overwrite current input.
+- **D27:** Display-only translated artist search: Searching for an artist's Arabic display name inspects `ArtistNameStore` first to locate original tagged names, then queries the library repository with original keys, keeping SQLite database contents completely untouched.
 
 ---
 
-## 17. Known Limitations
+## 18. Equalizer & Audio Panels (`lib/ui/audio_panels/`)
+
+- **State & Persistence (`EqStore`):** Persists configuration to `eq_settings.json` via atomic writes, debounced disk writes (400ms), and corrupt-file fallback to `.bad`. Stores `enabled` (bool), 10 band gains (`-12.0` to `+12.0` dB), `preampDb` (`-12.0` to `+12.0` dB), `presetId`, and up to 20 custom presets (name trimmed 1..24 characters, case-insensitive unique).
+- **Built-in Presets:**
+  - Flat: `[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]`, Preamp `0 dB`
+  - Warm: `[3, 3, 2, 1, 0, 0, -1, -1, -2, -2]`, Preamp `-3 dB`
+  - Bass Boost: `[6, 5, 4, 2, 0, 0, 0, 0, 0, 0]`, Preamp `-6 dB`
+  - Vocal: `[-2, -2, -1, 1, 3, 3, 2, 1, 0, -1]`, Preamp `-3 dB`
+  - Bright: `[-1, -1, 0, 0, 0, 1, 2, 3, 4, 4]`, Preamp `-4 dB`
+- **Controller (`EqController`):** Manages engine communication with a 50ms trailing throttle for live drags. Band editing marks the active preset as `'custom'`. Live band dragging reverts on engine failure and returns `AudioSettingsError`. Startup applies EQ gains and preamp via `applyAll()` only if `engine.capabilities.equalizer` is true.
+- **Audio Panels Screen (`AudioPanelsView`):**
+  - Responsive two-column desktop layout (EQ flex 640, Signal path flex 552) stacking vertically below 1100dp. Consumes exactly 2 blurred surfaces (`GlassDensity.regular`), staying well within the 6-surface budget.
+  - 10 vertical band sliders laid out low-to-high strictly left-to-right (`Directionality(textDirection: TextDirection.ltr)`) across both English and Arabic.
+  - Interactive preset chips row with inline "Save preset" creation field, validation feedback, and deletion support for user presets.
+  - Preamp slider, 0 dB center reference line, keyboard navigation (0.5 dB step; 2.0 dB with Shift), double-tap reset, and accessible frequency semantic labels (`31Hz`, `62Hz`, etc.).
+
+---
+
+## 19. Signal Path Pipeline (`lib/ui/audio_panels/signal_path_model.dart`)
+
+- **4-Stage Pipeline:**
+  1. **Source:** Stream format and container, sample rate, bit depth, channel configuration, bitrate, and lossless badge derived purely from `AudioStreamInfo`.
+  2. **Equalizer:** Equalizer state (enabled / disabled), active preset name, preamp gain, and per-band dB adjustments.
+  3. **ReplayGain:** Mode (`off`, `track`, `album`) and preamp gain in dB.
+  4. **Output:** Output device name, exclusive mode status, and explicit note regarding engine-managed device rate and buffer format.
+- **Verdict & Technical Truth:**
+  - When all processing is disabled, the panel displays "Direct output (processing off)".
+  - When EQ or ReplayGain is active, it displays "Processed".
+  - Strictly avoids "bit-perfect" or "unaltered" claims since OS mixers and engine decoders may apply internal resampling or dithering.
+- **Interactive Actions:**
+  - "Copy details": Copies complete plain-text technical summary to the clipboard.
+  - "Turn off processing": Instantly disables EQ and sets ReplayGain to off with inline feedback.
+
+---
+
+## 20. Quick Search Overlay (`lib/ui/quick_search/`)
+
+- **Trigger & Activation:** Activated globally via `Ctrl + K` or by calling `toggleQuickSearch()`. Dismissed by `Esc`, second `Ctrl + K`, or clicking the background scrim.
+- **Debounced Parallel Queries:** 120ms debounce before dispatching concurrent repository queries (`searchArtists`, `searchAlbums`, `search`).
+- **Section Caps:** Results are strictly capped to 4 artists, 4 albums, and 8 tracks to guarantee responsive rendering and compact display.
+- **Keyboard Navigation:** Arrow keys (`ArrowUp`, `ArrowDown`) navigate linearly through flat search results across sections; `Enter` activates the focused item (opens artist detail, album detail, or immediately plays the track).
+- **Display-Only Translated Matching:** Matches queries against Arabic display names via `ArtistNameStore` without modifying library repository queries or database contents.
+
+---
+
+## 21. Known Limitations
 
 - **Local Build Workload:** Local compilation of native Windows `.exe` binaries is disabled due to absence of Visual Studio C++ build tools; all native binaries are compiled via GitHub Actions CI.
 - **Headless Performance Benchmarks:** In unit and widget tests, frame timing callbacks operate within simulated clock dispatchers. Real GPU raster and build times must be evaluated directly on the Windows release executable using the Design Gallery.
 - **Glass Fallback Re-acquisition:** A GlassSurface that fell back to `light` because the blur budget was full does not re-acquire a slot until quality changes.
 - **Tools > Last.fm Placeholder:** Last.fm integration in the sidebar is currently a disabled placeholder with a neutral icon; no scrobbling, authentication, or external web browsing is active.
 - **Missing Bundled Font Assets:** Font asset files for Inter, IBM Plex Sans Arabic, Noto Sans Arabic, and Cairo are not yet committed under `assets/fonts/`. Per architecture rules, no external font downloads are permitted; until font files are placed on disk, the UI font picker offers "System default".
-- **Equalizer UI:** While the audio engine exposes equalizer capabilities, the equalizer graphical user interface is deferred to a future phase.

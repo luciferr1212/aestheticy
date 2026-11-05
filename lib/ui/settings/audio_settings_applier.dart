@@ -2,6 +2,15 @@ import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import 'settings_store.dart';
 
+/// Error categories surfaced when applying audio settings mutations.
+enum AudioSettingsError {
+  /// The audio engine does not support this capability.
+  unsupported,
+
+  /// Applying the setting to the audio engine failed.
+  failed,
+}
+
 /// Applies persistent audio settings to the underlying [AudioEngine]
 /// and exposes transactional mutations that persist only on success.
 class AudioSettingsApplier {
@@ -67,58 +76,58 @@ class AudioSettingsApplier {
   /// Selects the audio output device by [id].
   ///
   /// On success, persists [id] to [settingsStore] and returns `null`.
-  /// On failure, leaves settings unchanged and returns an error message.
-  Future<String?> setDevice(String id) async {
+  /// On failure, leaves settings unchanged and returns [AudioSettingsError.failed].
+  Future<AudioSettingsError?> setDevice(String id) async {
     try {
       await engine.selectDevice(id);
       settingsStore.update((s) => s.copyWith(outputDeviceId: id));
       return null;
-    } catch (e) {
-      return e.toString();
+    } catch (_) {
+      return AudioSettingsError.failed;
     }
   }
 
   /// Sets WASAPI exclusive mode.
   ///
-  /// Returns an error if the engine reports [EngineCapabilities.exclusiveMode] is false.
+  /// Returns [AudioSettingsError.unsupported] if [EngineCapabilities.exclusiveMode] is false.
   /// On success, persists to [settingsStore] and returns `null`.
-  Future<String?> setExclusive(bool enabled) async {
+  Future<AudioSettingsError?> setExclusive(bool enabled) async {
     if (!engine.capabilities.exclusiveMode) {
-      return 'Exclusive mode is not supported by the current engine.';
+      return AudioSettingsError.unsupported;
     }
     try {
       await engine.setExclusiveMode(enabled);
       settingsStore.update((s) => s.copyWith(exclusiveMode: enabled));
       return null;
-    } catch (e) {
-      return e.toString();
+    } catch (_) {
+      return AudioSettingsError.failed;
     }
   }
 
   /// Sets the ReplayGain normalization [mode].
   ///
   /// On success, persists to [settingsStore] and returns `null`.
-  Future<String?> setReplayGainMode(ReplayGainMode mode) async {
+  Future<AudioSettingsError?> setReplayGainMode(ReplayGainMode mode) async {
     try {
       await engine.setReplayGainMode(mode);
       settingsStore.update((s) => s.copyWith(replayGainMode: mode.name));
       return null;
-    } catch (e) {
-      return e.toString();
+    } catch (_) {
+      return AudioSettingsError.failed;
     }
   }
 
   /// Sets the ReplayGain pre-amplification in dB, clamped to [-15.0, 15.0].
   ///
   /// On success, persists the clamped value to [settingsStore] and returns `null`.
-  Future<String?> setReplayGainPreamp(double preampDb) async {
+  Future<AudioSettingsError?> setReplayGainPreamp(double preampDb) async {
     final clamped = preampDb.clamp(-15.0, 15.0);
     try {
       await engine.setReplayGainPreamp(clamped);
       settingsStore.update((s) => s.copyWith(replayGainPreampDb: clamped));
       return null;
-    } catch (e) {
-      return e.toString();
+    } catch (_) {
+      return AudioSettingsError.failed;
     }
   }
 }

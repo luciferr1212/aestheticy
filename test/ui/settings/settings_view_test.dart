@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
@@ -31,6 +32,16 @@ class _FakeLibraryRepository extends Fake implements LibraryRepository {
 
   @override
   Future<int> trackCount() async => count;
+}
+
+class _FailingAudioEngine extends FakeAudioEngine {
+  bool failDevice = false;
+
+  @override
+  Future<void> selectDevice(String id) async {
+    if (failDevice) throw Exception('Device failed');
+    return super.selectDevice(id);
+  }
 }
 
 Widget _buildTestSettingsApp({
@@ -298,7 +309,59 @@ void main() {
     expect(settingsStore.settings.glassQuality, equals(GlassQuality.light));
   });
 
-  testWidgets('displays all shortcuts from kAppShortcuts and nothing else', (tester) async {
+  testWidgets('failure shows the localized message in both languages, nothing persisted', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    final failingEngine = _FailingAudioEngine()..failDevice = true;
+    await failingEngine.init();
+    failingEngine.fakeDevices = [
+      AudioDevice.auto,
+      const AudioDevice(id: 'dev_1', name: 'Faulty Device'),
+    ];
+
+    final failingApplier = AudioSettingsApplier(
+      engine: failingEngine,
+      settingsStore: settingsStore,
+    );
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: failingEngine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: failingApplier,
+        artistNameStore: artistNameStore,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.text('Output device'), 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(find.text('Auto'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Auto'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Faulty Device').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Could not apply the change. Your previous setting was kept.'), findsOneWidget);
+    expect(settingsStore.settings.outputDeviceId, equals('auto'));
+
+    settingsStore.update((s) => s.copyWith(language: 'ar'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    expect(find.text('تعذّر تطبيق التغيير. تم الاحتفاظ بإعدادك السابق.'), findsOneWidget);
+    expect(settingsStore.settings.outputDeviceId, equals('auto'));
+
+    await failingEngine.dispose();
+  });
+
+  testWidgets('displays all shortcuts from kAppShortcuts with localized scope', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -321,6 +384,8 @@ void main() {
     for (final sc in kAppShortcuts) {
       await tester.scrollUntilVisible(find.text(sc.keyCombination), 50.0, scrollable: scrollFinder);
       expect(find.text(sc.keyCombination), findsOneWidget);
+      final expectedScope = sc.scope == AppShortcutScope.global ? 'Global' : 'Now playing';
+      expect(find.text(expectedScope), findsWidgets);
     }
   });
 

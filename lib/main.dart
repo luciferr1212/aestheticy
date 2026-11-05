@@ -11,9 +11,14 @@ import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
+import 'package:aestheticy/ui/audio_panels/eq_controller.dart';
+import 'package:aestheticy/ui/audio_panels/eq_scope.dart';
+import 'package:aestheticy/ui/audio_panels/eq_store.dart';
 import 'package:aestheticy/ui/gallery/design_gallery_screen.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/l10n/locale_controller.dart';
+import 'package:aestheticy/ui/quick_search/quick_search_overlay.dart';
+import 'package:aestheticy/ui/settings/app_shortcuts.dart';
 import 'package:aestheticy/ui/settings/audio_settings_applier.dart';
 import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
@@ -65,6 +70,11 @@ void main() async {
   );
   await audioSettingsApplier.applyAll();
 
+  final eqStore = EqStore();
+  await eqStore.init();
+  final eqController = EqController(engine: engine, store: eqStore);
+  await eqController.applyAll();
+
   final artistNameStore = ArtistNameStore();
   await artistNameStore.init();
 
@@ -78,6 +88,7 @@ void main() async {
     localeController: localeController,
     audioSettingsApplier: audioSettingsApplier,
     artistNameStore: artistNameStore,
+    eqController: eqController,
   ));
 }
 
@@ -325,6 +336,9 @@ class AestheticyApp extends StatefulWidget {
   /// Optional artist display names store.
   final ArtistNameStore? artistNameStore;
 
+  /// Optional equalizer controller.
+  final EqController? eqController;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -338,6 +352,7 @@ class AestheticyApp extends StatefulWidget {
     this.localeController,
     this.audioSettingsApplier,
     this.artistNameStore,
+    this.eqController,
   });
 
   @override
@@ -349,6 +364,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final GlassController _glassController;
   late final LocaleController _localeController;
   late final ArtistNameStore _artistNameStore;
+  late final EqController _eqController;
   late final AudioSettingsApplier _audioSettingsApplier;
   late final AppNavigator _navigator;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
@@ -362,6 +378,11 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _localeController = widget.localeController ??
         LocaleController(settingsStore: _settingsStore);
     _artistNameStore = widget.artistNameStore ?? ArtistNameStore();
+    _eqController = widget.eqController ??
+        EqController(
+          engine: widget.engine ?? FakeAudioEngine(),
+          store: EqStore(),
+        );
     _audioSettingsApplier = widget.audioSettingsApplier ??
         AudioSettingsApplier(
           engine: widget.engine ?? FakeAudioEngine(),
@@ -385,6 +406,24 @@ class _AestheticyAppState extends State<AestheticyApp> {
     }
   }
 
+  void _toggleQuickSearch() {
+    final ctx = _navigatorKey.currentContext;
+    if (ctx != null) {
+      toggleQuickSearch(
+        context: ctx,
+        repository: widget.repository ?? SqliteLibraryRepository.inMemory(),
+        controller: widget.controller ??
+            PlaybackController(
+              engine: widget.engine ?? FakeAudioEngine(),
+              queue: PlaybackQueue(),
+            ),
+        navigator: _navigator,
+        settingsStore: _settingsStore,
+        artistNameStore: _artistNameStore,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final effectiveEngine = widget.engine ?? FakeAudioEngine();
@@ -404,6 +443,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
         _localeController,
         _glassController,
         _artistNameStore,
+        _eqController,
       ]),
       builder: (context, _) {
         final scaleFactor = switch (_settingsStore.settings.textScale) {
@@ -416,11 +456,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
           controller: _glassController,
           child: CallbackShortcuts(
             bindings: <ShortcutActivator, VoidCallback>{
-              const SingleActivator(
-                LogicalKeyboardKey.keyG,
-                control: true,
-                shift: true,
-              ): _openDesignGallery,
+              shortcutById(AppShortcutId.gallery).activator:
+                  _openDesignGallery,
+              shortcutById(AppShortcutId.quickSearch).activator:
+                  _toggleQuickSearch,
             },
             child: Focus(
               autofocus: true,
@@ -440,7 +479,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
                       store: _settingsStore,
                       child: ArtistNameScope(
                         store: _artistNameStore,
-                        child: child!,
+                        child: EqScope(
+                          controller: _eqController,
+                          child: child!,
+                        ),
                       ),
                     ),
                   ),
@@ -455,6 +497,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                   directoryPicker: widget.directoryPicker,
                   audioSettingsApplier: _audioSettingsApplier,
                   artistNameStore: _artistNameStore,
+                  eqController: _eqController,
                 ),
               ),
             ),

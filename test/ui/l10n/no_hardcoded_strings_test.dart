@@ -10,6 +10,9 @@ void main() {
       Directory('lib/ui/now_playing'),
       Directory('lib/ui/settings'),
       Directory('lib/ui/artist_names'),
+      Directory('lib/ui/theme'),
+      Directory('lib/ui/audio_panels'),
+      Directory('lib/ui/quick_search'),
     ];
 
     final textRegex = RegExp(r"""\bText\(\s*['"]([^'"]+)['"]""");

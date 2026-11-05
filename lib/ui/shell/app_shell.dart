@@ -17,6 +17,10 @@ import '../library/welcome_view.dart';
 import '../now_playing/full_screen_view.dart';
 import '../now_playing/now_playing_view.dart';
 import '../artist_names/artist_name_store.dart';
+import '../audio_panels/audio_panels_view.dart';
+import '../audio_panels/eq_controller.dart';
+import '../quick_search/quick_search_overlay.dart';
+import '../settings/app_shortcuts.dart';
 import '../settings/audio_settings_applier.dart';
 import '../settings/settings_store.dart';
 import '../settings/settings_view.dart';
@@ -56,6 +60,9 @@ class AppShell extends StatefulWidget {
   /// Optional artist display names store.
   final ArtistNameStore? artistNameStore;
 
+  /// Optional equalizer controller.
+  final EqController? eqController;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -68,6 +75,7 @@ class AppShell extends StatefulWidget {
     this.directoryPicker,
     this.audioSettingsApplier,
     this.artistNameStore,
+    this.eqController,
   });
 
   @override
@@ -140,6 +148,17 @@ class _AppShellState extends State<AppShell> {
       scanService: widget.scanService,
       directoryPicker: widget.directoryPicker,
     ).then((_) => _loadFolders());
+  }
+
+  void _toggleQuickSearch() {
+    toggleQuickSearch(
+      context: context,
+      repository: widget.repository,
+      controller: widget.controller,
+      navigator: widget.navigator,
+      settingsStore: widget.settingsStore,
+      artistNameStore: widget.artistNameStore ?? ArtistNameStore(),
+    );
   }
 
   Widget _buildContent(AppDestination destination) {
@@ -218,6 +237,15 @@ class _AppShellState extends State<AppShell> {
           artistNameStore: widget.artistNameStore,
           onOpenFolders: _openFolders,
         );
+      case AppDestination.audioPanels:
+        return AudioPanelsView(
+          key: const ValueKey('view_audio_panels'),
+          engine: widget.engine,
+          eqController: widget.eqController,
+          audioSettingsApplier: widget.audioSettingsApplier,
+          settingsStore: widget.settingsStore,
+          navigator: widget.navigator,
+        );
       case AppDestination.folders:
         // Revert to albums and open modal
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -243,9 +271,11 @@ class _AppShellState extends State<AppShell> {
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
     final currentDestination = widget.navigator.current;
 
+    final Widget rootScaffold;
+
     // Now Playing full-screen card view (releases sidebar and bottom bar blur slots)
     if (currentDestination == AppDestination.nowPlaying) {
-      return Scaffold(
+      rootScaffold = Scaffold(
         backgroundColor: Colors.transparent,
         body: NowPlayingView(
           key: const ValueKey('view_now_playing'),
@@ -255,11 +285,9 @@ class _AppShellState extends State<AppShell> {
           settingsStore: widget.settingsStore,
         ),
       );
-    }
-
-    // In-app immersive Full Screen view
-    if (currentDestination == AppDestination.fullScreen) {
-      return Scaffold(
+    } else if (currentDestination == AppDestination.fullScreen) {
+      // In-app immersive Full Screen view
+      rootScaffold = Scaffold(
         backgroundColor: Colors.transparent,
         body: FullScreenView(
           key: const ValueKey('view_full_screen'),
@@ -269,74 +297,84 @@ class _AppShellState extends State<AppShell> {
           settingsStore: widget.settingsStore,
         ),
       );
-    }
+    } else {
+      rootScaffold = Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            // 1. Ambient static background
+            const Positioned.fill(
+              child: AmbientBackground(),
+            ),
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // 1. Ambient static background
-          const Positioned.fill(
-            child: AmbientBackground(),
-          ),
+            // 2. Main structure: Sidebar + Content Column
+            Positioned.fill(
+              child: Row(
+                children: [
+                  // Start side: Sidebar (blur slot 1)
+                  Sidebar(
+                    navigator: widget.navigator,
+                    settingsStore: widget.settingsStore,
+                    onOpenFolders: _openFolders,
+                  ),
 
-          // 2. Main structure: Sidebar + Content Column
-          Positioned.fill(
-            child: Row(
-              children: [
-                // Start side: Sidebar (blur slot 1)
-                Sidebar(
-                  navigator: widget.navigator,
-                  settingsStore: widget.settingsStore,
-                  onOpenFolders: _openFolders,
-                ),
+                  // Content area & floating now-playing bar
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        // Scrollable content area with padding above bottom bar
+                        Positioned.fill(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 104),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // Top scanning panel
+                                ScanningPanel(scanService: widget.scanService),
 
-                // Content area & floating now-playing bar
-                Expanded(
-                  child: Stack(
-                    children: [
-                      // Scrollable content area with padding above bottom bar
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 104),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // Top scanning panel
-                              ScanningPanel(scanService: widget.scanService),
-
-                              // Active destination view (no blur)
-                              Expanded(
-                                child: AnimatedSwitcher(
-                                  duration: reduceMotion
-                                      ? Duration.zero
-                                      : const Duration(milliseconds: 100),
-                                  child: _buildContent(currentDestination),
+                                // Active destination view (no blur)
+                                Expanded(
+                                  child: AnimatedSwitcher(
+                                    duration: reduceMotion
+                                        ? Duration.zero
+                                        : const Duration(milliseconds: 100),
+                                    child: _buildContent(currentDestination),
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
 
-                      // Floating bottom player bar (blur slot 2, 16dp margins)
-                      PositionedDirectional(
-                        start: 16,
-                        end: 16,
-                        bottom: 16,
-                        height: 84,
-                        child: BottomNowPlayingBar(
-                          controller: widget.controller,
-                          navigator: widget.navigator,
+                        // Floating bottom player bar (blur slot 2, 16dp margins)
+                        PositionedDirectional(
+                          start: 16,
+                          end: 16,
+                          bottom: 16,
+                          height: 84,
+                          child: BottomNowPlayingBar(
+                            controller: widget.controller,
+                            navigator: widget.navigator,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
+      );
+    }
+
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        shortcutById(AppShortcutId.quickSearch).activator: _toggleQuickSearch,
+      },
+      child: Focus(
+        autofocus: false,
+        child: rootScaffold,
       ),
     );
   }

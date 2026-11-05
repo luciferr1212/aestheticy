@@ -121,6 +121,28 @@ class ArtistNameStore extends ChangeNotifier {
     }
   }
 
+  /// Returns original names of up to [limit] entries where [query] matches
+  /// [original], [en], or [ar] (normalized with [TextNormalizer.normalize], contains).
+  List<String> findOriginalNamesMatching(String query, {int limit = 5}) {
+    final normQuery = TextNormalizer.normalize(query);
+    if (normQuery.isEmpty) return const [];
+
+    final results = <String>[];
+    for (final entry in _entries.values) {
+      final normOrig = TextNormalizer.normalize(entry.original);
+      final normEn = TextNormalizer.normalize(entry.en);
+      final normAr = TextNormalizer.normalize(entry.ar);
+
+      if (normOrig.contains(normQuery) ||
+          (normEn.isNotEmpty && normEn.contains(normQuery)) ||
+          (normAr.isNotEmpty && normAr.contains(normQuery))) {
+        results.add(entry.original);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  }
+
   /// Resolves the display artist name using current [AppSettings] mode and language.
   String displayArtist(
     String original, {

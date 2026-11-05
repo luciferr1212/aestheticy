@@ -1,8 +1,41 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+/// Scope in which a shortcut is active.
+enum AppShortcutScope {
+  /// Active globally across the entire application window.
+  global,
+
+  /// Active when Now Playing or Full Screen views are focused.
+  nowPlaying,
+}
+
+/// Identifiers for all supported shortcuts in Aestheticy.
+enum AppShortcutId {
+  /// Toggle play and pause.
+  playPause,
+
+  /// Navigate back or dismiss current view.
+  back,
+
+  /// Seek backward 5 seconds.
+  seekBackward,
+
+  /// Seek forward 5 seconds.
+  seekForward,
+
+  /// Open developer Design Gallery.
+  gallery,
+
+  /// Open quick search overlay (Ctrl+K).
+  quickSearch,
+}
+
 /// Representation of an active keyboard shortcut in Aestheticy.
 class AppShortcutItem {
+  /// Unique identifier of the shortcut.
+  final AppShortcutId id;
+
   /// Visual representation of the keys (e.g. 'Space', 'Ctrl + Shift + G').
   final String keyCombination;
 
@@ -10,13 +43,18 @@ class AppShortcutItem {
   final String descriptionKey;
 
   /// Activator used for runtime bindings where applicable.
-  final ShortcutActivator? activator;
+  final ShortcutActivator activator;
+
+  /// Scope in which this shortcut is active.
+  final AppShortcutScope scope;
 
   /// Creates an [AppShortcutItem].
   const AppShortcutItem({
+    required this.id,
     required this.keyCombination,
     required this.descriptionKey,
-    this.activator,
+    required this.activator,
+    required this.scope,
   });
 }
 
@@ -26,26 +64,35 @@ class AppShortcutItem {
 /// in the app. No unimplemented shortcuts are ever listed.
 const List<AppShortcutItem> kAppShortcuts = [
   AppShortcutItem(
+    id: AppShortcutId.playPause,
     keyCombination: 'Space',
     descriptionKey: 'shortcuts.playPause',
     activator: SingleActivator(LogicalKeyboardKey.space),
+    scope: AppShortcutScope.nowPlaying,
   ),
   AppShortcutItem(
+    id: AppShortcutId.back,
     keyCombination: 'Esc',
     descriptionKey: 'shortcuts.back',
     activator: SingleActivator(LogicalKeyboardKey.escape),
+    scope: AppShortcutScope.nowPlaying,
   ),
   AppShortcutItem(
+    id: AppShortcutId.seekBackward,
     keyCombination: '←',
     descriptionKey: 'shortcuts.seekBackward',
     activator: SingleActivator(LogicalKeyboardKey.arrowLeft),
+    scope: AppShortcutScope.nowPlaying,
   ),
   AppShortcutItem(
+    id: AppShortcutId.seekForward,
     keyCombination: '→',
     descriptionKey: 'shortcuts.seekForward',
     activator: SingleActivator(LogicalKeyboardKey.arrowRight),
+    scope: AppShortcutScope.nowPlaying,
   ),
   AppShortcutItem(
+    id: AppShortcutId.gallery,
     keyCombination: 'Ctrl + Shift + G',
     descriptionKey: 'shortcuts.gallery',
     activator: SingleActivator(
@@ -53,5 +100,48 @@ const List<AppShortcutItem> kAppShortcuts = [
       control: true,
       shift: true,
     ),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.quickSearch,
+    keyCombination: 'Ctrl + K',
+    descriptionKey: 'shortcuts.quickSearch',
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyK,
+      control: true,
+    ),
+    scope: AppShortcutScope.global,
   ),
 ];
+
+/// Looks up an [AppShortcutItem] by its [id].
+AppShortcutItem shortcutById(AppShortcutId id) {
+  return kAppShortcuts.firstWhere((s) => s.id == id);
+}
+
+/// Checks whether a [KeyEvent] matches the shortcut identified by [id].
+bool matchesShortcut(KeyEvent event, AppShortcutId id) {
+  if (event is! KeyDownEvent) return false;
+  for (final item in kAppShortcuts) {
+    if (item.id == id) {
+      return item.activator.accepts(event, HardwareKeyboard.instance);
+    }
+  }
+  return false;
+}
+
+/// Checks whether a [KeyEvent] represents the Up arrow key.
+bool isArrowUpKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.arrowUp;
+}
+
+/// Checks whether a [KeyEvent] represents the Down arrow key.
+bool isArrowDownKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.arrowDown;
+}
+
+/// Checks whether a [KeyEvent] represents the Enter key.
+bool isEnterKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.enter ||
+      event.logicalKey == LogicalKeyboardKey.numpadEnter;
+}

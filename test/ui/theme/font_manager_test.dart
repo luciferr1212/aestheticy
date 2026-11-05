@@ -29,6 +29,11 @@ class _FakeAssetBundle extends Fake implements AssetBundle {
 
 void main() {
   group('FontManager', () {
+    test('FontOption.system does not hold a display string', () {
+      expect(FontOption.system.id, equals('system'));
+      expect(FontOption.system.displayName, isNull);
+    });
+
     test('returns only system default when FontManifest.json throws error', () async {
       final bundle = _FakeAssetBundle({});
       final fonts = await FontManager.loadAvailableFonts(bundle: bundle);

@@ -304,6 +304,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(engine.lastSeekTarget, isNotNull);
 
+      // Left arrow: seek -5s
+      engine.lastSeekTarget = null;
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(engine.lastSeekTarget, isNotNull);
+
       // Esc: calls goBack on navigator
       bool wentBack = false;
       navigator.addListener(() {
