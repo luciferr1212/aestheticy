@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
+import '../../features/collections/user_collections.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
@@ -296,17 +297,31 @@ class FullScreenViewState extends State<FullScreenView>
                                 children: [
                                   _buildArtwork(coverKey, artworkSize),
                                   const SizedBox(height: 28),
-                                  Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
-                                    textDirection: textDirectionFor(title),
-                                    style: AppTypography.title.copyWith(
-                                      fontSize: 32,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.text,
-                                    ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          textDirection:
+                                              textDirectionFor(title),
+                                          style: AppTypography.title.copyWith(
+                                            fontSize: 32,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.text,
+                                          ),
+                                        ),
+                                      ),
+                                      if (hasTrack) ...[
+                                        const SizedBox(width: 10),
+                                        _FullScreenFavoriteButton(
+                                            path: current.uri),
+                                      ],
+                                    ],
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
@@ -605,6 +620,40 @@ class _SlenderProgressLine extends StatelessWidget {
               ],
             );
           },
+        );
+      },
+    );
+  }
+}
+
+class _FullScreenFavoriteButton extends StatelessWidget {
+  final String path;
+
+  const _FullScreenFavoriteButton({required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    final collections = UserCollectionsScope.maybeOf(context);
+    if (collections == null) return const SizedBox.shrink();
+
+    return ListenableBuilder(
+      listenable: collections,
+      builder: (context, _) {
+        final isFav = collections.isFavorite(path);
+
+        return IconButton(
+          key: const Key('fullscreen_favorite_button'),
+          icon: Icon(
+            isFav ? Icons.favorite : Icons.favorite_border,
+            size: 24,
+            color: isFav ? AppColors.accent : AppColors.textMuted,
+          ),
+          tooltip: isFav
+              ? context.t('track.unfavorite')
+              : context.t('track.favorite'),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          onPressed: () => collections.toggleFavorite(path),
         );
       },
     );

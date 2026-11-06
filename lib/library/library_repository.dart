@@ -121,6 +121,65 @@ abstract class LibraryRepository {
   /// Clears all recorded playback events from history.
   Future<void> clearPlayEvents();
 
+  // ── Favorites ────────────────────────────────────────────────────────
+
+  /// Returns the set of all track paths marked as favorite.
+  Future<Set<String>> favoritePaths();
+
+  /// Sets or clears favorite status for the track at [path].
+  Future<void> setFavorite(String path, bool value);
+
+  /// Retrieves all favorited tracks that exist in the library, newest favorite first.
+  Future<List<Track>> favoriteTracks();
+
+  // ── Ratings ──────────────────────────────────────────────────────────
+
+  /// Returns a map of track path to star rating (1..5) for all rated tracks.
+  Future<Map<String, int>> allRatings();
+
+  /// Sets star rating (1..5) for the track at [path], or 0 to clear.
+  /// Throws [ArgumentError] if [stars] is outside 0..5.
+  Future<void> setRating(String path, int stars);
+
+  // ── Playlists ────────────────────────────────────────────────────────
+
+  /// Creates a new empty playlist with [name].
+  ///
+  /// Throws [PlaylistNameException] if name is invalid or duplicate.
+  /// Throws [PlaylistLimitException] if the 500-playlist limit is reached.
+  Future<PlaylistSummary> createPlaylist(String name);
+
+  /// Renames an existing playlist identified by [id].
+  ///
+  /// Throws [PlaylistNameException] if name is invalid or duplicate.
+  Future<void> renamePlaylist(int id, String name);
+
+  /// Deletes a playlist and all its items.
+  Future<void> deletePlaylist(int id);
+
+  /// Lists all playlists with summary statistics.
+  Future<List<PlaylistSummary>> listPlaylists();
+
+  /// Retrieves all entries for playlist [id] in position order.
+  Future<List<PlaylistEntry>> playlistEntries(int id);
+
+  /// Appends [paths] to the end of playlist [id] in order.
+  /// Duplicates are allowed. Returns the number of items added.
+  /// Throws [PlaylistLimitException] if entry limit of 20000 is exceeded.
+  Future<int> addToPlaylist(int id, List<String> paths);
+
+  /// Removes entries with [entryIds] from playlist [id] and renumbers positions without gaps.
+  Future<void> removePlaylistEntries(int id, List<int> entryIds);
+
+  /// Moves entry [entryId] in playlist [id] to [newPosition] and updates order.
+  Future<void> movePlaylistEntry(int id, int entryId, int newPosition);
+
+  // ── Recently Played ──────────────────────────────────────────────────
+
+  /// Retrieves tracks played (counted = 1) from history, distinct by track path,
+  /// newest first, skipping any files not found in the library.
+  Future<List<Track>> recentlyPlayedTracks({int limit = 200});
+
   /// Closes the underlying database connection and releases resources.
   Future<void> close();
 }

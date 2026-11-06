@@ -110,26 +110,33 @@ class Sidebar extends StatelessWidget {
                         _SidebarTile(
                           key: const Key('sidebar_playlists'),
                           icon: Icons.queue_music_outlined,
+                          selectedIcon: Icons.queue_music,
                           title: context.t('nav.playlists'),
                           isCompact: isCompact,
-                          isSoon: true,
-                          onTap: null,
+                          isSelected:
+                              navigator.current == AppDestination.playlists ||
+                              navigator.current == AppDestination.playlistDetail,
+                          onTap: () => navigator.openPlaylists(),
                         ),
                         _SidebarTile(
                           key: const Key('sidebar_favorites'),
                           icon: Icons.favorite_border,
+                          selectedIcon: Icons.favorite,
                           title: context.t('nav.favorites'),
                           isCompact: isCompact,
-                          isSoon: true,
-                          onTap: null,
+                          isSelected:
+                              navigator.current == AppDestination.favorites,
+                          onTap: () => navigator.openFavorites(),
                         ),
                         _SidebarTile(
                           key: const Key('sidebar_recent'),
                           icon: Icons.history,
+                          selectedIcon: Icons.history_toggle_off,
                           title: context.t('nav.recent'),
                           isCompact: isCompact,
-                          isSoon: true,
-                          onTap: null,
+                          isSelected:
+                              navigator.current == AppDestination.recentlyPlayed,
+                          onTap: () => navigator.openRecentlyPlayed(),
                         ),
 
                         const SizedBox(height: 16),

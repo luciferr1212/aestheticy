@@ -183,6 +183,55 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
   Future<void> clearPlayEvents() async {}
 
   @override
+  Future<Set<String>> favoritePaths() async => {};
+
+  @override
+  Future<void> setFavorite(String path, bool value) async {}
+
+  @override
+  Future<List<Track>> favoriteTracks() async => [];
+
+  @override
+  Future<Map<String, int>> allRatings() async => {};
+
+  @override
+  Future<void> setRating(String path, int stars) async {}
+
+  @override
+  Future<PlaylistSummary> createPlaylist(String name) async => PlaylistSummary(
+        id: 1,
+        name: name,
+        trackCount: 0,
+        totalDurationMs: 0,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+  @override
+  Future<void> renamePlaylist(int id, String name) async {}
+
+  @override
+  Future<void> deletePlaylist(int id) async {}
+
+  @override
+  Future<List<PlaylistSummary>> listPlaylists() async => [];
+
+  @override
+  Future<List<PlaylistEntry>> playlistEntries(int id) async => [];
+
+  @override
+  Future<int> addToPlaylist(int id, List<String> paths) async => paths.length;
+
+  @override
+  Future<void> removePlaylistEntries(int id, List<int> entryIds) async {}
+
+  @override
+  Future<void> movePlaylistEntry(int id, int entryId, int newPosition) async {}
+
+  @override
+  Future<List<Track>> recentlyPlayedTracks({int limit = 200}) async => [];
+
+  @override
   Future<void> close() async {}
 }
 
@@ -333,10 +382,20 @@ void main() {
       await tester.pumpAndSettle();
       expect(navigator.current, AppDestination.albums);
 
-      // Tapping Playlists (disabled)
+      // Tapping Playlists (now enabled)
       await tester.tap(find.byKey(const Key('sidebar_playlists')));
       await tester.pumpAndSettle();
-      expect(navigator.current, AppDestination.albums);
+      expect(navigator.current, AppDestination.playlists);
+
+      // Tapping Favorites (now enabled)
+      await tester.tap(find.byKey(const Key('sidebar_favorites')));
+      await tester.pumpAndSettle();
+      expect(navigator.current, AppDestination.favorites);
+
+      // Tapping Recent (now enabled)
+      await tester.tap(find.byKey(const Key('sidebar_recent')));
+      await tester.pumpAndSettle();
+      expect(navigator.current, AppDestination.recentlyPlayed);
 
       // Tapping Audio Lab (enabled)
       await tester.tap(find.byKey(const Key('sidebar_audio_lab')));

@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'package:aestheticy/library/artist_splitter.dart';
 
 /// Target schema version.
-const int kLibrarySchemaVersion = 3;
+const int kLibrarySchemaVersion = 4;
 
 /// Runs database migrations up to [kLibrarySchemaVersion].
 class SchemaMigrator {
@@ -26,6 +26,9 @@ class SchemaMigrator {
     }
     if (currentVersion < 3) {
       _migrateToV3(db);
+    }
+    if (currentVersion < 4) {
+      _migrateToV4(db);
     }
   }
 
@@ -158,6 +161,57 @@ class SchemaMigrator {
       );
 
       db.execute('PRAGMA user_version = 3;');
+      db.execute('COMMIT;');
+    } catch (e) {
+      db.execute('ROLLBACK;');
+      rethrow;
+    }
+  }
+
+  static void _migrateToV4(Database db) {
+    db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS favorites (
+          path TEXT PRIMARY KEY,
+          added_at_ms INTEGER NOT NULL
+        );
+      ''');
+
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS ratings (
+          path TEXT PRIMARY KEY,
+          stars INTEGER NOT NULL CHECK(stars BETWEEN 1 AND 5),
+          rated_at_ms INTEGER NOT NULL
+        );
+      ''');
+
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS playlists (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          created_at_ms INTEGER NOT NULL,
+          updated_at_ms INTEGER NOT NULL
+        );
+      ''');
+
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS playlist_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          path TEXT NOT NULL,
+          added_at_ms INTEGER NOT NULL
+        );
+      ''');
+      db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_pos ON playlist_items(playlist_id, position);',
+      );
+      db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_playlist_items_path ON playlist_items(path);',
+      );
+
+      db.execute('PRAGMA user_version = 4;');
       db.execute('COMMIT;');
     } catch (e) {
       db.execute('ROLLBACK;');

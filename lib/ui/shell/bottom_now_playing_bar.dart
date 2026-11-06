@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
+import '../../features/collections/user_collections.dart';
 import '../../library/cover_cache.dart';
 import 'app_navigator.dart';
 import '../artist_names/artist_name_scope.dart';
@@ -141,16 +142,26 @@ class _TrackInfoArea extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textDirection: textDirectionFor(title),
-                          style: AppTypography.bodyStrong.copyWith(
-                            color: hasTrack
-                                ? AppColors.text
-                                : AppColors.textMuted,
-                          ),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textDirection: textDirectionFor(title),
+                                style: AppTypography.bodyStrong.copyWith(
+                                  color: hasTrack
+                                      ? AppColors.text
+                                      : AppColors.textMuted,
+                                ),
+                              ),
+                            ),
+                            if (hasTrack) ...[
+                              const SizedBox(width: 4),
+                              _PlayerFavoriteButton(path: current.uri),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -534,6 +545,47 @@ class _EndControlsArea extends StatelessWidget {
               navigator != null ? () => navigator!.openFullScreen() : null,
         ),
       ],
+    );
+  }
+}
+
+class _PlayerFavoriteButton extends StatelessWidget {
+  final String path;
+
+  const _PlayerFavoriteButton({required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    final collections = UserCollectionsScope.maybeOf(context);
+    if (collections == null) return const SizedBox.shrink();
+
+    return ListenableBuilder(
+      listenable: collections,
+      builder: (context, _) {
+        final isFav = collections.isFavorite(path);
+
+        return Tooltip(
+          message: isFav
+              ? context.t('track.unfavorite')
+              : context.t('track.favorite'),
+          child: InkResponse(
+            key: const Key('bottom_bar_favorite_button'),
+            radius: 12,
+            onTap: () => collections.toggleFavorite(path),
+            child: SizedBox(
+              width: 18,
+              height: 18,
+              child: Center(
+                child: Icon(
+                  isFav ? Icons.favorite : Icons.favorite_border,
+                  size: 16,
+                  color: isFav ? AppColors.accent : AppColors.textMuted,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

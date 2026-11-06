@@ -145,6 +145,57 @@ class FailingMergeRepository implements LibraryRepository {
   Future<void> clearPlayEvents() => _inner.clearPlayEvents();
 
   @override
+  Future<Set<String>> favoritePaths() => _inner.favoritePaths();
+
+  @override
+  Future<void> setFavorite(String path, bool value) =>
+      _inner.setFavorite(path, value);
+
+  @override
+  Future<List<Track>> favoriteTracks() => _inner.favoriteTracks();
+
+  @override
+  Future<Map<String, int>> allRatings() => _inner.allRatings();
+
+  @override
+  Future<void> setRating(String path, int stars) =>
+      _inner.setRating(path, stars);
+
+  @override
+  Future<PlaylistSummary> createPlaylist(String name) =>
+      _inner.createPlaylist(name);
+
+  @override
+  Future<void> renamePlaylist(int id, String name) =>
+      _inner.renamePlaylist(id, name);
+
+  @override
+  Future<void> deletePlaylist(int id) => _inner.deletePlaylist(id);
+
+  @override
+  Future<List<PlaylistSummary>> listPlaylists() => _inner.listPlaylists();
+
+  @override
+  Future<List<PlaylistEntry>> playlistEntries(int id) =>
+      _inner.playlistEntries(id);
+
+  @override
+  Future<int> addToPlaylist(int id, List<String> paths) =>
+      _inner.addToPlaylist(id, paths);
+
+  @override
+  Future<void> removePlaylistEntries(int id, List<int> entryIds) =>
+      _inner.removePlaylistEntries(id, entryIds);
+
+  @override
+  Future<void> movePlaylistEntry(int id, int entryId, int newPosition) =>
+      _inner.movePlaylistEntry(id, entryId, newPosition);
+
+  @override
+  Future<List<Track>> recentlyPlayedTracks({int limit = 200}) =>
+      _inner.recentlyPlayedTracks(limit: limit);
+
+  @override
   Future<void> close() => _inner.close();
 }
 

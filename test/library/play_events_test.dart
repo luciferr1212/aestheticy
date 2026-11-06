@@ -23,12 +23,12 @@ void main() {
       } catch (_) {}
     });
 
-    test('Fresh database initializes at schema version 3', () {
+    test('Fresh database initializes at current schema version', () {
       final db = sqlite3.openInMemory();
       SchemaMigrator.apply(db);
 
       final versionRow = db.select('PRAGMA user_version;');
-      expect(versionRow.first.values.first, equals(3));
+      expect(versionRow.first.values.first, equals(4));
 
       // play_events table must exist
       final tables = db.select(
@@ -112,10 +112,10 @@ void main() {
       // Open via repository (which runs SchemaMigrator.apply -> migrates v2 to v3)
       final repo = SqliteLibraryRepository.openFile(dbPath);
 
-      // Verify v3 schema
+      // Verify schema version
       final rawCheck = sqlite3.open(dbPath);
       final version = rawCheck.select('PRAGMA user_version;').first.values.first as int;
-      expect(version, equals(3));
+      expect(version, equals(4));
       rawCheck.close();
 
       // Verify existing rows are preserved

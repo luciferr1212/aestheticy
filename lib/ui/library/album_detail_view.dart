@@ -17,6 +17,7 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'track_actions_menu.dart';
 
 /// Album detail screen displaying large artwork, metadata header, Play & Shuffle buttons,
 /// and full tracklist with currently-playing row animation.
@@ -225,78 +226,125 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                                   (activeSource.uri == track.path ||
                                       activeSource.uri == 'file://${track.path}');
 
-                              return RepaintBoundary(
-                                child: Container(
-                                  margin: const EdgeInsets.symmetric(vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: isCurrent
-                                        ? AppColors.accentFill
-                                        : Colors.transparent,
-                                    borderRadius:
-                                        BorderRadius.circular(AppSpacing.r10),
-                                  ),
-                                  child: InkWell(
-                                    borderRadius:
-                                        BorderRadius.circular(AppSpacing.r10),
-                                    onTap: () => _playAlbum(startIndex: index),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 16),
-                                      child: Row(
-                                        children: [
-                                          SizedBox(
-                                            width: 32,
-                                            child: Center(
-                                              child: isCurrent
-                                                  ? _AnimatedEqualizerMini(
-                                                      isPlaying: isPlaying,
-                                                      reduceMotion: reduceMotion,
-                                                    )
-                                                  : Text(
-                                                      context.localizeDigitsText(
-                                                          '${track.trackNo ?? index + 1}'),
-                                                      style: AppTypography.caption
-                                                          .copyWith(
-                                                        color: AppColors.textMuted,
-                                                      ),
-                                                    ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              track.title ??
-                                                  context.t('library.unknownTitle'),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textDirection: textDirectionFor(
-                                                  track.title ?? ''),
-                                              style: AppTypography.body.copyWith(
-                                                color: isCurrent
-                                                    ? AppColors.accent
-                                                    : AppColors.text,
-                                                fontWeight: isCurrent
-                                                    ? FontWeight.w600
-                                                    : FontWeight.w400,
+                              return TrackActionsMenuAnchor(
+                                track: track,
+                                controller: widget.controller,
+                                onPlay: () => _playAlbum(startIndex: index),
+                                builder: (context, menuController) {
+                                  return RepaintBoundary(
+                                    child: Container(
+                                      margin:
+                                          const EdgeInsets.symmetric(vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: isCurrent
+                                            ? AppColors.accentFill
+                                            : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(
+                                            AppSpacing.r10),
+                                      ),
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(
+                                            AppSpacing.r10),
+                                        onTap: () =>
+                                            _playAlbum(startIndex: index),
+                                        onSecondaryTapUp: (details) =>
+                                            menuController.open(
+                                                position: details.localPosition),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16),
+                                          child: Row(
+                                            children: [
+                                              SizedBox(
+                                                width: 32,
+                                                child: Center(
+                                                  child: isCurrent
+                                                      ? _AnimatedEqualizerMini(
+                                                          isPlaying: isPlaying,
+                                                          reduceMotion:
+                                                              reduceMotion,
+                                                        )
+                                                      : Text(
+                                                          context
+                                                              .localizeDigitsText(
+                                                                  '${track.trackNo ?? index + 1}'),
+                                                          style: AppTypography
+                                                              .caption
+                                                              .copyWith(
+                                                            color: AppColors
+                                                                .textMuted,
+                                                          ),
+                                                        ),
+                                                ),
                                               ),
-                                            ),
-                                          ),
-                                          SizedBox(
-                                            width: 56,
-                                            child: Text(
-                                              context.formatDurationLocalized(
-                                                  Duration(milliseconds: track.durationMs)),
-                                              textAlign: TextAlign.end,
-                                              style: AppTypography.caption.copyWith(
-                                                color: AppColors.textMuted,
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Text(
+                                                  track.title ??
+                                                      context.t(
+                                                          'library.unknownTitle'),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textDirection:
+                                                      textDirectionFor(
+                                                          track.title ?? ''),
+                                                  style: AppTypography.body
+                                                      .copyWith(
+                                                    color: isCurrent
+                                                        ? AppColors.accent
+                                                        : AppColors.text,
+                                                    fontWeight: isCurrent
+                                                        ? FontWeight.w600
+                                                        : FontWeight.w400,
+                                                  ),
+                                                ),
                                               ),
-                                            ),
+                                              SizedBox(
+                                                width: 56,
+                                                child: Text(
+                                                  context
+                                                      .formatDurationLocalized(
+                                                          Duration(
+                                                              milliseconds:
+                                                                  track
+                                                                      .durationMs)),
+                                                  textAlign: TextAlign.end,
+                                                  style: AppTypography.caption
+                                                      .copyWith(
+                                                    color: AppColors.textMuted,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              SizedBox(
+                                                width: 32,
+                                                child: Center(
+                                                  child: IconButton(
+                                                    key: Key(
+                                                        'album_track_more_button_$index'),
+                                                    icon: const Icon(
+                                                        Icons.more_horiz,
+                                                        size: 18),
+                                                    tooltip: context.t(
+                                                        'tracks.moreOptions'),
+                                                    onPressed: () {
+                                                      if (menuController.isOpen) {
+                                                        menuController.close();
+                                                      } else {
+                                                        menuController.open();
+                                                      }
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
+                                  );
+                                },
                               );
                             },
                           );

@@ -36,6 +36,18 @@ enum AppDestination {
 
   /// Equalizer and Signal Path audio panels screen.
   audioPanels,
+
+  /// User playlists library screen.
+  playlists,
+
+  /// Detail view for a specific playlist.
+  playlistDetail,
+
+  /// Favorites library screen.
+  favorites,
+
+  /// Recently played tracks screen.
+  recentlyPlayed,
 }
 
 /// Navigation state coordinator managing active destination and detail selection.
@@ -50,6 +62,8 @@ class AppNavigator extends ChangeNotifier {
   AlbumSummary? _savedAlbum;
   String? _savedArtistId;
   ArtistSummary? _savedArtist;
+  int? _savedPlaylistId;
+  PlaylistSummary? _savedPlaylist;
   bool _fullScreenCameFromNowPlaying = false;
 
   String? _selectedAlbumId;
@@ -57,6 +71,9 @@ class AppNavigator extends ChangeNotifier {
 
   String? _selectedArtistId;
   ArtistSummary? _selectedArtist;
+
+  int? _selectedPlaylistId;
+  PlaylistSummary? _selectedPlaylist;
 
   /// Creates an [AppNavigator] defaulting to [AppDestination.albums].
   AppNavigator({AppDestination initialDestination = AppDestination.albums})
@@ -79,6 +96,12 @@ class AppNavigator extends ChangeNotifier {
 
   /// Selected artist model when available.
   ArtistSummary? get selectedArtist => _selectedArtist;
+
+  /// Selected playlist ID when [current] is [AppDestination.playlistDetail].
+  int? get selectedPlaylistId => _selectedPlaylistId;
+
+  /// Selected playlist model when available.
+  PlaylistSummary? get selectedPlaylist => _selectedPlaylist;
 
   /// Navigates to [destination].
   void navigateTo(AppDestination destination) {
@@ -122,6 +145,13 @@ class AppNavigator extends ChangeNotifier {
       _selectedArtistId = null;
       _selectedArtist = null;
     }
+    if (destination != AppDestination.playlistDetail &&
+        destination != AppDestination.nowPlaying &&
+        destination != AppDestination.fullScreen &&
+        destination != AppDestination.audioPanels) {
+      _selectedPlaylistId = null;
+      _selectedPlaylist = null;
+    }
     notifyListeners();
   }
 
@@ -131,6 +161,8 @@ class AppNavigator extends ChangeNotifier {
     _savedAlbum = _selectedAlbum;
     _savedArtistId = _selectedArtistId;
     _savedArtist = _selectedArtist;
+    _savedPlaylistId = _selectedPlaylistId;
+    _savedPlaylist = _selectedPlaylist;
   }
 
   void _restoreSavedState() {
@@ -139,6 +171,8 @@ class AppNavigator extends ChangeNotifier {
     _selectedAlbum = _savedAlbum;
     _selectedArtistId = _savedArtistId;
     _selectedArtist = _savedArtist;
+    _selectedPlaylistId = _savedPlaylistId;
+    _selectedPlaylist = _savedPlaylist;
     _fullScreenCameFromNowPlaying = false;
   }
 
@@ -147,6 +181,26 @@ class AppNavigator extends ChangeNotifier {
 
   /// Opens the immersive Full Screen view.
   void openFullScreen() => navigateTo(AppDestination.fullScreen);
+
+  /// Opens the Playlists view.
+  void openPlaylists() => navigateTo(AppDestination.playlists);
+
+  /// Opens the Favorites view.
+  void openFavorites() => navigateTo(AppDestination.favorites);
+
+  /// Opens the Recently Played view.
+  void openRecentlyPlayed() => navigateTo(AppDestination.recentlyPlayed);
+
+  /// Navigates to the detail screen for the given [id] and [playlist].
+  void openPlaylistDetail(int id, {PlaylistSummary? playlist}) {
+    if (_isListDestination(_current)) {
+      _previousList = _current;
+    }
+    _selectedPlaylistId = id;
+    _selectedPlaylist = playlist;
+    _current = AppDestination.playlistDetail;
+    notifyListeners();
+  }
 
   /// Navigates to the detail screen for the given [albumId] and [album].
   void openAlbumDetail(String albumId, {AlbumSummary? album}) {
@@ -196,6 +250,12 @@ class AppNavigator extends ChangeNotifier {
       _restoreSavedState();
       notifyListeners();
       return true;
+    } else if (_current == AppDestination.playlistDetail) {
+      _current = AppDestination.playlists;
+      _selectedPlaylistId = null;
+      _selectedPlaylist = null;
+      notifyListeners();
+      return true;
     } else if (_current == AppDestination.albumDetail) {
       _current = _previousList == AppDestination.artists
           ? AppDestination.artists
@@ -223,6 +283,9 @@ class AppNavigator extends ChangeNotifier {
   static bool _isListDestination(AppDestination destination) {
     return destination == AppDestination.albums ||
         destination == AppDestination.artists ||
-        destination == AppDestination.tracks;
+        destination == AppDestination.tracks ||
+        destination == AppDestination.playlists ||
+        destination == AppDestination.favorites ||
+        destination == AppDestination.recentlyPlayed;
   }
 }

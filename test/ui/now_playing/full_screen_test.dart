@@ -9,6 +9,8 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/features/collections/user_collections.dart';
+import '../../library/fake_library_repository.dart';
 import 'package:aestheticy/ui/glass/glass_blur_budget.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
@@ -36,6 +38,8 @@ void main() {
     late PlaybackQueue queue;
     late PlaybackController controller;
     late AppNavigator navigator;
+    late FakeLibraryRepository fakeRepo;
+    late UserCollections collections;
 
     setUp(() async {
       GlassBlurBudget.instance.resetForTesting();
@@ -50,9 +54,14 @@ void main() {
       await controller.init();
 
       navigator = AppNavigator();
+
+      fakeRepo = FakeLibraryRepository();
+      collections = UserCollections(repository: fakeRepo);
+      await collections.init();
     });
 
     tearDown(() async {
+      collections.dispose();
       await settingsStore.flush();
       await controller.dispose();
       await engine.dispose();
@@ -84,16 +93,19 @@ void main() {
 
     Widget buildTestWidget({VoidCallback? onTickerFrame}) {
       return MaterialApp(
-        home: GlassScope(
-          controller: GlassController(quality: GlassQuality.full),
-          child: Directionality(
-            textDirection: TextDirection.ltr,
-            child: FullScreenView(
-              controller: controller,
-              engine: engine,
-              navigator: navigator,
-              settingsStore: settingsStore,
-              onTickerFrame: onTickerFrame,
+        home: UserCollectionsScope(
+          collections: collections,
+          child: GlassScope(
+            controller: GlassController(quality: GlassQuality.full),
+            child: Directionality(
+              textDirection: TextDirection.ltr,
+              child: FullScreenView(
+                controller: controller,
+                engine: engine,
+                navigator: navigator,
+                settingsStore: settingsStore,
+                onTickerFrame: onTickerFrame,
+              ),
             ),
           ),
         ),
@@ -339,6 +351,26 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await repo.close();
       await settingsStore.flush();
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    testWidgets('Heart button toggles favorite in FullScreenView', (tester) async {
+      setupDesktopViewport(tester);
+      final tracks = createSampleTracks();
+      await controller.playQueue(tracks, startIndex: 0);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byKey(const Key('fullscreen_favorite_button')), findsOneWidget);
+      expect(collections.isFavorite('track1.flac'), isFalse);
+
+      await tester.tap(find.byKey(const Key('fullscreen_favorite_button')));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(collections.isFavorite('track1.flac'), isTrue);
+
+      await tester.tap(find.byKey(const Key('fullscreen_favorite_button')));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(collections.isFavorite('track1.flac'), isFalse);
     }, timeout: const Timeout(Duration(seconds: 30)));
   });
 }

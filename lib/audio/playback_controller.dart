@@ -252,6 +252,72 @@ class PlaybackController {
     await _preloadNext();
   }
 
+  /// Inserts [sources] immediately after the currently playing track.
+  ///
+  /// If the queue is currently empty, behaves like [playQueue] starting at index 0.
+  /// If the queue is non-empty, preserves the current track and active playback position.
+  Future<void> playNext(List<AudioSource> sources) async {
+    if (sources.isEmpty) return;
+    if (queue.isEmpty || queue.current == null) {
+      await playQueue(sources, startIndex: 0);
+      return;
+    }
+
+    if (queue.isShuffled) {
+      final currentIdx = queue.currentIndex;
+      for (final s in sources) {
+        queue.add(s);
+      }
+      for (var i = 0; i < sources.length; i++) {
+        final s = sources[i];
+        final from = queue.items.lastIndexOf(s);
+        if (from != -1) {
+          queue.move(from, currentIdx + 1 + i);
+        }
+      }
+    } else {
+      final targetIndex = queue.currentIndex + 1;
+      for (var i = 0; i < sources.length; i++) {
+        queue.insert(targetIndex + i, sources[i]);
+      }
+    }
+
+    notifyQueueChanged();
+    unawaited(_preloadNext());
+  }
+
+  /// Appends [sources] to the end of the playback queue.
+  ///
+  /// If the queue is currently empty, behaves like [playQueue] starting at index 0.
+  Future<void> addToQueue(List<AudioSource> sources) async {
+    if (sources.isEmpty) return;
+    if (queue.isEmpty || queue.current == null) {
+      await playQueue(sources, startIndex: 0);
+      return;
+    }
+
+    if (queue.isShuffled) {
+      for (final s in sources) {
+        queue.add(s);
+      }
+      final baseTarget = queue.length - sources.length;
+      for (var i = 0; i < sources.length; i++) {
+        final s = sources[i];
+        final from = queue.items.indexOf(s);
+        if (from != -1) {
+          queue.move(from, baseTarget + i);
+        }
+      }
+    } else {
+      for (final s in sources) {
+        queue.add(s);
+      }
+    }
+
+    notifyQueueChanged();
+    unawaited(_preloadNext());
+  }
+
   /// Pauses playback.
   Future<void> pause() async {
     await engine.pause();

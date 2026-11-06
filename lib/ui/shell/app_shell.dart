@@ -7,11 +7,16 @@ import '../../features/audio_lab/audio_lab_screen.dart';
 import '../../features/library/folder_management_sheet.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../../features/collections/user_collections.dart';
 import '../../library/scan_service.dart';
 import '../library/album_detail_view.dart';
 import '../library/albums_view.dart';
 import '../library/artist_detail_view.dart';
 import '../library/artists_view.dart';
+import '../library/favorites_view.dart';
+import '../library/playlist_detail_view.dart';
+import '../library/playlists_view.dart';
+import '../library/recently_played_view.dart';
 import '../library/tracks_view.dart';
 import '../library/welcome_view.dart';
 import '../now_playing/full_screen_view.dart';
@@ -63,6 +68,9 @@ class AppShell extends StatefulWidget {
   /// Optional equalizer controller.
   final EqController? eqController;
 
+  /// Optional user collections coordinator.
+  final UserCollections? userCollections;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -76,6 +84,7 @@ class AppShell extends StatefulWidget {
     this.audioSettingsApplier,
     this.artistNameStore,
     this.eqController,
+    this.userCollections,
   });
 
   @override
@@ -83,12 +92,18 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  late final UserCollections _userCollections;
   List<LibraryFolder> _folders = [];
   bool _isLoadingFolders = true;
 
   @override
   void initState() {
     super.initState();
+    _userCollections = widget.userCollections ??
+        UserCollections(repository: widget.repository);
+    if (!_userCollections.isLoaded) {
+      _userCollections.init();
+    }
     _loadFolders();
     widget.navigator.addListener(_onNavigatorChange);
     widget.scanService.addListener(_onScanChange);
@@ -246,6 +261,44 @@ class _AppShellState extends State<AppShell> {
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
         );
+      case AppDestination.playlists:
+        return PlaylistsView(
+          key: const ValueKey('view_playlists'),
+          collections: _userCollections,
+          repository: widget.repository,
+          controller: widget.controller,
+          settingsStore: widget.settingsStore,
+          navigator: widget.navigator,
+        );
+      case AppDestination.playlistDetail:
+        final playlistId = widget.navigator.selectedPlaylistId ?? 0;
+        final playlist = widget.navigator.selectedPlaylist;
+        return PlaylistDetailView(
+          key: ValueKey('view_playlist_detail_$playlistId'),
+          playlistId: playlistId,
+          initialPlaylist: playlist,
+          repository: widget.repository,
+          collections: _userCollections,
+          controller: widget.controller,
+          settingsStore: widget.settingsStore,
+          navigator: widget.navigator,
+        );
+      case AppDestination.favorites:
+        return FavoritesView(
+          key: const ValueKey('view_favorites'),
+          repository: widget.repository,
+          collections: _userCollections,
+          controller: widget.controller,
+          settingsStore: widget.settingsStore,
+        );
+      case AppDestination.recentlyPlayed:
+        return RecentlyPlayedView(
+          key: const ValueKey('view_recently_played'),
+          repository: widget.repository,
+          controller: widget.controller,
+          settingsStore: widget.settingsStore,
+          collections: _userCollections,
+        );
       case AppDestination.folders:
         // Revert to albums and open modal
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -374,7 +427,10 @@ class _AppShellState extends State<AppShell> {
       },
       child: Focus(
         autofocus: false,
-        child: rootScaffold,
+        child: UserCollectionsScope(
+          collections: _userCollections,
+          child: rootScaffold,
+        ),
       ),
     );
   }

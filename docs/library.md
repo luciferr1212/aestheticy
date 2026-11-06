@@ -10,7 +10,7 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
 
 ---
 
-## SQLite Database Schema (Version 3)
+## SQLite Database Schema (Version 4)
 
 ```text
 ┌───────────────────────────────┐
@@ -63,6 +63,36 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
 │ counted        INTEGER NOT NULL (0/1)  │
 │ completed      INTEGER NOT NULL (0/1)  │
 └────────────────────────────────────────┘
+
+┌────────────────────────────────────────┐        ┌────────────────────────────────────────┐
+│               favorites                │        │                ratings                 │
+├────────────────────────────────────────┤        ├────────────────────────────────────────┤
+│ path         TEXT PRIMARY KEY          │        │ path         TEXT PRIMARY KEY          │
+│ added_at_ms  INTEGER NOT NULL          │        │ stars        INTEGER NOT NULL (1..5)   │
+└────────────────────────────────────────┘        │ rated_at_ms  INTEGER NOT NULL          │
+                                                  └────────────────────────────────────────┘
+
+┌────────────────────────────────────────┐
+│               playlists                │
+├────────────────────────────────────────┤
+│ id            INTEGER PK AUTOINCREMENT │
+│ name          TEXT NOT NULL            │
+│ created_at_ms INTEGER NOT NULL         │
+│ updated_at_ms INTEGER NOT NULL         │
+└───────────────────┬────────────────────┘
+                    │ 1
+                    │
+                    │ * (ON DELETE CASCADE)
+                    ▼
+┌────────────────────────────────────────┐
+│             playlist_items             │
+├────────────────────────────────────────┤
+│ id            INTEGER PK AUTOINCREMENT │
+│ playlist_id   INTEGER NOT NULL (FK)    │
+│ position      INTEGER NOT NULL         │
+│ path          TEXT NOT NULL (INDEX)    │
+│ added_at_ms   INTEGER NOT NULL         │
+└────────────────────────────────────────┘
 ```
 
 ### Tables
@@ -109,11 +139,33 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
    - `counted`: Integer boolean flag (`1` if scrobble/play threshold reached, `0` otherwise).
    - `completed`: Integer boolean flag (`1` if playback reached natural track completion, `0` otherwise).
 
+7. **`favorites`** (Introduced in Schema v4)
+   - `path`: Normalized audio file path (`PRIMARY KEY`). Keyed by file path so user favorites persist across folder removals, library rescans, and file re-upserts.
+   - `added_at_ms`: UTC epoch milliseconds when the track was favorited (enables sorting newest favorite first).
+
+8. **`ratings`** (Introduced in Schema v4)
+   - `path`: Normalized audio file path (`PRIMARY KEY`). Keyed by file path so star ratings survive library rescans.
+   - `stars`: Integer rating value strictly constrained between 1 and 5 (`CHECK(stars BETWEEN 1 AND 5)`). 0 removes the row.
+   - `rated_at_ms`: UTC epoch milliseconds timestamp when rated.
+
+9. **`playlists`** (Introduced in Schema v4)
+   - `id`: Auto-incrementing primary key.
+   - `name`: Trimmed display name (1 to 60 characters, case-insensitively unique).
+   - `created_at_ms`: UTC epoch milliseconds when playlist was created.
+   - `updated_at_ms`: UTC epoch milliseconds when playlist was last modified (entries added, reordered, or removed).
+
+10. **`playlist_items`** (Introduced in Schema v4)
+    - `id`: Auto-incrementing primary key for the playlist entry item.
+    - `playlist_id`: Foreign key referencing `playlists(id)` with `ON DELETE CASCADE`.
+    - `position`: Zero-based contiguous ordering index within the playlist.
+    - `path`: Audio file path of the track (`NOT NULL`). Can point to files currently not in the local library (e.g. from M3U imports).
+    - `added_at_ms`: UTC epoch milliseconds when the entry was added.
+
 ### Indexes & Pragmas
 
 - **Pragmas:**
   - `PRAGMA foreign_keys = ON;` enforced on every opened connection to guarantee relational integrity.
-  - `PRAGMA user_version = 3` tracks the applied schema migration.
+  - `PRAGMA user_version = 4;` tracks the applied schema migration.
 - **Indexes:**
   - `idx_tracks_folder_id` on `tracks(folder_id)`: Accelerates cascaded operations and folder-scoped queries.
   - `idx_tracks_album` on `tracks(album)`: Speeds up album aggregation and filtering.
@@ -123,6 +175,8 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
   - `idx_track_artists_artist_key` on `track_artists(artist_key)`: Accelerates artist lookups and track aggregations.
   - `idx_play_events_started_at` on `play_events(started_at_ms)`: Fast retrieval of recent play history.
   - `idx_play_events_uri` on `play_events(uri)`: Accelerated history lookup by track URI.
+  - `idx_playlist_items_pos` on `playlist_items(playlist_id, position)`: Fast ordered retrieval and renumbering of playlist tracks.
+  - `idx_playlist_items_path` on `playlist_items(path)`: Accelerated lookup of playlists containing a specific track.
 
 ---
 
@@ -168,6 +222,84 @@ Phase 3c introduces playback tracking and scrobbled history persisted via `Libra
 - `recentPlayEvents({int limit = 50})`: Retrieves recent listening sessions in reverse chronological order (`ORDER BY started_at_ms DESC`).
 - `playEventCount({bool countedOnly = false})`: Returns total event count or scrobbled play count (`counted = 1`).
 - `clearPlayEvents()`: Clears all historical playback records atomically within a transaction.
+
+---
+
+## Schema V4 & Path-Keyed Collections Design
+
+### The Path-Keyed Architecture Decision
+In traditional desktop music players, tying user metadata (favorites, star ratings, playlists) to autoincrement integer row IDs (`tracks.id`) causes severe fragility:
+1. When a user removes a music folder and later re-adds it, SQLite assigns new integer IDs to the rescanned tracks.
+2. If metadata were keyed by `tracks.id` with `ON DELETE CASCADE`, all user playlists, star ratings, and favorites would be permanently destroyed when a folder is removed.
+3. If foreign keys were disabled, the IDs would become orphaned or re-link to unrelated new audio files.
+
+**The Solution:** All user collections (`favorites`, `ratings`, `playlist_items`, and `play_events.uri`) are keyed strictly by the track's **filesystem path** (`tracks.path` / `AudioSource.uri`), NOT by `tracks.id`.
+- **Survives Rescans & Folder Removal:** When folders are removed and re-added, favorites and ratings instantly re-attach to the track.
+- **Tolerant Playlists:** A playlist can contain entries for files not currently indexed in the library (e.g. from an imported M3U whose songs live outside watched folders). Such tracks are retained in `playlist_items` with `track = null` and render dimmed in the UI with a "Not in library" label, without disappearing from the playlist.
+- **Cascade Safety:** Deleting a playlist deletes its items in the same atomic transaction via explicit `DELETE FROM playlist_items WHERE playlist_id = ?` to guarantee cleanup even if SQLite foreign keys are disabled on custom connections.
+
+---
+
+## User Collections Controller (`UserCollections`)
+
+The `UserCollections` controller (`lib/features/collections/user_collections.dart`) is an in-memory `ChangeNotifier` providing zero-latency state access to the UI layer:
+- **Startup Caching:** Preloads all favorite paths (`Set<String>`), star ratings (`Map<String, int>`), and playlist summaries on startup.
+- **Synchronous Reads:** `isFavorite(path)`, `ratingOf(path)` (returns 0 for unrated), and `playlists` return in O(1) time without async layout pauses or `FutureBuilder` flicker.
+- **Optimistic Mutators:** `toggleFavorite(path)`, `setRating(path, stars)`, `deletePlaylist(id)`, etc. immediately mutate in-memory state and notify listeners. If the repository operation fails:
+  - In-memory state is automatically rolled back to its previous snapshot.
+  - Listeners are re-notified to update the UI.
+  - The failure is logged with file privacy protection (`p.basename(path)` only, never full absolute paths).
+  - The typed exception is rethrown for presentation in snackbars/dialogs.
+- **Inherited Access:** Accessible via `UserCollectionsScope` and `context.collections`.
+
+---
+
+## Library Repository API Extensions (Schema V4)
+
+`LibraryRepository` and `SqliteLibraryRepository` expose 14 new methods for user collections:
+
+### Favorites
+- `Future<Set<String>> favoritePaths()`: Retrieves the set of all favorited track paths.
+- `Future<void> setFavorite(String path, bool value)`: Adds or removes a track from favorites.
+- `Future<List<Track>> favoriteTracks()`: Returns fully resolved `Track` objects for all favorites joined to `tracks`, newest favorite first (`ORDER BY favorites.added_at_ms DESC`). Favorites whose files are missing from `tracks` are skipped here but kept in the table.
+
+### Star Ratings
+- `Future<Map<String, int>> allRatings()`: Retrieves a map of track paths to star ratings (1..5).
+- `Future<void> setRating(String path, int stars)`: Sets or clears rating for a track path. Passing `0` deletes the rating. Passing values outside `0..5` throws `ArgumentError`.
+
+### Playlists
+- `Future<PlaylistSummary> createPlaylist(String name)`: Creates a new playlist with trimmed name (1..60 chars, case-insensitively unique). Throws `PlaylistNameException` on blank/length/duplicate errors or `PlaylistLimitException` if the maximum 500 playlists limit is exceeded.
+- `Future<void> renamePlaylist(int id, String name)`: Renames a playlist with validation and duplicate checks.
+- `Future<void> deletePlaylist(int id)`: Atomically deletes the playlist and all its items.
+- `Future<List<PlaylistSummary>> listPlaylists()`: Returns all playlists with track counts, total duration, and cover key (derived from the first resolvable track).
+- `Future<List<PlaylistEntry>> playlistEntries(int id)`: Returns ordered entries (`position ASC`) with resolved `Track?` (null for unindexed files).
+- `Future<int> addToPlaylist(int id, List<String> paths)`: Appends track paths to the playlist, assigning contiguous positions. Allows duplicates; enforces max 20,000 entries per playlist.
+- `Future<void> removePlaylistEntries(int id, List<int> entryIds)`: Deletes entries and renumbers remaining items contiguously (0, 1, 2...) without gaps.
+- `Future<void> movePlaylistEntry(int id, int entryId, int newPosition)`: Moves an entry to a new position index, shifting affected entries and updating `updated_at_ms`.
+
+### Recently Played
+- `Future<List<Track>> recentlyPlayedTracks({int limit = 200})`: Returns distinct tracks played (`counted = 1`) from `play_events`, newest play session first, joined to `tracks`. Missing files are skipped.
+
+---
+
+## M3U / M3U8 Specification & Import/Export
+
+The `M3u` subsystem (`lib/features/collections/m3u.dart`) provides robust playlist interoperability:
+
+### Export (`M3u.exportPlaylist` / `buildM3u`)
+- Writes extended M3U format (`#EXTM3U`, `#PLAYLIST:<name>`, `#EXTINF:<seconds>,<Artist> - <Title>`).
+- Missing tracks write `#EXTINF:-1,<Title>`.
+- Emits UTF-8 with Byte Order Mark (`\uFEFF`) to prevent character encoding corruption when opened in Windows Notepad, VLC, foobar2000, or mobile players.
+- Prompts user destination via `FilePicker.saveFile` with default filename `<playlist-name>.m3u8` (sanitized against invalid filesystem characters `\ / : * ? " < > |`).
+
+### Import (`M3u.importPlaylist` / `parseM3u`)
+- Strips UTF-8 BOM if present; handles both Windows CRLF (`\r\n`) and UNIX LF (`\n`).
+- Resolves relative file paths against the M3U file's parent folder.
+- Detects and filters out web streams (`http://`, `https://`), reporting the count of skipped streams to the user.
+- Extracts playlist title from `#PLAYLIST:` header or falls back to the M3U file's basename.
+- Resolves name collisions automatically by appending `" (2)"`, `" (3)"`, etc., up to 60 characters.
+- Reports summary feedback to the user via localized SnackBar: `Added X tracks (Y not in library, Z web links skipped)`.
+- Pure functions and service helpers accept mockable picker interfaces for deterministic unit and widget testing without native file dialog popups.
 
 ---
 

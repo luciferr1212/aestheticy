@@ -504,3 +504,182 @@ class PlayEvent {
       'PlayEvent(id: $id, uri: $uri, title: $title, artist: $artist, '
       'startedAt: $startedAt, listenedMs: $listenedMs, counted: $counted, completed: $completed)';
 }
+
+/// Read model representing a user playlist and its aggregate metadata.
+class PlaylistSummary {
+  /// Unique database row ID.
+  final int id;
+
+  /// Playlist display name.
+  final String name;
+
+  /// Total number of tracks in this playlist.
+  final int trackCount;
+
+  /// Total duration of resolvable tracks in milliseconds.
+  final int totalDurationMs;
+
+  /// Timestamp when the playlist was created.
+  final DateTime createdAt;
+
+  /// Timestamp when the playlist was last updated.
+  final DateTime updatedAt;
+
+  /// Cover artwork key of the first resolvable track, if any.
+  final String? coverKey;
+
+  /// Creates an immutable [PlaylistSummary] instance.
+  const PlaylistSummary({
+    required this.id,
+    required this.name,
+    required this.trackCount,
+    required this.totalDurationMs,
+    required this.createdAt,
+    required this.updatedAt,
+    this.coverKey,
+  });
+
+  /// Creates a copy of this [PlaylistSummary] with the given fields replaced.
+  PlaylistSummary copyWith({
+    int? id,
+    String? name,
+    int? trackCount,
+    int? totalDurationMs,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    String? coverKey,
+  }) {
+    return PlaylistSummary(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      trackCount: trackCount ?? this.trackCount,
+      totalDurationMs: totalDurationMs ?? this.totalDurationMs,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      coverKey: coverKey ?? this.coverKey,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          trackCount == other.trackCount &&
+          totalDurationMs == other.totalDurationMs &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt &&
+          coverKey == other.coverKey;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        name,
+        trackCount,
+        totalDurationMs,
+        createdAt,
+        updatedAt,
+        coverKey,
+      );
+
+  @override
+  String toString() =>
+      'PlaylistSummary(id: $id, name: $name, trackCount: $trackCount, duration: $totalDurationMs)';
+}
+
+/// An entry within a playlist, holding its entry ID, 0-based position, path,
+/// and the resolved [Track] if present in the user library.
+class PlaylistEntry {
+  /// Unique database row ID for this playlist item.
+  final int entryId;
+
+  /// 0-based position within the playlist.
+  final int position;
+
+  /// Target file path of the track.
+  final String path;
+
+  /// Resolved library [Track], or null if the file is not currently in the library.
+  final Track? track;
+
+  /// Creates an immutable [PlaylistEntry] instance.
+  const PlaylistEntry({
+    required this.entryId,
+    required this.position,
+    required this.path,
+    this.track,
+  });
+
+  /// Creates a copy of this [PlaylistEntry] with the given fields replaced.
+  PlaylistEntry copyWith({
+    int? entryId,
+    int? position,
+    String? path,
+    Track? track,
+  }) {
+    return PlaylistEntry(
+      entryId: entryId ?? this.entryId,
+      position: position ?? this.position,
+      path: path ?? this.path,
+      track: track ?? this.track,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistEntry &&
+          runtimeType == other.runtimeType &&
+          entryId == other.entryId &&
+          position == other.position &&
+          path == other.path &&
+          track == other.track;
+
+  @override
+  int get hashCode => Object.hash(entryId, position, path, track);
+
+  @override
+  String toString() =>
+      'PlaylistEntry(entryId: $entryId, pos: $position, path: $path, track: ${track?.title})';
+}
+
+/// Reason code for playlist name validation errors.
+enum PlaylistNameError {
+  /// Name is empty or only whitespace.
+  empty,
+
+  /// Name exceeds 60 characters.
+  tooLong,
+
+  /// A playlist with this name already exists (case-insensitive).
+  duplicate,
+}
+
+/// Exception thrown when a playlist name is invalid.
+class PlaylistNameException implements Exception {
+  /// The specific name validation error.
+  final PlaylistNameError error;
+
+  /// The offending name, if known.
+  final String? name;
+
+  /// Creates a [PlaylistNameException].
+  const PlaylistNameException(this.error, {this.name});
+
+  @override
+  String toString() => 'PlaylistNameException: $error (name: $name)';
+}
+
+/// Exception thrown when a playlist capacity limit is reached.
+class PlaylistLimitException implements Exception {
+  /// Explanatory message.
+  final String message;
+
+  /// Creates a [PlaylistLimitException].
+  const PlaylistLimitException(this.message);
+
+  @override
+  String toString() => 'PlaylistLimitException: $message';
+}

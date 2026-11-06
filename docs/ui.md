@@ -400,9 +400,91 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
 
 ---
 
-## 22. Known Limitations
+## 22. Shared Track Table (`lib/ui/library/track_table.dart`)
 
-- **Local Build Workload:** Local compilation of native Windows `.exe` binaries is disabled due to absence of Visual Studio C++ build tools; all native binaries are compiled via GitHub Actions CI.
+Phase 3c extracts a reusable desktop table component `TrackTable` from `TracksView`:
+- **Columns:**
+  - Row position `#` (swaps to animated equalizer bars when actively playing; shows a warning circle if the file is missing).
+  - Artwork thumbnail (falls back to calm dark music note icon).
+  - Title (emphasized primary text).
+  - Artist (rendered via `context.displayArtist`, routed to artist detail on click).
+  - Album (secondary text, routed to album detail on click).
+  - Duration (formatted mm:ss localized).
+  - Trailing action button (opens `TrackActionsMenu`).
+- **Dimmed Missing Files:** Tracks whose files are missing from the library (e.g. from an imported M3U) render dimmed at 40% opacity with a localized "Not in library" label and disabled play actions, preventing crash loops.
+- **Used Across Views:** `TracksView`, `AlbumDetailView`, `PlaylistDetailView`, `FavoritesView`, and `RecentlyPlayedView` all share this identical table component without visual regressions.
+
+---
+
+## 23. Track Actions Menu (`lib/ui/library/track_actions_menu.dart`)
+
+Every row in `TrackTable` and album detail views exposes a unified `TrackActionsMenu` via both **right click** (secondary tap anywhere on the row) and the **"more" (three dots) icon button**:
+- **Menu Actions:**
+  - **Play:** Immediately clears the queue and starts playback of the selected track.
+  - **Play next:** Inserts the track immediately after the currently playing song without interrupting playback.
+  - **Add to queue:** Appends the track to the end of the active playback queue.
+  - **Add to playlist (Submenu):** Dynamically lists all user playlists; tapping one appends the track. Includes a "New playlist..." item triggering the creation dialog.
+  - **Star rating (Submenu):** Displays 1 to 5 star items with an active checkmark on the current rating, plus a "Clear rating" item.
+  - **Remove from playlist / Move actions:** Displayed contextually when invoked from `PlaylistDetailView`.
+- **Dialogs:** Localized modal glass dialogs for "New playlist", "Rename playlist", and "Delete playlist" with validation (1..60 chars, duplicate prevention) and keyboard support (`Enter` submits, `Esc` dismisses).
+
+---
+
+## 24. User Collections Screens (`lib/ui/library/`)
+
+### Playlists View (`PlaylistsView`)
+- Responsive grid of glass cards representing user playlists.
+- Each card displays derived album artwork (from the first resolvable song), playlist title, track count, and formatted total duration.
+- Card context menu allows renaming, deleting, and exporting as M3U.
+- Top bar features a "New playlist" glass button and "Import M3U" button.
+- Localized empty state when no playlists exist.
+
+### Playlist Detail View (`PlaylistDetailView`)
+- Back button navigation restoring previous destination history.
+- Large cover art thumbnail and header displaying title, track count, and total duration.
+- "Play" and "Shuffle" buttons (automatically skipping any missing/unindexed files).
+- "Export M3U" button exporting playlist to `.m3u8` with UTF-8 BOM.
+- Interactive `TrackTable` with row reordering (Move up, Move down) and removal.
+
+### Favorites View (`FavoritesView`)
+- Displays all favorited tracks in reverse chronological order (`newest favorite first`).
+- "Play" and "Shuffle" header controls.
+- Reactive live removal: when an item is unfavorited from the menu or bottom bar, the row immediately unmounts from the view.
+- Localized empty state when no favorites exist.
+
+### Recently Played View (`RecentlyPlayedView`)
+- Displays up to 200 distinct tracks recently played (`counted = 1`), newest play session first.
+- "Play" button playing the full recent history in order.
+- Localized empty state when listening history is empty.
+
+---
+
+## 25. Player Controls: Heart & Star Ratings
+
+### Heart Favorite Toggle
+- **Bottom Bar (`BottomNowPlayingBar`):** Compact heart icon button adjacent to the track title. Toggles favorite state with instant visual feedback and localized tooltips (`track.favorite` / `track.unfavorite`).
+- **Now Playing Views (`NowPlayingView` / `FullScreenView`):** Heart toggle button placed adjacent to track metadata.
+- **States:** Outlined heart in muted text color when un-favorited; filled heart in coral/accent when favorited.
+
+### 5-Star Rating Control
+- Available in desktop two-column `NowPlayingView` and `TrackActionsMenu`.
+- Displays 5 interactive star icons:
+  - Hover highlights target stars.
+  - Clicking star `N` assigns an `N`-star rating.
+  - Clicking the current star rating clears the rating to 0.
+
+---
+
+## 26. Visual Compromises & Architectural Decisions
+
+- **Star Rating Column Omission in TrackTable:** In a minimum window width of 1000px (with 200px sidebar, 48px padding, leaving ~752px content width), adding a dedicated 5-star column cramped the Title, Artist, and Album columns. Per prompt guidelines, star ratings were omitted from the shared table columns to preserve layout readability and are accessed via `TrackActionsMenu`, the bottom bar, and `NowPlayingView`.
+- **Bottom Bar Heart Button Layout:** Using standard `IconButton` with default 8px padding caused a 5.0px RenderFlex overflow inside the 62px constrained bottom bar info column. Replaced with `Tooltip` + `InkResponse` (18x18 bounded box, 16px icon) providing full touch target responsiveness without vertical overflow.
+
+---
+
+## 27. Known Limitations
+
+- **Local Build Workload & Audio Engine:** Local compilation of native Windows `.exe` binaries is disabled due to absence of Visual Studio C++ build tools; all native binaries are compiled via GitHub Actions CI. libmpv audio engine playback is not exercised by local test suites and requires testing on the GitHub Actions Windows desktop build artifact.
 - **Headless Performance Benchmarks:** In unit and widget tests, frame timing callbacks operate within simulated clock dispatchers. Real GPU raster and build times must be evaluated directly on the Windows release executable using the Design Gallery.
 - **Glass Fallback Re-acquisition:** A GlassSurface that fell back to `light` because the blur budget was full does not re-acquire a slot until quality changes.
 - **Tools > Last.fm Placeholder:** Last.fm integration in the sidebar is currently a disabled placeholder with a neutral icon; no scrobbling, authentication, or external web browsing is active.

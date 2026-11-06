@@ -11,6 +11,8 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/features/collections/user_collections.dart';
+import '../../library/fake_library_repository.dart';
 import 'package:aestheticy/ui/glass/glass_blur_budget.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
@@ -47,6 +49,8 @@ void main() {
     late PlaybackQueue queue;
     late PlaybackController controller;
     late AppNavigator navigator;
+    late FakeLibraryRepository fakeRepo;
+    late UserCollections collections;
 
     setUp(() async {
       GlassBlurBudget.instance.resetForTesting();
@@ -62,9 +66,14 @@ void main() {
       await controller.init();
 
       navigator = AppNavigator();
+
+      fakeRepo = FakeLibraryRepository();
+      collections = UserCollections(repository: fakeRepo);
+      await collections.init();
     });
 
     tearDown(() async {
+      collections.dispose();
       await controller.dispose();
       await engine.dispose();
       settingsStore.dispose();
@@ -109,16 +118,19 @@ void main() {
 
     Widget buildTestWidget({VoidCallback? onMetadataBuild}) {
       return MaterialApp(
-        home: GlassScope(
-          controller: GlassController(quality: GlassQuality.full),
-          child: Directionality(
-            textDirection: TextDirection.ltr,
-            child: NowPlayingView(
-              controller: controller,
-              engine: engine,
-              navigator: navigator,
-              settingsStore: settingsStore,
-              onMetadataBuild: onMetadataBuild,
+        home: UserCollectionsScope(
+          collections: collections,
+          child: GlassScope(
+            controller: GlassController(quality: GlassQuality.full),
+            child: Directionality(
+              textDirection: TextDirection.ltr,
+              child: NowPlayingView(
+                controller: controller,
+                engine: engine,
+                navigator: navigator,
+                settingsStore: settingsStore,
+                onMetadataBuild: onMetadataBuild,
+              ),
             ),
           ),
         ),
@@ -369,5 +381,42 @@ void main() {
 
       await repo.close();
     });
+
+    testWidgets(
+      'Heart button toggles favorite and 5-star rating sets and clears in NowPlayingView',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        setupDesktopViewport(tester);
+        final tracks = createSampleTracks();
+        await controller.playQueue(tracks, startIndex: 0);
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('now_playing_favorite_button')), findsOneWidget);
+        expect(collections.isFavorite('track1.flac'), isFalse);
+
+        // Toggle favorite on
+        await tester.tap(find.byKey(const Key('now_playing_favorite_button')));
+        await tester.pumpAndSettle();
+        expect(collections.isFavorite('track1.flac'), isTrue);
+
+        // Toggle favorite off
+        await tester.tap(find.byKey(const Key('now_playing_favorite_button')));
+        await tester.pumpAndSettle();
+        expect(collections.isFavorite('track1.flac'), isFalse);
+
+        // 5-star rating: click star 4 to rate 4
+        expect(find.byKey(const Key('rating_star_4')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('rating_star_4')));
+        await tester.pumpAndSettle();
+        expect(collections.ratingOf('track1.flac'), 4);
+
+        // Click same star 4 to clear rating
+        await tester.tap(find.byKey(const Key('rating_star_4')));
+        await tester.pumpAndSettle();
+        expect(collections.ratingOf('track1.flac'), 0);
+      },
+    );
   });
 }

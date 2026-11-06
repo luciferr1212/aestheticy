@@ -9,6 +9,7 @@ import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
 import '../../audio/playback_queue.dart';
+import '../../features/collections/user_collections.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
@@ -236,6 +237,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                           title: title,
                                           artist: artist,
                                           album: album,
+                                          trackPath: current?.uri,
                                           onBuild: widget.onMetadataBuild,
                                         ),
                                         const SizedBox(height: 16),
@@ -727,12 +729,14 @@ class _MetadataArea extends StatelessWidget {
   final String title;
   final String artist;
   final String album;
+  final String? trackPath;
   final VoidCallback? onBuild;
 
   const _MetadataArea({
     required this.title,
     required this.artist,
     required this.album,
+    this.trackPath,
     this.onBuild,
   });
 
@@ -742,13 +746,26 @@ class _MetadataArea extends StatelessWidget {
 
     return Column(
       children: [
-        Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          textDirection: textDirectionFor(title),
-          style: AppTypography.title.copyWith(fontSize: 24, fontWeight: FontWeight.bold),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                textDirection: textDirectionFor(title),
+                style: AppTypography.title
+                    .copyWith(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+            ),
+            if (trackPath != null) ...[
+              const SizedBox(width: 8),
+              _NowPlayingFavoriteButton(path: trackPath!),
+            ],
+          ],
         ),
         const SizedBox(height: 4),
         Text(
@@ -776,7 +793,97 @@ class _MetadataArea extends StatelessWidget {
             ),
           ),
         ],
+        if (trackPath != null) ...[
+          const SizedBox(height: 10),
+          _TrackStarRatingControl(trackPath: trackPath!),
+        ],
       ],
+    );
+  }
+}
+
+class _NowPlayingFavoriteButton extends StatelessWidget {
+  final String path;
+
+  const _NowPlayingFavoriteButton({required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    final collections = UserCollectionsScope.maybeOf(context);
+    if (collections == null) return const SizedBox.shrink();
+
+    return ListenableBuilder(
+      listenable: collections,
+      builder: (context, _) {
+        final isFav = collections.isFavorite(path);
+
+        return IconButton(
+          key: const Key('now_playing_favorite_button'),
+          icon: Icon(
+            isFav ? Icons.favorite : Icons.favorite_border,
+            size: 22,
+            color: isFav ? AppColors.accent : AppColors.textMuted,
+          ),
+          tooltip: isFav
+              ? context.t('track.unfavorite')
+              : context.t('track.favorite'),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: () => collections.toggleFavorite(path),
+        );
+      },
+    );
+  }
+}
+
+class _TrackStarRatingControl extends StatelessWidget {
+  final String trackPath;
+
+  const _TrackStarRatingControl({required this.trackPath});
+
+  @override
+  Widget build(BuildContext context) {
+    final collections = UserCollectionsScope.maybeOf(context);
+    if (collections == null) return const SizedBox.shrink();
+
+    return ListenableBuilder(
+      listenable: collections,
+      builder: (context, _) {
+        final currentRating = collections.ratingOf(trackPath);
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var s = 1; s <= 5; s++)
+              IconButton(
+                key: Key('rating_star_$s'),
+                icon: Icon(
+                  currentRating >= s ? Icons.star : Icons.star_border,
+                  size: 20,
+                  color: currentRating >= s
+                      ? AppColors.accent
+                      : AppColors.textMuted,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                constraints:
+                    const BoxConstraints(minWidth: 28, minHeight: 28),
+                tooltip: currentRating == s
+                    ? context.t('track.clearRating')
+                    : context.t('track.rateStars', args: {
+                        'stars': context.localizeDigitsText('$s'),
+                      }),
+                onPressed: () {
+                  if (currentRating == s) {
+                    collections.setRating(trackPath, 0);
+                  } else {
+                    collections.setRating(trackPath, s);
+                  }
+                },
+              ),
+          ],
+        );
+      },
     );
   }
 }

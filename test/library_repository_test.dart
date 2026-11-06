@@ -18,13 +18,13 @@ void main() {
       await repo.close();
     });
 
-    test('migration from empty DB sets user_version to 3 and creates schema',
+    test('migration from empty DB sets user_version to current version and creates schema',
         () {
       final rawDb = sqlite3.openInMemory();
       SchemaMigrator.apply(rawDb);
 
       final versionResult = rawDb.select('PRAGMA user_version;');
-      expect(versionResult.first.values.first, 3);
+      expect(versionResult.first.values.first, 4);
 
       // Verify tables exist
       final tables = rawDb
@@ -576,10 +576,10 @@ void main() {
         VALUES ('C:\\\\Music\\\\2.mp3', 1, 'Duet', 'Fairouz; Ziad Rahbani', 'Album 2', 100, 10, 10, 1000, 'duet fairouz ziad');
       ''');
 
-      // 3. Apply migration (migrates to current schema version 3)
+      // 3. Apply migration (migrates to current schema version 4)
       SchemaMigrator.apply(rawDb);
 
-      expect(rawDb.select('PRAGMA user_version;').first.values.first, 3);
+      expect(rawDb.select('PRAGMA user_version;').first.values.first, 4);
 
       // 4. Verify track_artists populated
       final rows = rawDb.select('SELECT track_id, artist_key, artist_name FROM track_artists ORDER BY track_id, artist_name;');

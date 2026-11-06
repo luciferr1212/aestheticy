@@ -10,6 +10,7 @@ import 'package:aestheticy/audio/mpv_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/diagnostics/app_logger.dart';
+import 'package:aestheticy/features/collections/user_collections.dart';
 import 'package:aestheticy/features/history/play_recorder.dart';
 import 'package:aestheticy/features/session/session_restorer.dart';
 import 'package:aestheticy/features/session/session_saver.dart';
@@ -179,6 +180,9 @@ void main() {
       repository: repository,
     );
 
+    final userCollections = UserCollections(repository: repository);
+    await userCollections.init();
+
     runApp(AestheticyApp(
       engine: engine,
       controller: controller,
@@ -190,6 +194,7 @@ void main() {
       audioSettingsApplier: audioSettingsApplier,
       artistNameStore: artistNameStore,
       eqController: eqController,
+      userCollections: userCollections,
       sessionStore: sessionStore,
       sessionSaver: sessionSaver,
       playRecorder: playRecorder,
@@ -451,6 +456,9 @@ class AestheticyApp extends StatefulWidget {
   /// Optional equalizer controller.
   final EqController? eqController;
 
+  /// Optional user collections coordinator (favorites, ratings, playlists).
+  final UserCollections? userCollections;
+
   /// Optional listening history recorder.
   final PlayRecorder? playRecorder;
 
@@ -474,6 +482,7 @@ class AestheticyApp extends StatefulWidget {
     this.audioSettingsApplier,
     this.artistNameStore,
     this.eqController,
+    this.userCollections,
     this.sessionStore,
     this.sessionSaver,
     this.playRecorder,
@@ -489,6 +498,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final LocaleController _localeController;
   late final ArtistNameStore _artistNameStore;
   late final EqController _eqController;
+  late final UserCollections _userCollections;
   late final AudioSettingsApplier _audioSettingsApplier;
   late final AppNavigator _navigator;
   late final SessionStore _sessionStore;
@@ -510,6 +520,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
         EqController(
           engine: widget.engine ?? FakeAudioEngine(),
           store: EqStore(),
+        );
+    _userCollections = widget.userCollections ??
+        UserCollections(
+          repository: widget.repository ?? SqliteLibraryRepository.inMemory(),
         );
     _audioSettingsApplier = widget.audioSettingsApplier ??
         AudioSettingsApplier(
@@ -637,7 +651,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         store: _artistNameStore,
                         child: EqScope(
                           controller: _eqController,
-                          child: child!,
+                          child: UserCollectionsScope(
+                            collections: _userCollections,
+                            child: child!,
+                          ),
                         ),
                       ),
                     ),
@@ -654,6 +671,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                   audioSettingsApplier: _audioSettingsApplier,
                   artistNameStore: _artistNameStore,
                   eqController: _eqController,
+                  userCollections: _userCollections,
                 ),
               ),
             ),

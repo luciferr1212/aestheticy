@@ -1028,6 +1028,120 @@ void main() {
         expect(engine.state, PlaybackState.idle);
       });
     });
+
+    group('playNext and addToQueue', () {
+      test('playNext with an empty queue starts playback at index 0', () async {
+        var queueChanged = false;
+        controller.queueChangeStream.listen((_) => queueChanged = true);
+
+        await controller.playNext([_src('first'), _src('second')]);
+
+        expect(queue.length, 2);
+        expect(queue.current?.uri, 'file:///first.flac');
+        expect(engine.state, PlaybackState.playing);
+        expect(queueChanged, isTrue);
+      });
+
+      test('playNext in the middle inserts items directly after the current track', () async {
+        queue.add(_src('a'));
+        queue.add(_src('b'));
+        queue.add(_src('c'));
+
+        await controller.playTrack(1); // 'b'
+        expect(queue.current?.uri, 'file:///b.flac');
+
+        var queueChanged = false;
+        controller.queueChangeStream.listen((_) => queueChanged = true);
+
+        await controller.playNext([_src('x'), _src('y')]);
+
+        expect(queueChanged, isTrue);
+        expect(queue.current?.uri, 'file:///b.flac');
+        expect(queue.items.map((s) => s.uri).toList(), [
+          'file:///a.flac',
+          'file:///b.flac',
+          'file:///x.flac',
+          'file:///y.flac',
+          'file:///c.flac',
+        ]);
+
+        await controller.skipNext();
+        expect(queue.current?.uri, 'file:///x.flac');
+      });
+
+      test('playNext at the end of the queue inserts after current and allows advancing to it', () async {
+        queue.add(_src('a'));
+        queue.add(_src('b'));
+
+        await controller.playTrack(1); // 'b' (last track)
+        expect(queue.current?.uri, 'file:///b.flac');
+
+        await controller.playNext([_src('z')]);
+
+        expect(queue.items.map((s) => s.uri).toList(), [
+          'file:///a.flac',
+          'file:///b.flac',
+          'file:///z.flac',
+        ]);
+
+        await controller.skipNext();
+        expect(queue.current?.uri, 'file:///z.flac');
+      });
+
+      test('playNext with shuffle on inserts right after current in active playback order', () async {
+        queue.add(_src('a'));
+        queue.add(_src('b'));
+        queue.add(_src('c'));
+        queue.add(_src('d'));
+
+        await controller.play();
+        queue.setShuffle(true);
+        expect(queue.isShuffled, isTrue);
+        final currentBefore = queue.current;
+        expect(currentBefore, isNotNull);
+
+        await controller.playNext([_src('next_1'), _src('next_2')]);
+
+        expect(queue.isShuffled, isTrue);
+        expect(queue.current, currentBefore);
+
+        final items = queue.items;
+        final currIdx = queue.currentIndex;
+        expect(items[currIdx], currentBefore);
+        expect(items[currIdx + 1].uri, 'file:///next_1.flac');
+        expect(items[currIdx + 2].uri, 'file:///next_2.flac');
+
+        await controller.skipNext();
+        expect(queue.current?.uri, 'file:///next_1.flac');
+      });
+
+      test('addToQueue with empty queue behaves like playQueue', () async {
+        await controller.addToQueue([_src('one'), _src('two')]);
+
+        expect(queue.length, 2);
+        expect(queue.current?.uri, 'file:///one.flac');
+        expect(engine.state, PlaybackState.playing);
+      });
+
+      test('addToQueue appends to the end of the queue', () async {
+        queue.add(_src('a'));
+        queue.add(_src('b'));
+        await controller.play();
+
+        var queueChanged = false;
+        controller.queueChangeStream.listen((_) => queueChanged = true);
+
+        await controller.addToQueue([_src('end1'), _src('end2')]);
+
+        expect(queueChanged, isTrue);
+        expect(queue.items.map((s) => s.uri).toList(), [
+          'file:///a.flac',
+          'file:///b.flac',
+          'file:///end1.flac',
+          'file:///end2.flac',
+        ]);
+      });
+    });
   });
 }
 
