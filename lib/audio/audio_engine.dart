@@ -88,8 +88,17 @@ abstract class AudioEngine {
   /// The total duration of the current track.
   Stream<Duration> get durationStream;
 
+  /// The latest duration received from the engine, or [Duration.zero] if none.
+  Duration get currentDuration;
+
+  /// The latest playback position received from the engine, or [Duration.zero] if none.
+  Duration get currentPosition;
+
   /// The current software volume (0.0–1.0).
   Stream<double> get volumeStream;
+
+  /// The latest software volume (0.0–1.0) received from the engine.
+  double get currentVolume;
 
   /// Typed errors from the engine.
   Stream<AudioError> get errorStream;

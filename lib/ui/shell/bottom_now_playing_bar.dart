@@ -12,6 +12,7 @@ import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
+import '../settings/settings_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
@@ -105,9 +106,7 @@ class _TrackInfoArea extends StatelessWidget {
             : context.t('player.noTrack');
         final rawArtist = current?.extras?['artist'];
         final artist = hasTrack
-            ? (rawArtist != null && rawArtist.isNotEmpty
-                ? context.displayArtist(rawArtist)
-                : context.t('library.unknownArtist'))
+            ? context.displayArtist(rawArtist)
             : '—';
         final coverKey = current?.extras?['coverKey'];
 
@@ -288,6 +287,7 @@ class _CenterTransportArea extends StatelessWidget {
             _NowPlayingSeekBarLeaf(
               engine: controller.engine,
               hasTrack: hasTrack,
+              controller: controller,
             ),
           ],
         );
@@ -300,10 +300,12 @@ class _CenterTransportArea extends StatelessWidget {
 class _NowPlayingSeekBarLeaf extends StatelessWidget {
   final AudioEngine engine;
   final bool hasTrack;
+  final PlaybackController? controller;
 
   const _NowPlayingSeekBarLeaf({
     required this.engine,
     required this.hasTrack,
+    this.controller,
   });
 
   @override
@@ -336,13 +338,13 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
 
     return StreamBuilder<Duration>(
       stream: engine.durationStream,
-      initialData: Duration.zero,
+      initialData: controller?.currentDuration ?? engine.currentDuration,
       builder: (context, durSnapshot) {
         final totalDuration = durSnapshot.data ?? Duration.zero;
 
         return StreamBuilder<Duration>(
           stream: engine.positionStream,
-          initialData: Duration.zero,
+          initialData: controller?.currentPosition ?? engine.currentPosition,
           builder: (context, posSnapshot) {
             final position = posSnapshot.data ?? Duration.zero;
             final maxMs = totalDuration.inMilliseconds.toDouble();
@@ -409,6 +411,7 @@ class _EndControlsArea extends StatelessWidget {
   });
 
   void _showVolumePopup(BuildContext context) {
+    final settingsStore = SettingsScope.maybeOf(context);
     showDialog<void>(
       context: context,
       barrierColor: Colors.transparent,
@@ -426,7 +429,7 @@ class _EndControlsArea extends StatelessWidget {
                 height: 52,
                 child: StreamBuilder<double>(
                   stream: controller.engine.volumeStream,
-                  initialData: 1.0,
+                  initialData: controller.engine.currentVolume,
                   builder: (context, snapshot) {
                     final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
                     return Row(
@@ -450,6 +453,7 @@ class _EndControlsArea extends StatelessWidget {
                               value: vol,
                               onChanged: (newVol) {
                                 controller.engine.setVolume(newVol);
+                                settingsStore?.update((s) => s.copyWith(volume: newVol));
                               },
                             ),
                           ),

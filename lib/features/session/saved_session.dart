@@ -48,6 +48,7 @@ class SavedSession {
 
   final List<SavedSessionItem> queue;
   final int currentIndex;
+  final String? currentUri;
   final int positionMs;
   final bool shuffle;
   final String repeatMode;
@@ -56,6 +57,7 @@ class SavedSession {
   const SavedSession({
     this.queue = const [],
     this.currentIndex = 0,
+    this.currentUri,
     this.positionMs = 0,
     this.shuffle = false,
     this.repeatMode = 'off',
@@ -78,6 +80,7 @@ class SavedSession {
     return {
       'queue': queue.take(maxQueueCapacity).map((item) => item.toJson()).toList(),
       'currentIndex': currentIndex,
+      if (currentUri != null) 'currentUri': currentUri,
       'positionMs': positionMs,
       'shuffle': shuffle,
       'repeatMode': repeatMode,
@@ -102,6 +105,7 @@ class SavedSession {
 
     final rawIndex = json['currentIndex'];
     final currentIndex = rawIndex is int ? rawIndex : 0;
+    final currentUri = json['currentUri'] as String?;
 
     final rawPos = json['positionMs'];
     final positionMs = rawPos is int ? rawPos : 0;
@@ -124,6 +128,7 @@ class SavedSession {
     return SavedSession(
       queue: items,
       currentIndex: currentIndex,
+      currentUri: currentUri,
       positionMs: positionMs,
       shuffle: shuffle,
       repeatMode: repeatMode,
@@ -137,6 +142,7 @@ class SavedSession {
       other is SavedSession &&
           runtimeType == other.runtimeType &&
           currentIndex == other.currentIndex &&
+          currentUri == other.currentUri &&
           positionMs == other.positionMs &&
           shuffle == other.shuffle &&
           repeatMode == other.repeatMode;
@@ -144,6 +150,7 @@ class SavedSession {
   @override
   int get hashCode => Object.hash(
         currentIndex,
+        currentUri,
         positionMs,
         shuffle,
         repeatMode,

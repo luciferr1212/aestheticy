@@ -256,7 +256,16 @@ class FakeAudioEngine extends AudioEngine {
   Stream<Duration> get durationStream => _durationCtrl.stream;
 
   @override
+  Duration get currentDuration => _duration;
+
+  @override
+  Duration get currentPosition => _position;
+
+  @override
   Stream<double> get volumeStream => _volumeCtrl.stream;
+
+  @override
+  double get currentVolume => _volume;
 
   @override
   Stream<AudioError> get errorStream => _errorCtrl.stream;

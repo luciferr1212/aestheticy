@@ -111,10 +111,22 @@ Future<SessionRestoreResult> restoreSession({
     );
   }
 
-  final targetIndex = survivingCurrentIndex ?? 0;
-  final originalItemSurvived = survivingCurrentIndex != null &&
-      saved.currentIndex < saved.queue.length &&
-      survivingSources[targetIndex].uri == saved.queue[saved.currentIndex].uri;
+  int targetIndex = -1;
+  if (saved.currentUri != null && saved.currentUri!.isNotEmpty) {
+    targetIndex = survivingSources.indexWhere((s) => s.uri == saved.currentUri);
+  }
+  if (targetIndex < 0) {
+    targetIndex = survivingCurrentIndex ?? 0;
+  }
+
+  final originalItemSurvived = targetIndex >= 0 &&
+      targetIndex < survivingSources.length &&
+      ((saved.currentUri != null &&
+              survivingSources[targetIndex].uri == saved.currentUri) ||
+          (survivingCurrentIndex != null &&
+              saved.currentIndex < saved.queue.length &&
+              survivingSources[targetIndex].uri ==
+                  saved.queue[saved.currentIndex].uri));
 
   final targetPositionMs = originalItemSurvived ? saved.positionMs : 0;
 

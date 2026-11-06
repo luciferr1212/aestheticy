@@ -56,6 +56,9 @@ class AppSettings {
   /// Whether to save and restore playback queue, position, and modes across app restarts.
   final bool resumeSession;
 
+  /// Output playback volume (0.0 to 1.0).
+  final double volume;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -76,15 +79,24 @@ class AppSettings {
     this.replayGainMode = 'off',
     double replayGainPreampDb = 0.0,
     this.resumeSession = true,
-  }) : replayGainPreampDb = replayGainPreampDb < -15.0
+    double volume = 1.0,
+  })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
-            : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb);
+            : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
+        volume = volume < 0.0 ? 0.0 : (volume > 1.0 ? 1.0 : volume);
 
   static double _clampPreamp(num? value) {
     if (value == null) return 0.0;
     final d = value.toDouble();
     if (d.isNaN) return 0.0;
     return d.clamp(-15.0, 15.0);
+  }
+
+  static double _clampVolume(num? value) {
+    if (value == null) return 1.0;
+    final d = value.toDouble();
+    if (d.isNaN) return 1.0;
+    return d.clamp(0.0, 1.0);
   }
 
   /// Creates a copy of this settings instance with updated fields.
@@ -107,6 +119,7 @@ class AppSettings {
     String? replayGainMode,
     double? replayGainPreampDb,
     bool? resumeSession,
+    double? volume,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -130,6 +143,7 @@ class AppSettings {
           ? _clampPreamp(replayGainPreampDb)
           : this.replayGainPreampDb,
       resumeSession: resumeSession ?? this.resumeSession,
+      volume: volume != null ? _clampVolume(volume) : this.volume,
     );
   }
 
@@ -154,6 +168,7 @@ class AppSettings {
       'replayGainMode': replayGainMode,
       'replayGainPreampDb': replayGainPreampDb,
       'resumeSession': resumeSession,
+      'volume': volume,
     };
   }
 
@@ -260,6 +275,9 @@ class AppSettings {
     final rawResume = json['resumeSession'];
     final resumeSession = rawResume is bool ? rawResume : true;
 
+    final rawVolume = json['volume'];
+    final volume = rawVolume is num ? _clampVolume(rawVolume) : 1.0;
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -279,6 +297,7 @@ class AppSettings {
       replayGainMode: replayGainMode,
       replayGainPreampDb: replayGainPreampDb,
       resumeSession: resumeSession,
+      volume: volume,
     );
   }
 
@@ -304,7 +323,8 @@ class AppSettings {
           exclusiveMode == other.exclusiveMode &&
           replayGainMode == other.replayGainMode &&
           replayGainPreampDb == other.replayGainPreampDb &&
-          resumeSession == other.resumeSession;
+          resumeSession == other.resumeSession &&
+          volume == other.volume;
 
   @override
   int get hashCode => Object.hashAll([
@@ -326,5 +346,6 @@ class AppSettings {
         replayGainMode,
         replayGainPreampDb,
         resumeSession,
+        volume,
       ]);
 }

@@ -25,6 +25,8 @@ class PlaybackController {
   final _stateCtrl = StreamController<PlaybackState>.broadcast();
   final _currentCtrl = StreamController<AudioSource?>.broadcast();
   final _errorCtrl = StreamController<AudioError>.broadcast();
+  final _seekCtrl = StreamController<Duration>.broadcast();
+  final _queueChangeCtrl = StreamController<void>.broadcast();
 
   PlaybackState _currentState = PlaybackState.idle;
   Duration _currentPosition = Duration.zero;
@@ -53,17 +55,23 @@ class PlaybackController {
       }
     }));
     _subs.add(engine.durationStream.listen((dur) {
-      if (_armedResumePosition != null &&
-          _openedUri != null &&
-          _openedUri == _armedResumeUri &&
-          dur > Duration.zero) {
-        final pos = _armedResumePosition!;
-        _armedResumePosition = null;
-        _armedResumeUri = null;
-        unawaited(engine.seek(pos));
-      }
+      _checkArmedResume(dur);
     }));
     _subs.add(engine.errorStream.listen(_onError));
+  }
+
+  void _checkArmedResume([Duration? dur]) {
+    final effectiveDur = dur ?? engine.currentDuration;
+    if (_armedResumePosition != null &&
+        effectiveDur > Duration.zero &&
+        (_openedUri == null ||
+            _openedUri == _armedResumeUri ||
+            queue.current?.uri == _armedResumeUri)) {
+      final pos = _armedResumePosition!;
+      _armedResumePosition = null;
+      _armedResumeUri = null;
+      unawaited(engine.seek(pos));
+    }
   }
 
   /// Tears down subscriptions. Does **not** dispose the engine.
@@ -76,6 +84,8 @@ class PlaybackController {
     await _stateCtrl.close();
     await _currentCtrl.close();
     await _errorCtrl.close();
+    await _seekCtrl.close();
+    await _queueChangeCtrl.close();
   }
 
   // ── Streams ─────────────────────────────────────────────────────────
@@ -93,6 +103,28 @@ class PlaybackController {
   /// Errors that occurred during playback.
   Stream<AudioError> get errorStream => _errorCtrl.stream;
 
+  /// Seeks that occurred on this controller.
+  Stream<Duration> get seekStream => _seekCtrl.stream;
+
+  /// Emits whenever the playback queue is modified.
+  Stream<void> get queueChangeStream => _queueChangeCtrl.stream;
+
+  /// Notifies listeners that the queue has changed.
+  void notifyQueueChanged() {
+    if (!_disposed) {
+      _queueChangeCtrl.add(null);
+    }
+  }
+
+  /// Seeks to [position] within the current track.
+  Future<void> seek(Duration position) async {
+    _currentPosition = position;
+    await engine.seek(position);
+    if (!_disposed) {
+      _seekCtrl.add(position);
+    }
+  }
+
   /// Arms a lazy seek to [position] when the current track is next opened.
   void armResume(Duration position) {
     _armedResumePosition = position;
@@ -101,6 +133,20 @@ class PlaybackController {
 
   /// The currently armed lazy seek position, if any.
   Duration? get armedResumePosition => _armedResumePosition;
+
+  /// The current playback position, or the armed resume position when nothing is loaded.
+  Duration get currentPosition {
+    if (_currentState == PlaybackState.idle && _armedResumePosition != null) {
+      return _armedResumePosition!;
+    }
+    return engine.currentPosition;
+  }
+
+  /// The current track duration, or [Duration.zero] if none.
+  Duration get currentDuration => engine.currentDuration;
+
+  /// The current software volume.
+  double get currentVolume => engine.currentVolume;
 
   // ── Transport ───────────────────────────────────────────────────────
 
@@ -118,6 +164,7 @@ class PlaybackController {
 
     _openedUri = source.uri;
     await engine.open(source, autoPlay: true);
+    _checkArmedResume();
     _emitCurrent(source);
     unawaited(_preloadNext());
   }
@@ -152,6 +199,7 @@ class PlaybackController {
     if (source == null) return;
     _openedUri = source.uri;
     await engine.open(source, autoPlay: true);
+    _checkArmedResume();
     _emitCurrent(source);
     unawaited(_preloadNext());
   }
@@ -171,6 +219,7 @@ class PlaybackController {
     }
 
     queue.replaceAll(sources, startIndex: startIndex);
+    notifyQueueChanged();
     final source = queue.current;
     if (source == null) {
       _openedUri = null;
@@ -181,6 +230,7 @@ class PlaybackController {
 
     _openedUri = source.uri;
     await engine.open(source, autoPlay: true);
+    _checkArmedResume();
     _emitCurrent(source);
     unawaited(_preloadNext());
   }
@@ -198,6 +248,7 @@ class PlaybackController {
     }
 
     queue.clearUpcoming();
+    notifyQueueChanged();
     await _preloadNext();
   }
 

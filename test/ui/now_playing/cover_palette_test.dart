@@ -10,8 +10,21 @@ import 'package:aestheticy/ui/now_playing/cover_palette.dart';
 
 void main() {
   group('CoverPalette Tests', () {
-    setUp(() {
+    late Directory tempCoversDir;
+
+    setUp(() async {
       clearPaletteCacheForTesting();
+      tempCoversDir = await Directory.systemTemp.createTemp('palette_test_covers_');
+      CoverCache.setCustomDirectory(tempCoversDir.path);
+    });
+
+    tearDown(() async {
+      CoverCache.setCustomDirectory(null);
+      if (tempCoversDir.existsSync()) {
+        try {
+          await tempCoversDir.delete(recursive: true);
+        } catch (_) {}
+      }
     });
 
     test('extractPalette clamps pure saturated red to sat <= 0.55 and light 0.25..0.60', () {

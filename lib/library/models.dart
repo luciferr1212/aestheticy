@@ -242,6 +242,9 @@ class AlbumSummary {
   /// Cover artwork key for this album, if available.
   final String? coverKey;
 
+  /// Computed display artist for UI representation.
+  final String? displayArtist;
+
   /// Creates an immutable [AlbumSummary] instance.
   const AlbumSummary({
     required this.album,
@@ -249,6 +252,7 @@ class AlbumSummary {
     this.year,
     required this.trackCount,
     this.coverKey,
+    this.displayArtist,
   });
 
   @override
@@ -260,7 +264,8 @@ class AlbumSummary {
           albumArtist == other.albumArtist &&
           year == other.year &&
           trackCount == other.trackCount &&
-          coverKey == other.coverKey;
+          coverKey == other.coverKey &&
+          displayArtist == other.displayArtist;
 
   @override
   int get hashCode =>
@@ -268,7 +273,8 @@ class AlbumSummary {
       albumArtist.hashCode ^
       year.hashCode ^
       trackCount.hashCode ^
-      coverKey.hashCode;
+      coverKey.hashCode ^
+      displayArtist.hashCode;
 
   @override
   String toString() =>

@@ -71,6 +71,12 @@ class AudioSettingsApplier {
     try {
       await engine.setReplayGainPreamp(clampedPreamp);
     } catch (_) {}
+
+    // 5. Volume (clamped 0.0 to 1.0)
+    final clampedVolume = settings.volume.clamp(0.0, 1.0);
+    try {
+      await engine.setVolume(clampedVolume);
+    } catch (_) {}
   }
 
   /// Selects the audio output device by [id].

@@ -604,9 +604,8 @@ class _QuickSearchOverlayState extends State<QuickSearchOverlay> {
     required int flatIndex,
   }) {
     final isSelected = _selectedIndex == flatIndex;
-    final displayArtist = album.albumArtist != null
-        ? context.displayArtist(album.albumArtist!)
-        : '';
+    final displayArtist = context
+        .displayArtist(album.displayArtist ?? album.albumArtist);
 
     return InkWell(
       key: Key('quick_search_album_${album.album}'),

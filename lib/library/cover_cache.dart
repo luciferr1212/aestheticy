@@ -3,9 +3,9 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -17,6 +17,36 @@ abstract final class CoverCache {
   /// Sets an override directory path (primarily for unit tests).
   static void setCustomDirectory(String? path) {
     _customDirectory = path;
+  }
+
+  /// Clears cached directories to simulate a cold start in tests.
+  @visibleForTesting
+  static void resetForTesting() {
+    _customDirectory = null;
+    _cachedDefaultDirectory = null;
+  }
+
+  /// Ensures the covers directory is resolved at startup.
+  ///
+  /// Can optionally accept [directory] or [directoryProvider] to override resolution in tests.
+  static Future<String> ensureInitialized({
+    String? directory,
+    Future<Directory> Function()? directoryProvider,
+  }) async {
+    if (directory != null) {
+      _cachedDefaultDirectory = directory;
+      return directory;
+    }
+    if (_cachedDefaultDirectory != null) return _cachedDefaultDirectory!;
+    if (directoryProvider != null) {
+      final dir = await directoryProvider();
+      if (!dir.existsSync()) {
+        dir.createSync(recursive: true);
+      }
+      _cachedDefaultDirectory = dir.path;
+      return dir.path;
+    }
+    return resolveDefaultDirectory();
   }
 
   /// Resolves the default application support covers directory.
@@ -47,7 +77,13 @@ abstract final class CoverCache {
   /// If [coversDirectory] is provided, uses it as the root; otherwise falls back
   /// to the configured custom directory or default covers directory.
   static String pathFor(String coverKey, {String? coversDirectory}) {
-    final root = coversDirectory ?? _customDirectory ?? _cachedDefaultDirectory ?? 'covers';
+    final root = coversDirectory ?? _customDirectory ?? _cachedDefaultDirectory;
+    if (root == null) {
+      throw StateError(
+        'CoverCache has not been initialized. Call CoverCache.ensureInitialized() '
+        'at startup or CoverCache.setCustomDirectory() in tests before resolving cover paths.',
+      );
+    }
     return p.join(root, '$coverKey.jpg');
   }
 
@@ -55,7 +91,8 @@ abstract final class CoverCache {
   ///
   /// Zero-length files are treated as missing.
   static bool hasCover(String coverKey, {String? coversDirectory}) {
-    final file = File(pathFor(coverKey, coversDirectory: coversDirectory));
+    final filePath = pathFor(coverKey, coversDirectory: coversDirectory);
+    final file = File(filePath);
     try {
       return file.existsSync() && file.lengthSync() > 0;
     } catch (_) {

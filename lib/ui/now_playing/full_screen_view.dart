@@ -556,13 +556,13 @@ class _SlenderProgressLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<Duration>(
       stream: engine.durationStream,
-      initialData: Duration.zero,
+      initialData: engine.currentDuration,
       builder: (context, durSnapshot) {
         final total = durSnapshot.data ?? Duration.zero;
 
         return StreamBuilder<Duration>(
           stream: engine.positionStream,
-          initialData: Duration.zero,
+          initialData: engine.currentPosition,
           builder: (context, posSnapshot) {
             final pos = posSnapshot.data ?? Duration.zero;
             final progress = total.inMilliseconds > 0

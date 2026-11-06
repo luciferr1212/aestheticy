@@ -135,10 +135,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                     const SizedBox(height: 6),
                     Builder(
                       builder: (context) {
-                        final rawArtist = widget.album.albumArtist;
-                        final artist = rawArtist != null && rawArtist.isNotEmpty
-                            ? context.displayArtist(rawArtist)
-                            : context.t('library.unknownArtist');
+                        final artist = context.displayArtist(
+                            widget.album.displayArtist ?? widget.album.albumArtist);
                         return Text(
                           artist,
                           textDirection: textDirectionFor(artist),

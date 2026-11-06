@@ -252,10 +252,7 @@ class _SquareAlbumTile extends StatelessWidget {
             const SizedBox(height: 2),
             Builder(
               builder: (context) {
-                final rawArtist = album.albumArtist;
-                final artist = rawArtist != null && rawArtist.isNotEmpty
-                    ? context.displayArtist(rawArtist)
-                    : context.t('library.unknownArtist');
+                final artist = context.displayArtist(album.displayArtist ?? album.albumArtist);
                 return Text(
                   artist,
                   maxLines: 1,
@@ -319,10 +316,7 @@ class _WideAlbumTile extends StatelessWidget {
                       const SizedBox(height: 3),
                       Builder(
                         builder: (context) {
-                          final rawArtist = album.albumArtist;
-                          final artist = rawArtist != null && rawArtist.isNotEmpty
-                              ? context.displayArtist(rawArtist)
-                              : context.t('library.unknownArtist');
+                          final artist = context.displayArtist(album.displayArtist ?? album.albumArtist);
                           return Text(
                             artist,
                             maxLines: 1,
@@ -397,10 +391,7 @@ class _ListAlbumTile extends StatelessWidget {
                 flex: 2,
                 child: Builder(
                   builder: (context) {
-                    final rawArtist = album.albumArtist;
-                    final artist = rawArtist != null && rawArtist.isNotEmpty
-                        ? context.displayArtist(rawArtist)
-                        : context.t('library.unknownArtist');
+                    final artist = context.displayArtist(album.displayArtist ?? album.albumArtist);
                     return Text(
                       artist,
                       maxLines: 1,

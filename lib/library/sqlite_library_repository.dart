@@ -239,7 +239,9 @@ class SqliteLibraryRepository implements LibraryRepository {
         album_artist,
         MAX(year) AS release_year,
         COUNT(*) AS track_count,
-        MAX(cover_key) AS cover_key
+        MAX(cover_key) AS cover_key,
+        COUNT(DISTINCT NULLIF(artist, '')) AS distinct_artist_count,
+        MIN(NULLIF(artist, '')) AS single_artist
       FROM tracks
       GROUP BY album_name, album_artist
       ORDER BY album_name COLLATE NOCASE ASC
@@ -258,12 +260,30 @@ class SqliteLibraryRepository implements LibraryRepository {
     final rows = _db.select(sql.toString(), params);
 
     return rows.map((row) {
+      final rawAlbumArtist = row['album_artist'] as String?;
+      final distinctArtistCount = row['distinct_artist_count'] as int;
+      final singleArtist = row['single_artist'] as String?;
+
+      final String? displayArtist;
+      if (rawAlbumArtist != null && rawAlbumArtist.isNotEmpty) {
+        displayArtist = rawAlbumArtist;
+      } else if (distinctArtistCount == 1 &&
+          singleArtist != null &&
+          singleArtist.isNotEmpty) {
+        displayArtist = singleArtist;
+      } else if (distinctArtistCount > 1) {
+        displayArtist = 'various';
+      } else {
+        displayArtist = null;
+      }
+
       return AlbumSummary(
         album: row['album_name'] as String,
-        albumArtist: row['album_artist'] as String?,
+        albumArtist: rawAlbumArtist,
         year: row['release_year'] as int?,
         trackCount: row['track_count'] as int,
         coverKey: row['cover_key'] as String?,
+        displayArtist: displayArtist,
       );
     }).toList();
   }
@@ -454,7 +474,9 @@ class SqliteLibraryRepository implements LibraryRepository {
         album_artist,
         MAX(year) AS release_year,
         COUNT(*) AS track_count,
-        MAX(cover_key) AS cover_key
+        MAX(cover_key) AS cover_key,
+        COUNT(DISTINCT NULLIF(artist, '')) AS distinct_artist_count,
+        MIN(NULLIF(artist, '')) AS single_artist
       FROM tracks
       WHERE $whereClauses
       GROUP BY album_name, album_artist
@@ -470,12 +492,30 @@ class SqliteLibraryRepository implements LibraryRepository {
 
     final rows = _db.select(sql, params);
     return rows.map((row) {
+      final rawAlbumArtist = row['album_artist'] as String?;
+      final distinctArtistCount = row['distinct_artist_count'] as int;
+      final singleArtist = row['single_artist'] as String?;
+
+      final String? displayArtist;
+      if (rawAlbumArtist != null && rawAlbumArtist.isNotEmpty) {
+        displayArtist = rawAlbumArtist;
+      } else if (distinctArtistCount == 1 &&
+          singleArtist != null &&
+          singleArtist.isNotEmpty) {
+        displayArtist = singleArtist;
+      } else if (distinctArtistCount > 1) {
+        displayArtist = 'various';
+      } else {
+        displayArtist = null;
+      }
+
       return AlbumSummary(
         album: row['album_name'] as String,
-        albumArtist: row['album_artist'] as String?,
+        albumArtist: rawAlbumArtist,
         year: row['release_year'] as int?,
         trackCount: row['track_count'] as int,
         coverKey: row['cover_key'] as String?,
+        displayArtist: displayArtist,
       );
     }).toList();
   }

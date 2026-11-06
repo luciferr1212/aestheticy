@@ -57,6 +57,39 @@ class SessionStore {
     }
   }
 
+  /// Updates the stored session and writes it to disk synchronously and atomically.
+  void saveSync(SavedSession newSession) {
+    _debounceTimer?.cancel();
+    _session = newSession;
+    writeToDiskSync();
+  }
+
+  /// Synchronously writes session snapshot to disk atomically.
+  void writeToDiskSync() {
+    if (directory == null) return;
+    try {
+      final targetPath = p.join(directory!.path, 'session.json');
+      final tmpPath = p.join(directory!.path, 'session.json.tmp');
+      final tmpFile = File(tmpPath);
+      final jsonStr =
+          const JsonEncoder.withIndent('  ').convert(_session.toJson());
+
+      tmpFile.writeAsStringSync(jsonStr, flush: true);
+
+      if (tmpFile.existsSync()) {
+        final targetFile = File(targetPath);
+        if (targetFile.existsSync()) {
+          try {
+            targetFile.deleteSync();
+          } catch (_) {}
+        }
+        tmpFile.renameSync(targetPath);
+      }
+    } catch (_) {
+      // In-memory value preserved, failed write does not crash
+    }
+  }
+
   /// Clears the stored session and writes an empty session to disk.
   Future<void> clear() async {
     _debounceTimer?.cancel();

@@ -120,6 +120,8 @@ class MpvAudioEngine extends AudioEngine {
   List<AudioDevice> _cachedDevices = const [AudioDevice.auto];
   AudioStreamInfo? _currentStreamInfo;
   double _volume = 1.0;
+  Duration _currentPosition = Duration.zero;
+  Duration _currentDuration = Duration.zero;
   String? _currentUri;
   int _lastMpvPlaylistIndex = 0;
 
@@ -204,10 +206,16 @@ class MpvAudioEngine extends AudioEngine {
     }));
 
     // position  →  mpv property `time-pos`
-    _subs.add(p.stream.position.listen(_positionCtrl.add));
+    _subs.add(p.stream.position.listen((pos) {
+      _currentPosition = pos;
+      _positionCtrl.add(pos);
+    }));
 
     // duration  →  mpv property `duration`
-    _subs.add(p.stream.duration.listen(_durationCtrl.add));
+    _subs.add(p.stream.duration.listen((dur) {
+      _currentDuration = dur;
+      _durationCtrl.add(dur);
+    }));
 
     // volume  →  mpv property `volume` (0–100 → 0.0–1.0)
     _subs.add(p.stream.volume.listen((v) {
@@ -419,6 +427,8 @@ class MpvAudioEngine extends AudioEngine {
   Future<void> stop() async {
     _currentUri = null;
     _currentStreamInfo = null;
+    _currentPosition = Duration.zero;
+    _currentDuration = Duration.zero;
     _lastMpvPlaylistIndex = 0;
     _preloadedUri = null;
     _streamInfoCtrl.add(null);
@@ -428,6 +438,7 @@ class MpvAudioEngine extends AudioEngine {
 
   @override
   Future<void> seek(Duration position) async {
+    _currentPosition = position;
     // player.seek()  →  mpv command `seek <seconds> absolute`
     await _player!.seek(position);
   }
@@ -511,7 +522,16 @@ class MpvAudioEngine extends AudioEngine {
   Stream<Duration> get durationStream => _durationCtrl.stream;
 
   @override
+  Duration get currentDuration => _currentDuration;
+
+  @override
+  Duration get currentPosition => _currentPosition;
+
+  @override
   Stream<double> get volumeStream => _volumeCtrl.stream;
+
+  @override
+  double get currentVolume => _volume;
 
   @override
   Stream<AudioError> get errorStream => _errorCtrl.stream;

@@ -16,6 +16,7 @@ import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
 import '../settings/app_shortcuts.dart';
+import '../settings/settings_scope.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -239,7 +240,10 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                         ),
                                         const SizedBox(height: 16),
                                         // Isolated seekbar leaf widget (zero rebuilds on ticks)
-                                        _IsolatedSeekBar(engine: widget.engine),
+                                        _IsolatedSeekBar(
+                                          engine: widget.engine,
+                                          controller: widget.controller,
+                                        ),
                                         const SizedBox(height: 16),
                                         // Transport row (strictly LTR)
                                         Directionality(
@@ -780,20 +784,21 @@ class _MetadataArea extends StatelessWidget {
 /// Isolated seekbar leaf listening to position and duration streams.
 class _IsolatedSeekBar extends StatelessWidget {
   final AudioEngine engine;
+  final PlaybackController? controller;
 
-  const _IsolatedSeekBar({required this.engine});
+  const _IsolatedSeekBar({required this.engine, this.controller});
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Duration>(
       stream: engine.durationStream,
-      initialData: Duration.zero,
+      initialData: controller?.currentDuration ?? engine.currentDuration,
       builder: (context, durSnapshot) {
         final totalDuration = durSnapshot.data ?? Duration.zero;
 
         return StreamBuilder<Duration>(
           stream: engine.positionStream,
-          initialData: Duration.zero,
+          initialData: controller?.currentPosition ?? engine.currentPosition,
           builder: (context, posSnapshot) {
             final position = posSnapshot.data ?? Duration.zero;
             final maxMs = totalDuration.inMilliseconds.toDouble();
@@ -966,7 +971,7 @@ class _VolumeControl extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<double>(
       stream: engine.volumeStream,
-      initialData: 1.0,
+      initialData: engine.currentVolume,
       builder: (context, snapshot) {
         final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
         return SizedBox(
@@ -993,6 +998,7 @@ class _VolumeControl extends StatelessWidget {
                     value: vol,
                     onChanged: (newVol) {
                       engine.setVolume(newVol);
+                      SettingsScope.maybeOf(context)?.update((s) => s.copyWith(volume: newVol));
                     },
                   ),
                 ),

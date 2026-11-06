@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,7 @@ import 'package:aestheticy/features/history/play_recorder.dart';
 import 'package:aestheticy/features/session/session_restorer.dart';
 import 'package:aestheticy/features/session/session_saver.dart';
 import 'package:aestheticy/features/session/session_store.dart';
+import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/scan_service.dart';
@@ -87,6 +89,7 @@ void main() {
     final SqliteLibraryRepository repository;
     final ScanService scanService;
     try {
+      await CoverCache.ensureInitialized();
       repository = await SqliteLibraryRepository.openDefault();
       scanService = ScanService(repository: repository);
       AppLogger.instance.info(
@@ -491,6 +494,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final SessionStore _sessionStore;
   PlayRecorder? _playRecorder;
   SessionSaver? _sessionSaver;
+  AppLifecycleListener? _lifecycleListener;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
@@ -516,10 +520,27 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _sessionStore = widget.sessionStore ?? SessionStore();
     _sessionSaver = widget.sessionSaver;
     _playRecorder = widget.playRecorder;
+
+    _lifecycleListener = AppLifecycleListener(
+      onExitRequested: () async {
+        _sessionSaver?.saveSnapshotSync();
+        return AppExitResponse.exit;
+      },
+      onDetach: () {
+        _sessionSaver?.saveSnapshotSync();
+      },
+      onHide: () {
+        _sessionSaver?.saveSnapshotSync();
+      },
+      onPause: () {
+        _sessionSaver?.saveSnapshotSync();
+      },
+    );
   }
 
   @override
   void dispose() {
+    _lifecycleListener?.dispose();
     _playRecorder?.dispose();
     _sessionSaver?.dispose();
     _sessionStore.dispose();
