@@ -27,9 +27,19 @@ class TrayWindowController {
   String _lastLanguage = 'en';
   PlaybackState _lastPlaybackState = PlaybackState.idle;
   bool _disposed = false;
+  Future<void>? _lastTrayEventFuture;
+  Future<void>? _lastCloseFuture;
 
   /// Whether the main application window is currently visible.
   bool get isWindowVisible => _isWindowVisible;
+
+  /// Visible for testing to await completion of asynchronous tray events.
+  @visibleForTesting
+  Future<void>? get lastTrayEventFuture => _lastTrayEventFuture;
+
+  /// Visible for testing to await completion of close requests.
+  @visibleForTesting
+  Future<void>? get lastCloseFuture => _lastCloseFuture;
 
   /// Creates a [TrayWindowController].
   TrayWindowController({
@@ -50,7 +60,9 @@ class TrayWindowController {
 
     await windowService.setPreventClose(true);
 
-    _subs.add(windowService.closeRequested.listen((_) => unawaited(_onCloseRequested())));
+    _subs.add(windowService.closeRequested.listen((_) {
+      _lastCloseFuture = _onCloseRequested();
+    }));
     _subs.add(trayService.events.listen(_onTrayEvent));
     _subs.add(playbackController.stateStream.listen(_onPlaybackStateChanged));
 
@@ -136,13 +148,19 @@ class TrayWindowController {
 
   void _onTrayEvent(TrayEvent event) {
     if (_disposed) return;
+    _lastTrayEventFuture = handleTrayEvent(event);
+  }
+
+  /// Handles a [TrayEvent] in an awaited, deterministic sequence.
+  Future<void> handleTrayEvent(TrayEvent event) async {
+    if (_disposed) return;
 
     switch (event.type) {
       case TrayEventType.iconClicked:
-        unawaited(_toggleWindowVisibility());
+        await _toggleWindowVisibility();
       case TrayEventType.menuItem:
         if (event.menuItem != null) {
-          unawaited(_handleMenuItem(event.menuItem!));
+          await handleMenuItem(event.menuItem!);
         }
     }
   }
@@ -158,7 +176,8 @@ class TrayWindowController {
     }
   }
 
-  Future<void> _handleMenuItem(TrayMenuItemId item) async {
+  /// Handles a specific tray [item] action in an awaited sequence.
+  Future<void> handleMenuItem(TrayMenuItemId item) async {
     switch (item) {
       case TrayMenuItemId.show:
         await windowService.show();

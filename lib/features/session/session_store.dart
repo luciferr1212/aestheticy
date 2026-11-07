@@ -15,6 +15,7 @@ class SessionStore {
   Directory? directory;
   SavedSession _session = SavedSession.empty;
   Timer? _debounceTimer;
+  int _writeGeneration = 0;
 
   /// Creates a [SessionStore] with an optional injected [directory] or [directoryProvider].
   SessionStore({
@@ -48,6 +49,7 @@ class SessionStore {
 
   /// Updates the stored session and schedules a debounced atomic write.
   void save(SavedSession newSession, {bool debounce = true}) {
+    _writeGeneration++;
     _session = newSession;
     if (debounce) {
       _scheduleWrite();
@@ -59,6 +61,7 @@ class SessionStore {
 
   /// Updates the stored session and writes it to disk synchronously and atomically.
   void saveSync(SavedSession newSession) {
+    _writeGeneration++;
     _debounceTimer?.cancel();
     _session = newSession;
     writeToDiskSync();
@@ -69,7 +72,10 @@ class SessionStore {
     if (directory == null) return;
     try {
       final targetPath = p.join(directory!.path, 'session.json');
-      final tmpPath = p.join(directory!.path, 'session.json.tmp');
+      final tmpPath = p.join(
+        directory!.path,
+        'session.json.${DateTime.now().microsecondsSinceEpoch}.tmp',
+      );
       final tmpFile = File(tmpPath);
       final jsonStr =
           const JsonEncoder.withIndent('  ').convert(_session.toJson());
@@ -78,12 +84,19 @@ class SessionStore {
 
       if (tmpFile.existsSync()) {
         final targetFile = File(targetPath);
-        if (targetFile.existsSync()) {
-          try {
+        try {
+          if (targetFile.existsSync()) {
             targetFile.deleteSync();
-          } catch (_) {}
+          }
+          tmpFile.renameSync(targetPath);
+        } catch (_) {
+          try {
+            tmpFile.copySync(targetPath);
+            tmpFile.deleteSync();
+          } catch (_) {
+            File(targetPath).writeAsStringSync(jsonStr, flush: true);
+          }
         }
-        tmpFile.renameSync(targetPath);
       }
     } catch (_) {
       // In-memory value preserved, failed write does not crash
@@ -142,23 +155,42 @@ class SessionStore {
 
   Future<void> _writeToDisk() async {
     if (directory == null) return;
+    final gen = _writeGeneration;
     try {
       final targetPath = p.join(directory!.path, 'session.json');
-      final tmpPath = p.join(directory!.path, 'session.json.tmp');
+      final tmpPath = p.join(
+        directory!.path,
+        'session.json.${DateTime.now().microsecondsSinceEpoch}.tmp',
+      );
       final tmpFile = File(tmpPath);
       final jsonStr =
           const JsonEncoder.withIndent('  ').convert(_session.toJson());
 
       await tmpFile.writeAsString(jsonStr, flush: true);
 
+      if (_writeGeneration != gen) {
+        // Newer write occurred while writing; discard stale file
+        try {
+          if (tmpFile.existsSync()) tmpFile.deleteSync();
+        } catch (_) {}
+        return;
+      }
+
       if (tmpFile.existsSync()) {
         final targetFile = File(targetPath);
-        if (targetFile.existsSync()) {
-          try {
+        try {
+          if (targetFile.existsSync()) {
             await targetFile.delete();
-          } catch (_) {}
+          }
+          await tmpFile.rename(targetPath);
+        } catch (_) {
+          try {
+            await tmpFile.copy(targetPath);
+            await tmpFile.delete();
+          } catch (_) {
+            await File(targetPath).writeAsString(jsonStr, flush: true);
+          }
         }
-        await tmpFile.rename(targetPath);
       }
     } catch (_) {
       // In-memory value preserved, failed write does not crash

@@ -35,6 +35,9 @@ class SessionSaver {
         sessionStore.session.positionMs > 0) {
       _lastPosition = Duration(milliseconds: sessionStore.session.positionMs);
       _lastPositionUri = sessionStore.session.currentUri;
+    } else if (controller.engine.currentPosition > Duration.zero) {
+      _lastPosition = controller.engine.currentPosition;
+      _lastPositionUri = controller.queue.current?.uri;
     }
 
     _subs.add(controller.currentStream.listen((source) {
@@ -79,8 +82,17 @@ class SessionSaver {
       return;
     }
 
+    final currentTrack = controller.queue.current;
+    if (pos == Duration.zero &&
+        currentTrack != null &&
+        _lastPositionUri == currentTrack.uri &&
+        _lastPosition > Duration.zero) {
+      // Do not overwrite non-zero position with zero for the same track
+      return;
+    }
+
     _lastPosition = pos;
-    _lastPositionUri = controller.queue.current?.uri;
+    _lastPositionUri = currentTrack?.uri;
 
     if (controller.currentState == PlaybackState.playing) {
       final now = clock();
@@ -93,21 +105,41 @@ class SessionSaver {
   }
 
   SavedSession _buildSessionSnapshot() {
+    final currentTrack = controller.queue.current;
+    final syncPos = controller.engine.currentPosition;
+
+    if (currentTrack != null) {
+      if (currentTrack.uri != _lastPositionUri) {
+        // Track changed
+        if (controller.armedResumePosition != null &&
+            currentTrack.uri == controller.queue.current?.uri &&
+            controller.currentState == PlaybackState.idle) {
+          _lastPosition = controller.armedResumePosition!;
+        } else if (syncPos > Duration.zero) {
+          _lastPosition = syncPos;
+        } else {
+          _lastPosition = Duration.zero;
+        }
+        _lastPositionUri = currentTrack.uri;
+      } else {
+        // Same track: read synchronously from engine.currentPosition,
+        // and never write a zero position over a non-zero one for the same track.
+        if (syncPos > Duration.zero) {
+          _lastPosition = syncPos;
+        } else if (_lastPosition == Duration.zero && controller.armedResumePosition != null) {
+          _lastPosition = controller.armedResumePosition!;
+        }
+      }
+    } else {
+      // Nothing is loaded: keep armed-resume position
+      if (controller.armedResumePosition != null) {
+        _lastPosition = controller.armedResumePosition!;
+      }
+    }
+
     final queueItems = controller.queue.items.map((src) {
       return SavedSessionItem(uri: src.uri, extras: src.extras);
     }).toList();
-
-    int positionMs = _lastPosition.inMilliseconds;
-    if (controller.armedResumePosition != null && _lastPosition == Duration.zero) {
-      positionMs = controller.armedResumePosition!.inMilliseconds;
-    }
-
-    final currentTrack = controller.queue.current;
-    if (currentTrack != null &&
-        _lastPositionUri != null &&
-        currentTrack.uri != _lastPositionUri) {
-      positionMs = 0;
-    }
 
     return SavedSession(
       queue: queueItems,
@@ -115,7 +147,7 @@ class SessionSaver {
           ? controller.queue.currentIndex
           : 0,
       currentUri: currentTrack?.uri,
-      positionMs: positionMs,
+      positionMs: _lastPosition.inMilliseconds,
       shuffle: controller.queue.isShuffled,
       repeatMode: controller.queue.repeatMode.name,
       savedAt: clock().toUtc(),

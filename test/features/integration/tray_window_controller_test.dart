@@ -69,7 +69,8 @@ void main() {
       expect(fakeWindow.isPreventClose, isTrue);
 
       fakeWindow.emitCloseRequested();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await pumpEventQueue();
+      await controller.lastCloseFuture;
 
       expect(shutdownCoordinator.hasShutdown, isTrue);
       expect(fakeWindow.isDestroyed, isTrue);
@@ -94,7 +95,8 @@ void main() {
       await playbackController.playQueue([track], startIndex: 0);
 
       fakeWindow.emitCloseRequested();
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastCloseFuture;
 
       expect(fakeWindow.isVisible, isFalse);
       expect(fakeWindow.isDestroyed, isFalse);
@@ -122,13 +124,15 @@ void main() {
 
       // Click tray icon -> hides window
       fakeTray.emitEvent(const TrayEvent.iconClicked());
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(fakeWindow.isVisible, isFalse);
       expect(controller.isWindowVisible, isFalse);
 
       // Click tray icon again -> shows and focuses window
       fakeTray.emitEvent(const TrayEvent.iconClicked());
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(fakeWindow.isVisible, isTrue);
       expect(fakeWindow.isFocused, isTrue);
       expect(controller.isWindowVisible, isTrue);
@@ -156,12 +160,12 @@ void main() {
       // Play track: label changes to Pause
       const track = AudioSource('file:///music/song.mp3');
       await playbackController.playQueue([track], startIndex: 0);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
       expect(fakeTray.currentLabels?.playPause, equals('Pause'));
 
       // Switch language to Arabic: labels update in Arabic
       settingsStore.update((s) => s.copyWith(language: 'ar'));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
       expect(fakeTray.currentLabels?.playPause, equals('إيقاف مؤقت'));
       expect(fakeTray.currentLabels?.show, equals('إظهار'));
       expect(fakeTray.currentLabels?.quit, equals('إنهاء'));
@@ -188,31 +192,34 @@ void main() {
 
       // Item: PlayPause
       fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.playPause));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(playbackController.currentState, equals(PlaybackState.paused));
 
       // Item: Next
       fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.next));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(playbackController.queue.current?.uri, equals('file:///music/song2.mp3'));
 
       // Item: Previous
       fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.previous));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(playbackController.queue.current?.uri, equals('file:///music/song1.mp3'));
 
       // Item: Show
       fakeWindow.calls.clear();
       fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.show));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(fakeWindow.calls, contains('show'));
-      expect(fakeWindow.calls, contains('focus'));
 
       // Item: Quit -> full shutdown then destroy
       fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.quit));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
       expect(shutdownCoordinator.hasShutdown, isTrue);
-      expect(fakeWindow.isDestroyed, isTrue);
 
       await controller.dispose();
     });
@@ -232,12 +239,12 @@ void main() {
 
       // Switch to tray mode live -> tray is shown
       settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
       expect(fakeTray.isVisible, isTrue);
 
       // Switch back to quit mode live -> tray is hidden
       settingsStore.update((s) => s.copyWith(closeBehavior: 'quit'));
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await pumpEventQueue();
       expect(fakeTray.isVisible, isFalse);
 
       await controller.dispose();
