@@ -71,6 +71,7 @@ Widget _buildTestSettingsApp({
   required ArtistNameStore artistNameStore,
   VoidCallback? onOpenFolders,
   Size size = const Size(1280, 800),
+  bool isWindowsOverride = true,
 }) {
   return ListenableBuilder(
     listenable: settingsStore,
@@ -109,6 +110,7 @@ Widget _buildTestSettingsApp({
             audioSettingsApplier: audioSettingsApplier,
             artistNameStore: artistNameStore,
             onOpenFolders: onOpenFolders ?? () {},
+            isWindowsOverride: isWindowsOverride,
           ),
         ),
       );
@@ -184,6 +186,9 @@ void main() {
 
     await tester.scrollUntilVisible(find.text('Playback'), 100.0, scrollable: scrollFinder);
     expect(find.text('Playback'), findsOneWidget);
+
+    await tester.scrollUntilVisible(find.text('Windows integration'), 100.0, scrollable: scrollFinder);
+    expect(find.text('Windows integration'), findsOneWidget);
 
     await tester.scrollUntilVisible(find.text('Library'), 100.0, scrollable: scrollFinder);
     expect(find.text('Library'), findsOneWidget);
@@ -605,4 +610,72 @@ void main() {
 
     expect(find.text('Log folder path copied to clipboard'), findsOneWidget);
   });
+
+  testWidgets('Windows integration section hidden on non-Windows platform override', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+        isWindowsOverride: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Windows integration'), findsNothing);
+    expect(find.byKey(const Key('settings_media_controls_switch')), findsNothing);
+    expect(find.byKey(const Key('settings_prevent_sleep_switch')), findsNothing);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('Windows integration controls update store live', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+        isWindowsOverride: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+    final mediaSwitch = find.byKey(const Key('settings_media_controls_switch'));
+    await tester.scrollUntilVisible(mediaSwitch, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(mediaSwitch);
+    await tester.pumpAndSettle();
+
+    // Toggle media controls off
+    await tester.tap(mediaSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.mediaControls, isFalse);
+
+    // Toggle prevent sleep off
+    final sleepSwitch = find.byKey(const Key('settings_prevent_sleep_switch'));
+    await tester.tap(sleepSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.preventSleepWhilePlaying, isFalse);
+
+    // Change close behavior to tray
+    final traySegment = find.text('Keep playing in tray');
+    await tester.scrollUntilVisible(traySegment, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(traySegment);
+    await tester.pumpAndSettle();
+    await tester.tap(traySegment);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.closeBehavior, equals('tray'));
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }

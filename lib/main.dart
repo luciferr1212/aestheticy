@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,10 @@ import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/features/collections/user_collections.dart';
 import 'package:aestheticy/features/history/play_recorder.dart';
+import 'package:aestheticy/features/integration/app_shutdown.dart';
+import 'package:aestheticy/features/integration/media_session_controller.dart';
+import 'package:aestheticy/features/integration/sleep_controller.dart';
+import 'package:aestheticy/features/integration/tray_window_controller.dart';
 import 'package:aestheticy/features/session/session_restorer.dart';
 import 'package:aestheticy/features/session/session_saver.dart';
 import 'package:aestheticy/features/session/session_store.dart';
@@ -20,6 +25,15 @@ import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/platform/fake_platform_services.dart';
+import 'package:aestheticy/platform/media_session_service.dart';
+import 'package:aestheticy/platform/sleep_inhibitor.dart';
+import 'package:aestheticy/platform/tray_service.dart';
+import 'package:aestheticy/platform/window_service.dart';
+import 'package:aestheticy/platform/windows/smtc_media_session.dart';
+import 'package:aestheticy/platform/windows/win32_sleep_inhibitor.dart';
+import 'package:aestheticy/platform/windows/windows_tray_service.dart';
+import 'package:aestheticy/platform/windows/windows_window_service.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/audio_panels/eq_controller.dart';
@@ -183,6 +197,55 @@ void main() {
     final userCollections = UserCollections(repository: repository);
     await userCollections.init();
 
+    final MediaSessionService mediaSessionService;
+    final SleepInhibitor sleepInhibitor;
+    final TrayService trayService;
+    final WindowService windowService;
+
+    if (Platform.isWindows) {
+      mediaSessionService = SmtcMediaSession();
+      sleepInhibitor = Win32SleepInhibitor();
+      trayService = WindowsTrayService();
+      windowService = WindowsWindowService();
+    } else {
+      mediaSessionService = FakeMediaSessionService();
+      sleepInhibitor = FakeSleepInhibitor();
+      trayService = FakeTrayService();
+      windowService = FakeWindowService();
+    }
+
+    final shutdownCoordinator = AppShutdownCoordinator(
+      sessionSaver: sessionSaver,
+      playRecorder: playRecorder,
+      settingsStore: settingsStore,
+      mediaSessionService: mediaSessionService,
+      sleepInhibitor: sleepInhibitor,
+      trayService: trayService,
+    );
+
+    final mediaSessionController = MediaSessionController(
+      playbackController: controller,
+      mediaSessionService: mediaSessionService,
+      settingsStore: settingsStore,
+      artistNameStore: artistNameStore,
+    );
+
+    final sleepController = SleepController(
+      playbackController: controller,
+      sleepInhibitor: sleepInhibitor,
+      settingsStore: settingsStore,
+    );
+
+    final trayWindowController = TrayWindowController(
+      windowService: windowService,
+      trayService: trayService,
+      playbackController: controller,
+      settingsStore: settingsStore,
+      shutdownCoordinator: shutdownCoordinator,
+      sessionSaver: sessionSaver,
+    );
+    await trayWindowController.init();
+
     runApp(AestheticyApp(
       engine: engine,
       controller: controller,
@@ -198,6 +261,14 @@ void main() {
       sessionStore: sessionStore,
       sessionSaver: sessionSaver,
       playRecorder: playRecorder,
+      mediaSessionService: mediaSessionService,
+      sleepInhibitor: sleepInhibitor,
+      trayService: trayService,
+      windowService: windowService,
+      shutdownCoordinator: shutdownCoordinator,
+      mediaSessionController: mediaSessionController,
+      sleepController: sleepController,
+      trayWindowController: trayWindowController,
     ));
   }, (error, stack) {
     AppLogger.instance.error(
@@ -468,6 +539,30 @@ class AestheticyApp extends StatefulWidget {
   /// Optional session saver.
   final SessionSaver? sessionSaver;
 
+  /// Optional media session service.
+  final MediaSessionService? mediaSessionService;
+
+  /// Optional sleep inhibitor.
+  final SleepInhibitor? sleepInhibitor;
+
+  /// Optional tray service.
+  final TrayService? trayService;
+
+  /// Optional window service.
+  final WindowService? windowService;
+
+  /// Optional shutdown coordinator.
+  final AppShutdownCoordinator? shutdownCoordinator;
+
+  /// Optional media session controller.
+  final MediaSessionController? mediaSessionController;
+
+  /// Optional sleep controller.
+  final SleepController? sleepController;
+
+  /// Optional tray window controller.
+  final TrayWindowController? trayWindowController;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -486,6 +581,14 @@ class AestheticyApp extends StatefulWidget {
     this.sessionStore,
     this.sessionSaver,
     this.playRecorder,
+    this.mediaSessionService,
+    this.sleepInhibitor,
+    this.trayService,
+    this.windowService,
+    this.shutdownCoordinator,
+    this.mediaSessionController,
+    this.sleepController,
+    this.trayWindowController,
   });
 
   @override
@@ -502,6 +605,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final AudioSettingsApplier _audioSettingsApplier;
   late final AppNavigator _navigator;
   late final SessionStore _sessionStore;
+  late final AppShutdownCoordinator _shutdownCoordinator;
+  MediaSessionController? _mediaSessionController;
+  SleepController? _sleepController;
+  TrayWindowController? _trayWindowController;
   PlayRecorder? _playRecorder;
   SessionSaver? _sessionSaver;
   AppLifecycleListener? _lifecycleListener;
@@ -535,9 +642,23 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _sessionSaver = widget.sessionSaver;
     _playRecorder = widget.playRecorder;
 
+    _shutdownCoordinator = widget.shutdownCoordinator ??
+        AppShutdownCoordinator(
+          sessionSaver: _sessionSaver,
+          playRecorder: _playRecorder,
+          settingsStore: _settingsStore,
+          mediaSessionService: widget.mediaSessionService ?? FakeMediaSessionService(),
+          sleepInhibitor: widget.sleepInhibitor ?? FakeSleepInhibitor(),
+          trayService: widget.trayService ?? FakeTrayService(),
+        );
+
+    _mediaSessionController = widget.mediaSessionController;
+    _sleepController = widget.sleepController;
+    _trayWindowController = widget.trayWindowController;
+
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
-        _sessionSaver?.saveSnapshotSync();
+        await _shutdownCoordinator.shutdown();
         return AppExitResponse.exit;
       },
       onDetach: () {
@@ -554,6 +675,9 @@ class _AestheticyAppState extends State<AestheticyApp> {
 
   @override
   void dispose() {
+    _trayWindowController?.dispose();
+    _sleepController?.dispose();
+    _mediaSessionController?.dispose();
     _lifecycleListener?.dispose();
     _playRecorder?.dispose();
     _sessionSaver?.dispose();
@@ -630,6 +754,12 @@ class _AestheticyAppState extends State<AestheticyApp> {
                   _openDesignGallery,
               shortcutById(AppShortcutId.quickSearch).activator:
                   _toggleQuickSearch,
+              shortcutById(AppShortcutId.mediaPlayPause).activator:
+                  effectiveController.togglePlayPause,
+              shortcutById(AppShortcutId.mediaNext).activator:
+                  effectiveController.skipNext,
+              shortcutById(AppShortcutId.mediaPrevious).activator:
+                  effectiveController.skipPrevious,
             },
             child: Focus(
               autofocus: true,

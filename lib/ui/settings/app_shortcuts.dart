@@ -29,6 +29,15 @@ enum AppShortcutId {
 
   /// Open quick search overlay (Ctrl+K).
   quickSearch,
+
+  /// Global media key: toggle play and pause.
+  mediaPlayPause,
+
+  /// Global media key: skip to next track.
+  mediaNext,
+
+  /// Global media key: skip to previous track.
+  mediaPrevious,
 }
 
 /// Representation of an active keyboard shortcut in Aestheticy.
@@ -110,6 +119,27 @@ const List<AppShortcutItem> kAppShortcuts = [
       LogicalKeyboardKey.keyK,
       control: true,
     ),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.mediaPlayPause,
+    keyCombination: 'Media Play/Pause',
+    descriptionKey: 'shortcuts.mediaPlayPause',
+    activator: SingleActivator(LogicalKeyboardKey.mediaPlayPause),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.mediaNext,
+    keyCombination: 'Media Next',
+    descriptionKey: 'shortcuts.mediaNext',
+    activator: SingleActivator(LogicalKeyboardKey.mediaTrackNext),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.mediaPrevious,
+    keyCombination: 'Media Previous',
+    descriptionKey: 'shortcuts.mediaPrevious',
+    activator: SingleActivator(LogicalKeyboardKey.mediaTrackPrevious),
     scope: AppShortcutScope.global,
   ),
 ];

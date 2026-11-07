@@ -19,6 +19,12 @@ dependencies:
   audio_metadata_reader: 1.8.1
   # Stable cryptographic hashing for cover art caching
   crypto: 3.0.8
+  # Windows System Media Transport Controls
+  smtc_windows: 1.1.0
+  # System tray icon and menu for Windows
+  tray_manager: 0.5.3
+  # Window lifecycle, close intercept, and visibility control
+  window_manager: 0.4.3
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +33,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/tray/app_icon.ico

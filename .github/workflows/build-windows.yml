@@ -36,11 +36,17 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      # 6. Build the Windows release executable.
+      # 6. Set up Rust toolchain for smtc_windows native bridge.
+      - name: Set up Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+
+      # 7. Build the Windows release executable.
       - name: Build Windows release
         run: flutter build windows --release
 
-      # 7. Upload the built app as a downloadable artifact.
+      # 8. Upload the built app as a downloadable artifact.
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:

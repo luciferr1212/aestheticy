@@ -56,6 +56,10 @@ void main() {
       expect(report, contains('1500 tracks, 120 albums, 85 artists, 2 folders'));
       expect(report, contains('Schema Version: 3'));
       expect(report, contains('Play Events Count: 42'));
+      expect(report, contains('Media Session: active'));
+      expect(report, contains('Tray: off'));
+      expect(report, contains('Sleep Prevention: on'));
+      expect(report, contains('Close Behavior: quit'));
       expect(report, contains('Session Restore: restored 10 items, dropped 0'));
       expect(report, contains('=== Recent Logs (Last 100 lines) ==='));
       expect(report, contains('Engine started'));
@@ -136,6 +140,39 @@ void main() {
       expect(report.contains('Log line #49'), isFalse);
       expect(report.contains('Log line #50'), isTrue);
       expect(report.contains('Log line #149'), isTrue);
+    });
+
+    test('buildDiagnosticReport includes custom integration status lines without paths or names', () {
+      final report = buildDiagnosticReport(
+        osVersion: 'Windows 11',
+        dartVersion: '3.5.0',
+        engineName: 'MpvAudioEngine',
+        capabilities: testCaps,
+        outputDeviceName: 'Default',
+        exclusiveMode: false,
+        eqEnabled: false,
+        replayGainMode: ReplayGainMode.off,
+        glassQuality: GlassQuality.off,
+        language: 'en',
+        textScale: 'normal',
+        trackCount: 0,
+        albumCount: 0,
+        artistCount: 0,
+        folderCount: 0,
+        schemaVersion: 4,
+        playEventsCount: 0,
+        mediaSessionStatus: 'unavailable',
+        trayEnabled: true,
+        sleepPreventionEnabled: false,
+        closeBehavior: 'tray',
+        logLines: [],
+      );
+
+      expect(report, contains('Media Session: unavailable'));
+      expect(report, contains('Tray: on'));
+      expect(report, contains('Sleep Prevention: off'));
+      expect(report, contains('Close Behavior: tray'));
+      expect(report.contains(r'C:\'), isFalse);
     });
   });
 }

@@ -25,6 +25,10 @@ String buildDiagnosticReport({
   bool resumeSession = true,
   String? sessionRestoreSummary,
   required int playEventsCount,
+  String mediaSessionStatus = 'active',
+  bool trayEnabled = false,
+  bool sleepPreventionEnabled = true,
+  String closeBehavior = 'quit',
   required List<String> logLines,
   String? userNameToScrub,
 }) {
@@ -47,6 +51,10 @@ String buildDiagnosticReport({
   sb.writeln('Library Counts: $trackCount tracks, $albumCount albums, $artistCount artists, $folderCount folders');
   sb.writeln('Schema Version: $schemaVersion');
   sb.writeln('Play Events Count: $playEventsCount');
+  sb.writeln('Media Session: $mediaSessionStatus');
+  sb.writeln('Tray: ${trayEnabled ? 'on' : 'off'}');
+  sb.writeln('Sleep Prevention: ${sleepPreventionEnabled ? 'on' : 'off'}');
+  sb.writeln('Close Behavior: $closeBehavior');
   if (sessionRestoreSummary != null) {
     sb.writeln('Session Restore: $sessionRestoreSummary');
   }

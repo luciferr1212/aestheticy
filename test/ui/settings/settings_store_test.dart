@@ -44,6 +44,9 @@ void main() {
       expect(store.settings.exclusiveMode, isFalse);
       expect(store.settings.replayGainMode, equals('off'));
       expect(store.settings.replayGainPreampDb, equals(0.0));
+      expect(store.settings.mediaControls, isTrue);
+      expect(store.settings.preventSleepWhilePlaying, isTrue);
+      expect(store.settings.closeBehavior, equals('quit'));
 
       final file = File(p.join(tempDir.path, 'ui_settings.json'));
       expect(file.existsSync(), isFalse);
@@ -72,6 +75,9 @@ void main() {
             exclusiveMode: true,
             replayGainMode: 'track',
             replayGainPreampDb: 4.5,
+            mediaControls: false,
+            preventSleepWhilePlaying: false,
+            closeBehavior: 'tray',
           ));
       await store1.flush();
       store1.dispose();
@@ -97,6 +103,9 @@ void main() {
       expect(store2.settings.exclusiveMode, isTrue);
       expect(store2.settings.replayGainMode, equals('track'));
       expect(store2.settings.replayGainPreampDb, equals(4.5));
+      expect(store2.settings.mediaControls, isFalse);
+      expect(store2.settings.preventSleepWhilePlaying, isFalse);
+      expect(store2.settings.closeBehavior, equals('tray'));
       store2.dispose();
     });
 
@@ -130,6 +139,9 @@ void main() {
         'replayGainMode': 'super_boost',
         'replayGainPreampDb': 99.9,
         'userName': 'Hani',
+        'mediaControls': 'invalid_bool',
+        'preventSleepWhilePlaying': 123,
+        'closeBehavior': 'hibernate',
       }));
 
       final store = SettingsStore(directory: tempDir);
@@ -151,6 +163,9 @@ void main() {
       expect(store.settings.exclusiveMode, isFalse);
       expect(store.settings.replayGainMode, equals('off'));
       expect(store.settings.replayGainPreampDb, equals(15.0)); // clamped to 15.0
+      expect(store.settings.mediaControls, isTrue);
+      expect(store.settings.preventSleepWhilePlaying, isTrue);
+      expect(store.settings.closeBehavior, equals('quit'));
       store.dispose();
     });
 

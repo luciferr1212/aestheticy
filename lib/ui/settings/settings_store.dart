@@ -140,8 +140,7 @@ class SettingsStore extends ChangeNotifier {
     }
   }
 
-  /// Immediately flushes pending writes to disk (primarily for unit tests).
-  @visibleForTesting
+  /// Immediately flushes pending writes to disk.
   Future<void> flush() async {
     _debounceTimer?.cancel();
     await _writeToDisk();

@@ -489,3 +489,66 @@ Every row in `TrackTable` and album detail views exposes a unified `TrackActions
 - **Glass Fallback Re-acquisition:** A GlassSurface that fell back to `light` because the blur budget was full does not re-acquire a slot until quality changes.
 - **Tools > Last.fm Placeholder:** Last.fm integration in the sidebar is currently a disabled placeholder with a neutral icon; no scrobbling, authentication, or external web browsing is active.
 - **Missing Bundled Font Assets:** Font asset files for Inter, IBM Plex Sans Arabic, Noto Sans Arabic, and Cairo are not yet committed under `assets/fonts/`. Per architecture rules, no external font downloads are permitted; until font files are placed on disk, the UI font picker offers "System default".
+
+---
+
+## 28. Windows Desktop Integration & Platform Services (Phase 3c, Prompt 3)
+
+### 28.1 Platform Interfaces Architecture (`lib/platform/`)
+All native Windows integrations are encapsulated behind lightweight, testable interfaces in `lib/platform/`. Application features and UI components interact exclusively with these abstract contracts:
+- **`MediaSessionService`:** Controls OS media session (System Media Transport Controls / SMTC), metadata presentation, timeline progress, playback status, and media button event streams (`play`, `pause`, `next`, `previous`, `stop`).
+- **`SleepInhibitor`:** Manages OS sleep/idle execution states (`acquire()`, `release()`).
+- **`TrayService`:** Manages system tray icon, tooltips, localized context menu items, and interaction event streams (`iconClicked`, `menuItem`).
+- **`WindowService`:** Manages desktop window life cycle, close event interception (`setPreventClose`), visibility toggle (`show`, `hide`), focus, and process termination (`destroy`).
+- **Fakes (`FakeMediaSessionService`, `FakeSleepInhibitor`, `FakeTrayService`, `FakeWindowService`):** Deterministic in-memory fakes recording every call for full unit and widget test verification without calling real OS APIs or plugins.
+
+### 28.2 Resolved Package Versions & Dependency Architecture
+- **`smtc_windows: 1.1.0`:** Interacts with Windows System Media Transport Controls via WinRT. Requires Rust toolchain in CI (`rustup default stable`).
+- **`tray_manager: 0.5.3`:** Interacts with Windows notification area tray icon and context menus via standard Flutter platform channels.
+- **`window_manager: 0.4.3`:** Interacts with Win32 desktop window APIs via standard Flutter platform channels.
+- **Dependency Version Pinning Decision:** `tray_manager 0.8.x` and `window_manager 0.6.x` incorporate Dart Native Assets C-builder hooks (`cnativeapi`), which require a local MSVC C++ compiler during `flutter test`. To preserve local development workflows without requiring Visual Studio C++ (per project constraints), `tray_manager` was pinned to `0.5.3` and `window_manager` to `0.4.3`. These versions rely purely on standard Flutter platform channels and execute cleanly across local unit and widget test suites.
+
+### 28.3 System Media Transport Controls (SMTC) & Media Keys
+- **Implementation:** `lib/platform/windows/smtc_media_session.dart` and pure-Dart controller `lib/features/integration/media_session_controller.dart`.
+- **Metadata Presentation:** Synchronizes track title, artist name, and album title with OS SMTC. The artist string passes through `ArtistNameStore.displayArtist` matching current app language and bilingual display mode. Artwork is mapped from `AudioSource.extras['coverKey']` via `CoverCache` to local file URIs.
+- **Timeline Throttling:** Timeline progress updates are throttled to at most once per second during continuous playback, but emitted immediately on seek, pause, and track transition.
+- **Hardware Media Keys & In-App Keyboard Shortcuts:** Hardware media keys are received directly through SMTC. In-app media shortcuts (`LogicalKeyboardKey.mediaPlayPause`, `mediaTrackNext`, `mediaTrackPrevious`) are registered in `kAppShortcuts` and handled via `CallbackShortcuts` in `lib/main.dart` when the application window is focused.
+- **Settings Reactivity:** Toggling `mediaControls` in Settings immediately disables or re-initializes SMTC live without application restart. Plugin exceptions are caught, logged, and surfaced in diagnostics without interrupting audio playback.
+
+### 28.4 Tray Icon & Desktop Close Behavior
+- **Asset Registration:** Reused `windows/runner/resources/app_icon.ico` copied to `assets/tray/app_icon.ico` and registered in `pubspec.yaml`.
+- **Close Interception:** `WindowService.setPreventClose(true)` intercepts window close requests.
+- **Quit vs Tray Modes:**
+  - `closeBehavior: 'quit'` (default): Initiates orderly app shutdown via `AppShutdownCoordinator`, then destroys window and exits.
+  - `closeBehavior: 'tray'`: Saves a synchronous session snapshot, hides the desktop window, and leaves audio playback active in the background.
+- **Tray Interactions:** Clicking the tray icon toggles window visibility (`show` / `hide`). The localized context menu contains Show, Play/Pause (dynamically reflecting current playback state), Next, Previous, and Quit (which triggers full shutdown).
+
+### 28.5 Application Shutdown Coordinator (`AppShutdownCoordinator`)
+- **Location:** `lib/features/integration/app_shutdown.dart`.
+- **Execution Order (Idempotent & Failure-Tolerant):**
+  1. Synchronous session snapshot (`SessionSaver.saveSnapshotSync`).
+  2. Finalize active play recorder listening session (`PlayRecorder.dispose`).
+  3. Flush settings store (`SettingsStore.flush`).
+  4. Flush diagnostics logger (`AppLogger.flush`).
+  5. Disable media session and release sleep inhibitor.
+  6. Hide system tray icon.
+- Handled uniformly for window close requests, tray Quit activations, and `AppLifecycleListener` shutdown events.
+
+### 28.6 Sleep Prevention (`SleepInhibitor` & `SleepController`)
+- **Implementation:** `lib/platform/windows/win32_sleep_inhibitor.dart` and `lib/features/integration/sleep_controller.dart`.
+- **Mechanism:** Direct Win32 `kernel32.dll` call to `SetThreadExecutionState` via `dart:ffi`.
+- **Execution Flags:**
+  - `0x80000001` (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`): Prevents system sleep while allowing monitors to enter low-power sleep.
+  - `0x80000000` (`ES_CONTINUOUS`): Releases sleep prevention lock.
+- **Reactivity:** Automatically acquired when playback enters `playing` and `preventSleepWhilePlaying` is true; immediately released when paused, stopped, track completes, or the setting is disabled live.
+
+### 28.7 Settings UI & Diagnostics Integration
+- **Settings View:** Windows Integration card presented conditionally when running on Windows (or during testing via `isWindowsOverride`). Exposes:
+  - Media Controls toggle switch.
+  - Prevent Sleep toggle switch.
+  - Close Behavior segmented selector ("Quit", "Minimize to tray").
+- **Diagnostics Report:** `buildDiagnosticReport` includes Windows integration status lines (`SMTC: active/disabled/unavailable`, `Sleep inhibitor: active/idle/unavailable`, `Tray: active/disabled/unavailable`, `Close behavior: quit/tray`) without exposing system paths or personal data.
+
+### 28.8 Known Limitations & Integration Notes
+- **Local Native Execution:** As Visual Studio C++ is not installed on the development PC, real SMTC and tray plugins run exclusively in GitHub Actions release builds. All local behavior is fully verified using platform abstraction fakes and contract tests.
+- **Win32 Raw Key Simulator:** Flutter's test raw event simulator on Windows omits `mediaTrackNext` and `mediaTrackPrevious` virtual keycodes. Tests dispatch synthetic key events directly to focus nodes and verify activator acceptance deterministically.

@@ -49,6 +49,9 @@ class SettingsView extends StatefulWidget {
   /// Optional callback to open folder management sheet directly.
   final VoidCallback? onOpenFolders;
 
+  /// Optional override for platform detection (for testing non-Windows behavior).
+  final bool? isWindowsOverride;
+
   /// Creates a [SettingsView].
   const SettingsView({
     super.key,
@@ -59,6 +62,7 @@ class SettingsView extends StatefulWidget {
     this.audioSettingsApplier,
     this.artistNameStore,
     this.onOpenFolders,
+    this.isWindowsOverride,
   });
 
   @override
@@ -69,6 +73,8 @@ class _SettingsViewState extends State<SettingsView> {
   late final AudioSettingsApplier _applier;
   late final TextEditingController _nameController;
   final FocusNode _focusNode = FocusNode();
+
+  bool get _isWindows => widget.isWindowsOverride ?? Platform.isWindows;
 
   List<FontOption> _fontOptions = [FontOption.system];
   AudioSettingsError? _audioError;
@@ -212,6 +218,12 @@ class _SettingsViewState extends State<SettingsView> {
                             // 6. Playback
                             _buildPlaybackSection(context, settings),
                             const SizedBox(height: 20),
+
+                            // Windows integration (hidden off Windows)
+                            if (_isWindows) ...[
+                              _buildWindowsSection(context, settings),
+                              const SizedBox(height: 20),
+                            ],
 
                             // 7. Library
                             _buildLibrarySection(context),
@@ -795,6 +807,70 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
+  // ── Windows Integration ───────────────────────────────────────────────
+  Widget _buildWindowsSection(BuildContext context, AppSettings settings) {
+    return _SettingsCard(
+      title: context.t('settings.sectionWindows'),
+      children: [
+        // Media controls
+        _SettingsRow(
+          title: context.t('settings.mediaControls'),
+          description: context.t('settings.mediaControlsSubtitle'),
+          control: Switch(
+            key: const Key('settings_media_controls_switch'),
+            value: settings.mediaControls,
+            activeThumbColor: AppColors.accent,
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(mediaControls: val));
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // Prevent sleep while playing
+        _SettingsRow(
+          title: context.t('settings.preventSleep'),
+          description: context.t('settings.preventSleepSubtitle'),
+          control: Switch(
+            key: const Key('settings_prevent_sleep_switch'),
+            value: settings.preventSleepWhilePlaying,
+            activeThumbColor: AppColors.accent,
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(preventSleepWhilePlaying: val));
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // When closing the window
+        _SettingsRow(
+          title: context.t('settings.closeBehavior'),
+          description: context.t('settings.closeBehaviorSubtitle'),
+          control: _SegmentedControl<String>(
+            key: const Key('settings_close_behavior_segmented'),
+            value: settings.closeBehavior,
+            options: [
+              _SegmentedOption(
+                value: 'quit',
+                label: context.t('settings.closeBehaviorQuit'),
+              ),
+              _SegmentedOption(
+                value: 'tray',
+                label: context.t('settings.closeBehaviorTray'),
+              ),
+            ],
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(closeBehavior: val));
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── 7. Library ────────────────────────────────────────────────────────
   Widget _buildLibrarySection(BuildContext context) {
     return _SettingsCard(
@@ -997,6 +1073,10 @@ class _SettingsViewState extends State<SettingsView> {
                   schemaVersion: kLibrarySchemaVersion,
                   resumeSession: settings.resumeSession,
                   playEventsCount: _playEventCount,
+                  mediaSessionStatus: settings.mediaControls ? 'active' : 'disabled',
+                  trayEnabled: settings.closeBehavior == 'tray',
+                  sleepPreventionEnabled: settings.preventSleepWhilePlaying,
+                  closeBehavior: settings.closeBehavior,
                   logLines: logLines,
                   userNameToScrub: settings.userName,
                 );
@@ -1155,6 +1235,7 @@ class _SegmentedControl<T> extends StatelessWidget {
   final ValueChanged<T> onChanged;
 
   const _SegmentedControl({
+    super.key,
     required this.value,
     required this.options,
     required this.onChanged,

@@ -59,6 +59,15 @@ class AppSettings {
   /// Output playback volume (0.0 to 1.0).
   final double volume;
 
+  /// Whether Windows System Media Transport Controls (SMTC) integration is enabled.
+  final bool mediaControls;
+
+  /// Whether to prevent system sleep while audio is actively playing.
+  final bool preventSleepWhilePlaying;
+
+  /// Window close button behavior ('quit' or 'tray').
+  final String closeBehavior;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -80,10 +89,14 @@ class AppSettings {
     double replayGainPreampDb = 0.0,
     this.resumeSession = true,
     double volume = 1.0,
+    this.mediaControls = true,
+    this.preventSleepWhilePlaying = true,
+    String closeBehavior = 'quit',
   })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
-        volume = volume < 0.0 ? 0.0 : (volume > 1.0 ? 1.0 : volume);
+        volume = volume < 0.0 ? 0.0 : (volume > 1.0 ? 1.0 : volume),
+        closeBehavior = closeBehavior == 'tray' ? 'tray' : 'quit';
 
   static double _clampPreamp(num? value) {
     if (value == null) return 0.0;
@@ -120,6 +133,9 @@ class AppSettings {
     double? replayGainPreampDb,
     bool? resumeSession,
     double? volume,
+    bool? mediaControls,
+    bool? preventSleepWhilePlaying,
+    String? closeBehavior,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -144,6 +160,10 @@ class AppSettings {
           : this.replayGainPreampDb,
       resumeSession: resumeSession ?? this.resumeSession,
       volume: volume != null ? _clampVolume(volume) : this.volume,
+      mediaControls: mediaControls ?? this.mediaControls,
+      preventSleepWhilePlaying:
+          preventSleepWhilePlaying ?? this.preventSleepWhilePlaying,
+      closeBehavior: closeBehavior ?? this.closeBehavior,
     );
   }
 
@@ -169,6 +189,9 @@ class AppSettings {
       'replayGainPreampDb': replayGainPreampDb,
       'resumeSession': resumeSession,
       'volume': volume,
+      'mediaControls': mediaControls,
+      'preventSleepWhilePlaying': preventSleepWhilePlaying,
+      'closeBehavior': closeBehavior,
     };
   }
 
@@ -278,6 +301,18 @@ class AppSettings {
     final rawVolume = json['volume'];
     final volume = rawVolume is num ? _clampVolume(rawVolume) : 1.0;
 
+    final rawMediaControls = json['mediaControls'];
+    final mediaControls =
+        rawMediaControls is bool ? rawMediaControls : true;
+
+    final rawPreventSleep = json['preventSleepWhilePlaying'];
+    final preventSleepWhilePlaying =
+        rawPreventSleep is bool ? rawPreventSleep : true;
+
+    final rawCloseBehavior = json['closeBehavior'];
+    final closeBehavior =
+        rawCloseBehavior == 'tray' ? 'tray' : 'quit';
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -298,6 +333,9 @@ class AppSettings {
       replayGainPreampDb: replayGainPreampDb,
       resumeSession: resumeSession,
       volume: volume,
+      mediaControls: mediaControls,
+      preventSleepWhilePlaying: preventSleepWhilePlaying,
+      closeBehavior: closeBehavior,
     );
   }
 
@@ -324,7 +362,10 @@ class AppSettings {
           replayGainMode == other.replayGainMode &&
           replayGainPreampDb == other.replayGainPreampDb &&
           resumeSession == other.resumeSession &&
-          volume == other.volume;
+          volume == other.volume &&
+          mediaControls == other.mediaControls &&
+          preventSleepWhilePlaying == other.preventSleepWhilePlaying &&
+          closeBehavior == other.closeBehavior;
 
   @override
   int get hashCode => Object.hashAll([
@@ -347,5 +388,8 @@ class AppSettings {
         replayGainPreampDb,
         resumeSession,
         volume,
+        mediaControls,
+        preventSleepWhilePlaying,
+        closeBehavior,
       ]);
 }
