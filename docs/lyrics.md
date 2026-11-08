@@ -75,16 +75,36 @@ Configurable in `AppSettings.lyricsSource`:
 
 ---
 
-## 7. UI Components & Presentation
+## 7. UI Components, Motion & Presentation
 - **`LyricsView`** (`lib/ui/lyrics/lyrics_view.dart`):
-  - Synced lyrics scrolling list: active line centered with smooth animation (instant if reduce motion is enabled).
-  - Past and future lines dimmed for visual focus.
-  - Real word progress interpolation ticker: ticks only while playing and visible; disabled when motion is reduced or track lacks word timing.
-  - Tapping any synced line seeks playback directly to that line's start timestamp.
-  - Dedicated states: loading indicator, not found, instrumental, disabled (off), and error with retry action.
+  - **Calm Line Scrolling**: Active line sits slightly above vertical center (alignment 0.42) with a smooth 550 ms glide (`Curves.easeOutCubic`).
+  - **Manual Scroll Pause**: If the user scrolls manually, auto-follow pauses for 4 seconds, then smoothly glides back to the current line. Clicking any line seeks immediately and scrolls.
+  - **Typography & Scale**:
+    - Current line: fontSize 32 on the lyrics page, 40 in Full screen (scale 1.0).
+    - Inactive lines: fontSize 24 on page, 28 in Full screen (scale 0.92, anchored to text start side).
+    - Transitions animate scale and opacity over 350 ms with `Curves.easeOut`.
+    - Line height 1.35 with dynamic per-line text direction (`textDirectionFor`).
+  - **Opacity Falloff & Hover**:
+    - Current active line: 1.0.
+    - Upcoming lines: distance 1 = 0.55, distance 2 = 0.38, distance 3 = 0.26, distance 4+ = 0.20 (floor).
+    - Past lines: dimmer than upcoming (distance 1 = 0.44, distance 2 = 0.30, distance 3 = 0.21, distance 4+ = 0.20).
+    - Line hover raises opacity by 0.18 over 150 ms with pointer cursor.
+  - **Edge Softening**:
+    - Top and bottom 12% of the lyrics area are dissolved with a `ShaderMask` linear gradient so lines enter and leave view softly without harsh cuts.
+  - **Enhanced Word Highlight**:
+    - Current word fills smoothly from dim to full color with a soft gradient sweep (right-to-left for RTL, left-to-right for LTR) driven strictly by real word timing.
+    - Previous word settles to full color over 120 ms.
+    - Zero per-frame list rebuilds: on ticker frames only the active line's word sweep repaints within its `RepaintBoundary`.
+  - **State Transitions & Loading**:
+    - States switch with an `AnimatedSwitcher` (250 ms fade).
+    - Track change cross-fades out old lyrics and resets new lyrics scroll offset to top without a visual jump.
+    - Loading displays calm dimmed placeholder lines (no fast spinner).
+  - **Performance & Accessibility**:
+    - Each line wrapped in a `RepaintBoundary`.
+    - Reduce Motion ON: all durations become `Duration.zero`, scale stays 1.0, word sweep is replaced by instant color switch, scroll jumps immediately, and ticker is stopped.
 - **Navigation & Full Screen**:
   - Accessible via `AppDestination.lyrics` with glass back button and metadata header.
-  - Displayed alongside album artwork in `FullScreenView` when `showLyricsInFullScreen` is enabled.
+  - Displayed alongside album artwork in `FullScreenView` when `showLyricsInFullScreen` is enabled (`isFullScreen: true`).
 - **Settings Section**:
   - Source selector (5 modes).
   - Highlight mode selector (Line vs. Word).

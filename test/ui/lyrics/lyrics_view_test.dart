@@ -315,5 +315,221 @@ void main() {
         expect(navigator.current, equals(AppDestination.albums));
       },
     );
+
+    test('computeLineOpacity falls off with distance, dims past lines, and raises on hover', () {
+      // Active line = 4
+      expect(computeLineOpacity(index: 4, activeIndex: 4), equals(1.0));
+
+      // Upcoming lines
+      expect(computeLineOpacity(index: 5, activeIndex: 4), equals(0.55));
+      expect(computeLineOpacity(index: 6, activeIndex: 4), equals(0.38));
+      expect(computeLineOpacity(index: 7, activeIndex: 4), equals(0.26));
+      expect(computeLineOpacity(index: 8, activeIndex: 4), equals(0.20));
+      expect(computeLineOpacity(index: 12, activeIndex: 4), equals(0.20)); // floor
+
+      // Past lines are dimmer than upcoming ones
+      expect(computeLineOpacity(index: 3, activeIndex: 4), lessThan(0.55));
+      expect(computeLineOpacity(index: 3, activeIndex: 4), equals(0.44));
+      expect(computeLineOpacity(index: 2, activeIndex: 4), lessThan(0.38));
+      expect(computeLineOpacity(index: 2, activeIndex: 4), equals(0.30));
+      expect(computeLineOpacity(index: 1, activeIndex: 4), lessThan(0.26));
+      expect(computeLineOpacity(index: 1, activeIndex: 4), equals(0.21));
+      expect(computeLineOpacity(index: 0, activeIndex: 4), equals(0.20));
+
+      // Hover interaction raises opacity
+      expect(computeLineOpacity(index: 5, activeIndex: 4, isHovered: true), closeTo(0.73, 0.001));
+      expect(computeLineOpacity(index: 4, activeIndex: 4, isHovered: true), equals(1.0));
+
+      // Negative active index (before first line starts)
+      expect(computeLineOpacity(index: 0, activeIndex: -1), equals(0.55));
+      expect(computeLineOpacity(index: 1, activeIndex: -1), equals(0.38));
+    });
+
+    testWidgets(
+      'current line receives larger typography and scale 1.0 in normal and full screen modes',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        const synced = '''
+[00:01.00]Line 0
+[00:03.00]Line 1
+[00:05.00]Line 2
+''';
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(synced));
+        queue.replaceAll([
+          const AudioSource('file:///music/song.mp3', extras: {'title': 'Song'}),
+        ]);
+        await lyricsController.retry();
+
+        // 1. Normal mode (fontSize 32 / 24, scale 1.0 / 0.92)
+        await tester.pumpWidget(buildTestApp());
+        lyricsController.updatePosition(const Duration(milliseconds: 3500));
+        await tester.pump();
+
+        final scaleCurrent = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedScale)).first,
+        );
+        expect(scaleCurrent.scale, equals(1.0));
+
+        final scaleOther = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedScale)).first,
+        );
+        expect(scaleOther.scale, equals(0.92));
+
+        final styleCurrent = tester.widget<AnimatedDefaultTextStyle>(
+          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedDefaultTextStyle)).first,
+        );
+        expect(styleCurrent.style.fontSize, equals(32.0));
+
+        final styleOther = tester.widget<AnimatedDefaultTextStyle>(
+          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedDefaultTextStyle)).first,
+        );
+        expect(styleOther.style.fontSize, equals(24.0));
+
+        // 2. Full screen mode (fontSize 40 / 28)
+        await tester.pumpWidget(buildTestApp(
+          child: LyricsView(
+            controller: lyricsController,
+            playbackController: playbackController,
+            settingsStore: settingsStore,
+            navigator: navigator,
+            isFullScreen: true,
+            showHeader: false,
+          ),
+        ));
+        await tester.pump();
+
+        final fsStyleCurrent = tester.widget<AnimatedDefaultTextStyle>(
+          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedDefaultTextStyle)).first,
+        );
+        expect(fsStyleCurrent.style.fontSize, equals(40.0));
+
+        final fsStyleOther = tester.widget<AnimatedDefaultTextStyle>(
+          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedDefaultTextStyle)).first,
+        );
+        expect(fsStyleOther.style.fontSize, equals(28.0));
+      },
+    );
+
+    testWidgets(
+      'reduce motion removes scale animations and sets all animation durations to zero',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        const synced = '''
+[00:01.00]Line 0
+[00:03.00]Line 1
+''';
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(synced));
+        queue.replaceAll([
+          const AudioSource('file:///music/song.mp3', extras: {'title': 'Song'}),
+        ]);
+        await lyricsController.retry();
+
+        settingsStore.update((s) => s.copyWith(reduceMotion: true));
+        await tester.pumpWidget(buildTestApp());
+        lyricsController.updatePosition(const Duration(milliseconds: 3500));
+        await tester.pump();
+
+        final scale0 = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedScale)).first,
+        );
+        final scale1 = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedScale)).first,
+        );
+
+        expect(scale0.scale, equals(1.0));
+        expect(scale1.scale, equals(1.0));
+        expect(scale0.duration, equals(Duration.zero));
+        expect(scale1.duration, equals(Duration.zero));
+
+        final opacity0 = tester.widget<AnimatedOpacity>(
+          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedOpacity)).first,
+        );
+        expect(opacity0.duration, equals(Duration.zero));
+
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'word sweep progress follows real word timing and settles previous word over 120ms',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        const enhanced = '''
+[00:02.00]<00:02.00>Alpha <00:02.50>Beta <00:03.00>Gamma
+[00:06.00]Line two
+''';
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(enhanced));
+        queue.replaceAll([
+          const AudioSource('file:///music/song.mp3', extras: {'title': 'Song'}),
+        ]);
+        await lyricsController.retry();
+
+        await tester.pumpWidget(buildTestApp());
+        lyricsController.updatePosition(const Duration(milliseconds: 2250));
+        await tester.pump();
+
+        // Alpha is current word (at 50% progress in 2000..2500ms)
+        expect(find.text('Alpha'), findsOneWidget);
+        expect(find.text('Beta'), findsOneWidget);
+        expect(find.text('Gamma'), findsOneWidget);
+
+        // Alpha should have a ShaderMask sweep widget
+        final alphaMask = find.ancestor(
+          of: find.text('Alpha'),
+          matching: find.byType(ShaderMask),
+        );
+        expect(alphaMask, findsWidgets);
+
+        // Advance to 2600ms (Beta is now active, Alpha is previous word)
+        lyricsController.updatePosition(const Duration(milliseconds: 2600));
+        await tester.pump();
+
+        // Previous word Alpha settles with AnimatedDefaultTextStyle over 120ms
+        final alphaSettle = find.ancestor(
+          of: find.text('Alpha'),
+          matching: find.byType(AnimatedDefaultTextStyle),
+        );
+        expect(alphaSettle, findsWidgets);
+        final settleWidget = tester.widget<AnimatedDefaultTextStyle>(alphaSettle.first);
+        expect(settleWidget.duration, equals(const Duration(milliseconds: 120)));
+      },
+    );
+
+    testWidgets(
+      'manual scroll pauses auto-follow and no pending timers or tickers after dispose',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        const synced = '''
+[00:01.00]Line 0
+[00:03.00]Line 1
+[00:05.00]Line 2
+[00:07.00]Line 3
+''';
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(synced));
+        queue.replaceAll([
+          const AudioSource('file:///music/song.mp3', extras: {'title': 'Song'}),
+        ]);
+        await lyricsController.retry();
+
+        await tester.pumpWidget(buildTestApp());
+        lyricsController.updatePosition(const Duration(milliseconds: 1500));
+        await tester.pump();
+
+        // Simulate a manual user scroll gesture on the list
+        await tester.drag(find.byType(ListView), const Offset(0, -100));
+        await tester.pump();
+
+        // Auto-follow is now paused for 4s
+        // Advancing position should not crash or trigger premature scroll
+        lyricsController.updatePosition(const Duration(milliseconds: 3500));
+        await tester.pump();
+
+        // Dispose the widget while the 4s auto-follow timer is still active
+        await tester.pumpWidget(const SizedBox.shrink());
+
+        // Verify clean dispose without pending timers or exceptions
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

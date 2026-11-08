@@ -363,6 +363,7 @@ class FullScreenViewState extends State<FullScreenView>
                                   settingsStore: widget.settingsStore,
                                   navigator: widget.navigator,
                                   showHeader: false,
+                                  isFullScreen: true,
                                 ),
                               ),
                             ],

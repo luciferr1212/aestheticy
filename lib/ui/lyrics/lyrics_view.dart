@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../audio/audio_models.dart';
@@ -17,7 +18,65 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 
-/// Presentation widget for time-synchronized and plain lyrics.
+/// Computes the visual opacity for a lyrics line based on its distance from the active line.
+///
+/// Falloff table:
+/// - Current active line: 1.0
+/// - Distance 1 upcoming: 0.55 (next line)
+/// - Distance 2 upcoming: 0.38
+/// - Distance 3 upcoming: 0.26
+/// - Distance 4+ upcoming: 0.20 (floor)
+/// - Past lines are dimmer than upcoming ones (distance 1: 0.44, distance 2: 0.30, distance 3: 0.21, distance 4+: 0.20)
+/// - Hover raises opacity by 0.18 (clamped to 1.0)
+double computeLineOpacity({
+  required int index,
+  required int activeIndex,
+  bool isHovered = false,
+}) {
+  if (activeIndex < 0) {
+    // Before first line starts: index 0 is distance 1
+    final d = index + 1;
+    final base = switch (d) {
+      1 => 0.55,
+      2 => 0.38,
+      3 => 0.26,
+      _ => 0.20,
+    };
+    return isHovered ? (base + 0.18).clamp(0.20, 1.0) : base;
+  }
+
+  if (index == activeIndex) {
+    return 1.0;
+  }
+
+  final diff = index - activeIndex;
+  final double base;
+  if (diff > 0) {
+    // Upcoming lines
+    base = switch (diff) {
+      1 => 0.55,
+      2 => 0.38,
+      3 => 0.26,
+      _ => 0.20,
+    };
+  } else {
+    // Past lines: dimmer than upcoming ones
+    final pastDist = -diff;
+    base = switch (pastDist) {
+      1 => 0.44,
+      2 => 0.30,
+      3 => 0.21,
+      _ => 0.20,
+    };
+  }
+
+  if (isHovered) {
+    return (base + 0.18).clamp(0.20, 1.0);
+  }
+  return base;
+}
+
+/// Presentation widget for time-synchronized and plain lyrics with calm motion and typography.
 class LyricsView extends StatefulWidget {
   /// The lyrics state coordinator.
   final LyricsController controller;
@@ -34,6 +93,9 @@ class LyricsView extends StatefulWidget {
   /// Whether to render the top header with track metadata, source pill, and back button.
   final bool showHeader;
 
+  /// Whether this view is rendered in full screen mode.
+  final bool isFullScreen;
+
   /// Creates a [LyricsView].
   const LyricsView({
     super.key,
@@ -42,6 +104,7 @@ class LyricsView extends StatefulWidget {
     required this.settingsStore,
     this.navigator,
     this.showHeader = true,
+    this.isFullScreen = false,
   });
 
   @override
@@ -52,15 +115,23 @@ class _LyricsViewState extends State<LyricsView>
     with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _lineKeys = {};
+  final ValueNotifier<double> _wordProgressNotifier = ValueNotifier<double>(0.0);
+
   StreamSubscription<PlaybackState>? _playbackStateSub;
+  StreamSubscription<AudioSource?>? _currentTrackSub;
   Ticker? _ticker;
+  Timer? _autoFollowTimer;
+  bool _isAutoFollowPaused = false;
   int _lastScrolledLine = -1;
+  String? _currentTrackUri;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChange);
     _playbackStateSub = widget.playbackController.stateStream.listen(_onPlaybackStateChange);
+    _currentTrackSub = widget.playbackController.currentStream.listen(_onCurrentTrackChange);
+    _currentTrackUri = widget.playbackController.queue.current?.uri;
 
     _ticker = createTicker(_onTick);
     _updateTicker();
@@ -73,7 +144,27 @@ class _LyricsViewState extends State<LyricsView>
       oldWidget.controller.removeListener(_onControllerChange);
       widget.controller.addListener(_onControllerChange);
     }
+    if (oldWidget.playbackController != widget.playbackController) {
+      _playbackStateSub?.cancel();
+      _currentTrackSub?.cancel();
+      _playbackStateSub = widget.playbackController.stateStream.listen(_onPlaybackStateChange);
+      _currentTrackSub = widget.playbackController.currentStream.listen(_onCurrentTrackChange);
+    }
     _updateTicker();
+  }
+
+  void _onCurrentTrackChange(AudioSource? source) {
+    final newUri = source?.uri;
+    if (newUri != _currentTrackUri) {
+      _currentTrackUri = newUri;
+      _lastScrolledLine = -1;
+      _isAutoFollowPaused = false;
+      _autoFollowTimer?.cancel();
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0.0);
+      }
+      if (mounted) setState(() {});
+    }
   }
 
   void _onPlaybackStateChange(PlaybackState _) {
@@ -118,36 +209,53 @@ class _LyricsViewState extends State<LyricsView>
     if (!mounted) return;
     widget.controller.updatePosition(
       widget.playbackController.currentPosition,
-      forceNotify: true,
+      forceNotify: false,
     );
+    _wordProgressNotifier.value = widget.controller.wordProgress;
   }
 
-  void _scrollToCurrentLine(int lineIndex) {
+  void _scrollToCurrentLine(int lineIndex, {bool force = false}) {
+    if (!force && _isAutoFollowPaused) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (!force && _isAutoFollowPaused) return;
       final key = _lineKeys[lineIndex];
       final targetContext = key?.currentContext;
       if (targetContext != null) {
         final reduceMotion = widget.settingsStore.settings.reduceMotion;
         Scrollable.ensureVisible(
           targetContext,
-          alignment: 0.5,
+          alignment: 0.42,
           duration: reduceMotion
               ? Duration.zero
-              : const Duration(milliseconds: 280),
+              : const Duration(milliseconds: 550),
           curve: Curves.easeOutCubic,
         );
       }
     });
   }
 
+  void _pauseAutoFollow() {
+    _isAutoFollowPaused = true;
+    _autoFollowTimer?.cancel();
+    _autoFollowTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      _isAutoFollowPaused = false;
+      _scrollToCurrentLine(widget.controller.currentLineIndex, force: true);
+    });
+  }
+
   @override
   void dispose() {
+    _autoFollowTimer?.cancel();
+    _autoFollowTimer = null;
     widget.controller.removeListener(_onControllerChange);
     _playbackStateSub?.cancel();
+    _currentTrackSub?.cancel();
     _ticker?.stop();
     _ticker?.dispose();
     _ticker = null;
+    _wordProgressNotifier.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -275,32 +383,72 @@ class _LyricsViewState extends State<LyricsView>
 
   Widget _buildBody(BuildContext context) {
     final state = widget.controller.state;
+    final reduceMotion = widget.settingsStore.settings.reduceMotion;
 
-    return switch (state) {
-      LyricsStateLoading() => _buildLoading(context),
-      LyricsStateOff() => _buildOff(context),
-      LyricsStateNotFound() => _buildNotFound(context),
-      LyricsStateError(reason: final r) => _buildError(context, r),
-      LyricsStateFound(document: final doc) => _buildFound(context, doc),
-    };
+    final Widget content;
+    final Key contentKey;
+
+    switch (state) {
+      case LyricsStateLoading():
+        contentKey = const ValueKey('lyrics_state_loading');
+        content = _buildLoading(context);
+      case LyricsStateOff():
+        contentKey = const ValueKey('lyrics_state_off');
+        content = _buildOff(context);
+      case LyricsStateNotFound():
+        contentKey = const ValueKey('lyrics_state_notFound');
+        content = _buildNotFound(context);
+      case LyricsStateError(reason: final r):
+        contentKey = ValueKey('lyrics_state_error_${r.name}');
+        content = _buildError(context, r);
+      case LyricsStateFound(document: final doc):
+        contentKey = ValueKey('lyrics_doc_${_currentTrackUri}_${doc.source}_${doc.lines.length}');
+        content = _buildFound(context, doc);
+    }
+
+    return AnimatedSwitcher(
+      duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 250),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, animation) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+      child: KeyedSubtree(
+        key: contentKey,
+        child: content,
+      ),
+    );
   }
 
   Widget _buildLoading(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(strokeWidth: 2.5),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            context.t('lyrics.state.loading'),
-            style: AppTypography.body.copyWith(color: AppColors.textMuted),
-          ),
-        ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final widthFactor in [0.70, 0.90, 0.55, 0.80, 0.45]) ...[
+              FractionallySizedBox(
+                widthFactor: widthFactor,
+                child: Container(
+                  height: 20,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.textMuted.withValues(alpha: 0.18),
+                    borderRadius: AppSpacing.br10,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 24),
+            Text(
+              context.t('lyrics.state.loading'),
+              style: AppTypography.body.copyWith(
+                color: AppColors.textMuted.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -379,145 +527,377 @@ class _LyricsViewState extends State<LyricsView>
     }
 
     if (doc.kind == LyricsKind.plain) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final line in doc.lines)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Text(
-                      line.text,
-                      textDirection: textDirectionFor(line.text),
-                      style: AppTypography.bodyStrong.copyWith(
-                        fontSize: 18,
-                        color: AppColors.textSecondary,
-                        height: 1.6,
+      return _buildPlain(context, doc);
+    }
+
+    return _buildSyncedList(context, doc);
+  }
+
+  Widget _buildPlain(BuildContext context, LyricsDocument doc) {
+    final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    final plainFontSize = widget.isFullScreen ? 26.0 : 20.0;
+
+    return ShaderMask(
+      shaderCallback: (Rect bounds) {
+        return const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            Colors.white,
+            Colors.white,
+            Colors.transparent,
+          ],
+          stops: [0.0, 0.12, 0.88, 1.0],
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.dstIn,
+      child: AnimatedOpacity(
+        duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 300),
+        opacity: 1.0,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.symmetric(
+            horizontal: 32,
+            vertical: widget.isFullScreen ? 80 : 48,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final line in doc.lines)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text(
+                        line.text,
+                        textAlign: TextAlign.center,
+                        textDirection: textDirectionFor(line.text),
+                        style: AppTypography.title.copyWith(
+                          fontSize: plainFontSize,
+                          fontWeight: FontWeight.normal,
+                          color: AppColors.textSecondary,
+                          height: 1.6,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    // Synced lyrics list
+  Widget _buildSyncedList(BuildContext context, LyricsDocument doc) {
     final activeIndex = widget.controller.currentLineIndex;
     final highlightMode = widget.settingsStore.settings.lyricsHighlight;
     final hasWordTiming = doc.hasWordTiming;
     final currentWordIdx = widget.controller.currentWordIndex;
-    final wordProgress = widget.controller.wordProgress;
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
 
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 120),
-      itemCount: doc.lines.length,
-      itemBuilder: (context, index) {
-        final line = doc.lines[index];
-        final isCurrent = index == activeIndex;
-        final key = _lineKeys.putIfAbsent(index, GlobalKey.new);
+    return ShaderMask(
+      shaderCallback: (Rect bounds) {
+        return const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            Colors.white,
+            Colors.white,
+            Colors.transparent,
+          ],
+          stops: [0.0, 0.12, 0.88, 1.0],
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.dstIn,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is UserScrollNotification &&
+              notification.direction != ScrollDirection.idle) {
+            _pauseAutoFollow();
+          } else if (notification is ScrollStartNotification &&
+              notification.dragDetails != null) {
+            _pauseAutoFollow();
+          }
+          return false;
+        },
+        child: ListView.builder(
+          controller: _scrollController,
+          padding: EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: widget.isFullScreen ? 140 : 100,
+          ),
+          itemCount: doc.lines.length,
+          itemBuilder: (context, index) {
+            final line = doc.lines[index];
+            final key = _lineKeys.putIfAbsent(index, GlobalKey.new);
 
-        final lineDirection = textDirectionFor(line.text);
+            return RepaintBoundary(
+              child: _SyncedLineItem(
+                key: key,
+                index: index,
+                line: line,
+                activeIndex: activeIndex,
+                activeWordIdx: currentWordIdx,
+                wordProgressNotifier: _wordProgressNotifier,
+                highlightMode: highlightMode,
+                hasWordTiming: hasWordTiming,
+                reduceMotion: reduceMotion,
+                isFullScreen: widget.isFullScreen,
+                onTap: () {
+                  _autoFollowTimer?.cancel();
+                  _isAutoFollowPaused = false;
+                  widget.playbackController.seek(Duration(milliseconds: line.startMs));
+                  _scrollToCurrentLine(index, force: true);
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
 
-        return Container(
-          key: key,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          alignment: Alignment.center,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppSpacing.r12),
-            onTap: () {
-              widget.playbackController.seek(Duration(milliseconds: line.startMs));
-            },
+class _SyncedLineItem extends StatefulWidget {
+  final int index;
+  final LyricsLine line;
+  final int activeIndex;
+  final int activeWordIdx;
+  final ValueNotifier<double> wordProgressNotifier;
+  final String highlightMode;
+  final bool hasWordTiming;
+  final bool reduceMotion;
+  final bool isFullScreen;
+  final VoidCallback onTap;
+
+  const _SyncedLineItem({
+    super.key,
+    required this.index,
+    required this.line,
+    required this.activeIndex,
+    required this.activeWordIdx,
+    required this.wordProgressNotifier,
+    required this.highlightMode,
+    required this.hasWordTiming,
+    required this.reduceMotion,
+    required this.isFullScreen,
+    required this.onTap,
+  });
+
+  @override
+  State<_SyncedLineItem> createState() => _SyncedLineItemState();
+}
+
+class _SyncedLineItemState extends State<_SyncedLineItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isCurrent = widget.index == widget.activeIndex;
+    final lineDirection = textDirectionFor(widget.line.text);
+    final lineOpacity = computeLineOpacity(
+      index: widget.index,
+      activeIndex: widget.activeIndex,
+      isHovered: _isHovered,
+    );
+
+    final double currentFontSize = widget.isFullScreen ? 40.0 : 32.0;
+    final double otherFontSize = widget.isFullScreen ? 28.0 : 24.0;
+    final targetFontSize = isCurrent ? currentFontSize : otherFontSize;
+    final targetFontWeight = isCurrent ? FontWeight.bold : FontWeight.w600;
+
+    final baseStyle = AppTypography.title.copyWith(
+      fontSize: targetFontSize,
+      fontWeight: targetFontWeight,
+      color: isCurrent ? AppColors.text : AppColors.textMuted,
+      height: 1.35,
+    );
+
+    final isWordHighlightActive = isCurrent &&
+        widget.highlightMode == 'word' &&
+        widget.hasWordTiming &&
+        widget.line.words != null &&
+        widget.line.words!.isNotEmpty;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedOpacity(
+          opacity: lineOpacity,
+          duration: widget.reduceMotion
+              ? Duration.zero
+              : (_isHovered
+                  ? const Duration(milliseconds: 150)
+                  : const Duration(milliseconds: 350)),
+          curve: Curves.easeOut,
+          child: AnimatedScale(
+            scale: widget.reduceMotion ? 1.0 : (isCurrent ? 1.0 : 0.92),
+            alignment: (lineDirection == TextDirection.rtl)
+                ? Alignment.centerRight
+                : Alignment.centerLeft,
+            duration: widget.reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 350),
+            curve: Curves.easeOut,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: isCurrent &&
-                      highlightMode == 'word' &&
-                      hasWordTiming &&
-                      line.words != null &&
-                      line.words!.isNotEmpty
+              child: isWordHighlightActive
                   ? _buildWordHighlightedLine(
-                      line,
-                      currentWordIdx,
-                      wordProgress,
-                      reduceMotion,
-                      lineDirection,
+                      baseStyle: baseStyle,
+                      lineDirection: lineDirection,
                     )
-                  : Text(
-                      line.text,
-                      textAlign: TextAlign.center,
-                      textDirection: lineDirection,
-                      style: AppTypography.title.copyWith(
-                        fontSize: isCurrent ? 24 : 18,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        color: isCurrent
-                            ? AppColors.text
-                            : AppColors.textMuted.withValues(alpha: 0.45),
-                        height: 1.5,
+                  : AnimatedDefaultTextStyle(
+                      duration: widget.reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 350),
+                      curve: Curves.easeOut,
+                      style: baseStyle,
+                      child: Text(
+                        widget.line.text,
+                        textAlign: TextAlign.center,
+                        textDirection: lineDirection,
                       ),
                     ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWordHighlightedLine({
+    required TextStyle baseStyle,
+    required TextDirection lineDirection,
+  }) {
+    final words = widget.line.words!;
+    final activeWordIdx = widget.activeWordIdx;
+    final reduceMotion = widget.reduceMotion;
+    final dimColor = AppColors.textMuted.withValues(alpha: 0.45);
+
+    return ValueListenableBuilder<double>(
+      valueListenable: widget.wordProgressNotifier,
+      builder: (context, progress, _) {
+        return Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8.0,
+          runSpacing: 4.0,
+          textDirection: lineDirection,
+          children: [
+            for (var i = 0; i < words.length; i++) ...[
+              if (i < activeWordIdx - 1)
+                Text(
+                  words[i].text,
+                  style: baseStyle.copyWith(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              else if (i == activeWordIdx - 1)
+                reduceMotion
+                    ? Text(
+                        words[i].text,
+                        style: baseStyle.copyWith(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                    : AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 120),
+                        curve: Curves.easeOut,
+                        style: baseStyle.copyWith(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        child: Text(words[i].text),
+                      )
+              else if (i == activeWordIdx)
+                reduceMotion
+                    ? Text(
+                        words[i].text,
+                        style: baseStyle.copyWith(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                    : _WordSweepWidget(
+                        text: words[i].text,
+                        progress: progress,
+                        textDirection: lineDirection,
+                        style: baseStyle,
+                      )
+              else
+                Text(
+                  words[i].text,
+                  style: baseStyle.copyWith(
+                    color: dimColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+            ],
+          ],
         );
       },
     );
   }
+}
 
-  Widget _buildWordHighlightedLine(
-    LyricsLine line,
-    int activeWordIdx,
-    double progress,
-    bool reduceMotion,
-    TextDirection direction,
-  ) {
-    final words = line.words!;
-    final spans = <InlineSpan>[];
+class _WordSweepWidget extends StatelessWidget {
+  final String text;
+  final double progress;
+  final TextDirection textDirection;
+  final TextStyle style;
 
-    for (var i = 0; i < words.length; i++) {
-      final w = words[i];
-      final isPast = i < activeWordIdx;
-      final isCurrent = i == activeWordIdx;
+  const _WordSweepWidget({
+    required this.text,
+    required this.progress,
+    required this.textDirection,
+    required this.style,
+  });
 
-      final Color wordColor;
-      if (isPast) {
-        wordColor = AppColors.text;
-      } else if (isCurrent) {
-        if (reduceMotion) {
-          wordColor = AppColors.text;
-        } else {
-          wordColor = Color.lerp(
-            AppColors.textMuted.withValues(alpha: 0.5),
+  @override
+  Widget build(BuildContext context) {
+    final p = progress.clamp(0.0, 1.0);
+    final isRtl = textDirection == TextDirection.rtl;
+    final begin = isRtl ? Alignment.centerRight : Alignment.centerLeft;
+    final end = isRtl ? Alignment.centerLeft : Alignment.centerRight;
+
+    // Soft gradient sweep transition zone
+    const softness = 0.18;
+    final x = -softness + p * (1.0 + 2 * softness);
+    final stop0 = x.clamp(0.0, 1.0);
+    final stop1 = (x + softness).clamp(0.0, 1.0);
+
+    final dimColor = AppColors.textMuted.withValues(alpha: 0.45);
+
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (Rect bounds) {
+        return LinearGradient(
+          begin: begin,
+          end: end,
+          colors: [
             AppColors.text,
-            progress,
-          )!;
-        }
-      } else {
-        wordColor = AppColors.textMuted.withValues(alpha: 0.45);
-      }
-
-      spans.add(TextSpan(
-        text: i < words.length - 1 ? '${w.text} ' : w.text,
-        style: TextStyle(
-          color: wordColor,
-          fontWeight: isCurrent || isPast ? FontWeight.bold : FontWeight.w500,
+            AppColors.text,
+            dimColor,
+            dimColor,
+          ],
+          stops: [0.0, stop0, stop1, 1.0],
+        ).createShader(bounds);
+      },
+      child: Text(
+        text,
+        style: style.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
         ),
-      ));
-    }
-
-    return Text.rich(
-      TextSpan(children: spans),
-      textAlign: TextAlign.center,
-      textDirection: direction,
-      style: AppTypography.title.copyWith(
-        fontSize: 24,
-        height: 1.5,
       ),
     );
   }
