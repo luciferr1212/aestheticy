@@ -219,6 +219,10 @@ class _SettingsViewState extends State<SettingsView> {
                             _buildPlaybackSection(context, settings),
                             const SizedBox(height: 20),
 
+                            // Lyrics
+                            _buildLyricsSection(context, settings),
+                            const SizedBox(height: 20),
+
                             // Windows integration (hidden off Windows)
                             if (_isWindows) ...[
                               _buildWindowsSection(context, settings),
@@ -803,6 +807,152 @@ class _SettingsViewState extends State<SettingsView> {
             },
           ),
         ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+        _SettingsRow(
+          title: context.t('settings.seekStep'),
+          description: context.t('settings.seekStepHint'),
+          control: _SegmentedControl<int>(
+            value: settings.seekStepSeconds,
+            options: [
+              _SegmentedOption(
+                value: 1,
+                label: context.t('settings.seekStep.1s'),
+              ),
+              _SegmentedOption(
+                value: 2,
+                label: context.t('settings.seekStep.2s'),
+              ),
+              _SegmentedOption(
+                value: 5,
+                label: context.t('settings.seekStep.5s'),
+              ),
+            ],
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(seekStepSeconds: val));
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Lyrics ───────────────────────────────────────────────────────────
+  Widget _buildLyricsSection(BuildContext context, AppSettings settings) {
+    final currentSource = switch (settings.lyricsSource) {
+      'onlineThenLocal' => 'onlineThenLocal',
+      'localOnly' => 'localOnly',
+      'onlineOnly' => 'onlineOnly',
+      'off' => 'off',
+      _ => 'localThenOnline',
+    };
+
+    return _SettingsCard(
+      title: context.t('settings.sectionLyrics'),
+      children: [
+        // Source
+        _SettingsRow(
+          title: context.t('settings.lyricsSource'),
+          description: context.t('settings.lyricsSourceHint'),
+          control: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: AppColors.fillControl,
+              borderRadius: BorderRadius.circular(AppSpacing.r10),
+              border: Border.all(color: AppColors.borderSubtle),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                key: const Key('settings_lyrics_source_dropdown'),
+                value: currentSource,
+                dropdownColor: AppColors.surface,
+                items: [
+                  DropdownMenuItem(
+                    value: 'localThenOnline',
+                    child: Text(
+                      context.t('settings.lyricsSource.localThenOnline'),
+                      style: AppTypography.body,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'onlineThenLocal',
+                    child: Text(
+                      context.t('settings.lyricsSource.onlineThenLocal'),
+                      style: AppTypography.body,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'localOnly',
+                    child: Text(
+                      context.t('settings.lyricsSource.localOnly'),
+                      style: AppTypography.body,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'onlineOnly',
+                    child: Text(
+                      context.t('settings.lyricsSource.onlineOnly'),
+                      style: AppTypography.body,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'off',
+                    child: Text(
+                      context.t('settings.lyricsSource.off'),
+                      style: AppTypography.body,
+                    ),
+                  ),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    widget.settingsStore
+                        .update((s) => s.copyWith(lyricsSource: val));
+                  }
+                },
+              ),
+            ),
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // Highlight mode
+        _SettingsRow(
+          title: context.t('settings.lyricsHighlight'),
+          description: context.t('settings.lyricsHighlightHint'),
+          control: _SegmentedControl<String>(
+            value: settings.lyricsHighlight == 'line' ? 'line' : 'word',
+            options: [
+              _SegmentedOption(
+                value: 'line',
+                label: context.t('settings.lyricsHighlight.line'),
+              ),
+              _SegmentedOption(
+                value: 'word',
+                label: context.t('settings.lyricsHighlight.word'),
+              ),
+            ],
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(lyricsHighlight: val));
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // Show lyrics in full screen
+        _SettingsRow(
+          title: context.t('settings.showLyricsInFullScreen'),
+          description: context.t('settings.showLyricsInFullScreenHint'),
+          control: Switch(
+            key: const Key('settings_show_lyrics_full_screen_switch'),
+            value: settings.showLyricsInFullScreen,
+            activeThumbColor: AppColors.accent,
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(showLyricsInFullScreen: val));
+            },
+          ),
+        ),
       ],
     );
   }
@@ -1077,6 +1227,7 @@ class _SettingsViewState extends State<SettingsView> {
                   trayEnabled: settings.closeBehavior == 'tray',
                   sleepPreventionEnabled: settings.preventSleepWhilePlaying,
                   closeBehavior: settings.closeBehavior,
+                  lyricsSource: settings.lyricsSource,
                   logLines: logLines,
                   userNameToScrub: settings.userName,
                 );

@@ -678,4 +678,67 @@ void main() {
     await tester.pumpAndSettle();
     expect(settingsStore.settings.closeBehavior, equals('tray'));
   }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('Playback seek step and Lyrics section update store live and render in RTL Large text', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+        isWindowsOverride: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+
+    // 1. Seek step selector
+    final seek5s = find.text('5 seconds');
+    await tester.scrollUntilVisible(seek5s, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(seek5s);
+    await tester.pumpAndSettle();
+
+    await tester.tap(seek5s);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.seekStepSeconds, equals(5));
+
+    // 2. Lyrics highlight selector
+    final lineHighlight = find.text('Line');
+    await tester.scrollUntilVisible(lineHighlight, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(lineHighlight);
+    await tester.pumpAndSettle();
+
+    await tester.tap(lineHighlight);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.lyricsHighlight, equals('line'));
+
+    // 3. Show lyrics in full screen switch
+    final fsSwitch = find.byKey(const Key('settings_show_lyrics_full_screen_switch'));
+    await tester.scrollUntilVisible(fsSwitch, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(fsSwitch);
+    await tester.pumpAndSettle();
+
+    await tester.tap(fsSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.showLyricsInFullScreen, isFalse);
+
+    // 4. Test in Arabic RTL with Large text scale
+    settingsStore.update((s) => s.copyWith(
+          language: 'ar',
+          textScale: 'large',
+        ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('الكلمات'), findsOneWidget);
+    expect(tester.takeException(), isNull, reason: 'RTL Large text must not throw overflow errors');
+
+    await tester.pump(const Duration(milliseconds: 500));
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }

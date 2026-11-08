@@ -29,6 +29,7 @@ String buildDiagnosticReport({
   bool trayEnabled = false,
   bool sleepPreventionEnabled = true,
   String closeBehavior = 'quit',
+  String lyricsSource = 'localThenOnline',
   required List<String> logLines,
   String? userNameToScrub,
 }) {
@@ -55,6 +56,7 @@ String buildDiagnosticReport({
   sb.writeln('Tray: ${trayEnabled ? 'on' : 'off'}');
   sb.writeln('Sleep Prevention: ${sleepPreventionEnabled ? 'on' : 'off'}');
   sb.writeln('Close Behavior: $closeBehavior');
+  sb.writeln('Lyrics Source: $lyricsSource');
   if (sessionRestoreSummary != null) {
     sb.writeln('Session Restore: $sessionRestoreSummary');
   }

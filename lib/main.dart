@@ -17,6 +17,7 @@ import 'package:aestheticy/features/integration/app_shutdown.dart';
 import 'package:aestheticy/features/integration/media_session_controller.dart';
 import 'package:aestheticy/features/integration/sleep_controller.dart';
 import 'package:aestheticy/features/integration/tray_window_controller.dart';
+import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
 import 'package:aestheticy/features/session/session_restorer.dart';
 import 'package:aestheticy/features/session/session_saver.dart';
 import 'package:aestheticy/features/session/session_store.dart';
@@ -563,6 +564,9 @@ class AestheticyApp extends StatefulWidget {
   /// Optional tray window controller.
   final TrayWindowController? trayWindowController;
 
+  /// Optional lyrics controller.
+  final LyricsController? lyricsController;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -589,6 +593,7 @@ class AestheticyApp extends StatefulWidget {
     this.mediaSessionController,
     this.sleepController,
     this.trayWindowController,
+    this.lyricsController,
   });
 
   @override
@@ -809,6 +814,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                   artistNameStore: _artistNameStore,
                   eqController: _eqController,
                   userCollections: _userCollections,
+                  lyricsController: widget.lyricsController,
                 ),
               ),
             ),

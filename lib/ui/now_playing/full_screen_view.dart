@@ -10,12 +10,15 @@ import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
 import '../../features/collections/user_collections.dart';
+import '../../features/lyrics/lyrics_controller.dart';
+import '../../features/lyrics/lyrics_repository.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
+import '../lyrics/lyrics_view.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
@@ -38,6 +41,9 @@ class FullScreenView extends StatefulWidget {
   /// Application settings store.
   final SettingsStore settingsStore;
 
+  /// Optional lyrics controller.
+  final LyricsController? lyricsController;
+
   /// Optional callback invoked on ticker frame (for test verification).
   final VoidCallback? onTickerFrame;
 
@@ -48,6 +54,7 @@ class FullScreenView extends StatefulWidget {
     required this.engine,
     required this.navigator,
     required this.settingsStore,
+    this.lyricsController,
     this.onTickerFrame,
   });
 
@@ -60,9 +67,9 @@ class FullScreenViewState extends State<FullScreenView>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final Ticker _ticker;
   final FocusNode _focusNode = FocusNode();
+  late final LyricsController _lyricsController;
+  bool _createdLyricsControllerLocally = false;
   StreamSubscription<AudioSource?>? _currentSub;
-  StreamSubscription<Duration>? _posSub;
-  Duration _currentPos = Duration.zero;
   Timer? _controlsTimer;
 
   CoverPalette _palette = CoverPalette.fallback;
@@ -78,14 +85,21 @@ class FullScreenViewState extends State<FullScreenView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.lyricsController != null) {
+      _lyricsController = widget.lyricsController!;
+    } else {
+      _lyricsController = LyricsController(
+        playbackController: widget.controller,
+        repository: LyricsRepository(),
+        settingsStore: widget.settingsStore,
+      );
+      _createdLyricsControllerLocally = true;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
 
     _updatePalette(widget.controller.queue.current?.extras?['coverKey']);
-    _posSub = widget.engine.positionStream.listen((pos) {
-      _currentPos = pos;
-    });
     _currentSub = widget.controller.currentStream.listen((source) {
       if (!mounted) return;
       _updatePalette(source?.extras?['coverKey']);
@@ -156,42 +170,26 @@ class FullScreenViewState extends State<FullScreenView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_createdLyricsControllerLocally) {
+      _lyricsController.dispose();
+    }
     _controlsTimer?.cancel();
     _ticker.dispose();
-    _posSub?.cancel();
     _currentSub?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
     _resetControlsTimer();
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     if (matchesShortcut(event, AppShortcutId.back)) {
       widget.navigator.goBack();
       return KeyEventResult.handled;
     }
-    if (matchesShortcut(event, AppShortcutId.playPause)) {
-      widget.controller.togglePlayPause();
-      return KeyEventResult.handled;
-    }
-    if (matchesShortcut(event, AppShortcutId.seekBackward)) {
-      _seekRelative(-const Duration(seconds: 5));
-      return KeyEventResult.handled;
-    }
-    if (matchesShortcut(event, AppShortcutId.seekForward)) {
-      _seekRelative(const Duration(seconds: 5));
-      return KeyEventResult.handled;
-    }
 
     return KeyEventResult.ignored;
-  }
-
-  void _seekRelative(Duration delta) {
-    final target = _currentPos + delta;
-    widget.engine.seek(target < Duration.zero ? Duration.zero : target);
   }
 
   void _toggleGlassShapes() {
@@ -355,40 +353,19 @@ class FullScreenViewState extends State<FullScreenView>
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 48),
-
-                            // End side: Lyrics placeholder area
-                            Expanded(
-                              flex: 5,
-                              child: Container(
-                                padding: const EdgeInsets.all(32),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(28),
-                                  border: Border.all(color: AppColors.borderSubtle),
-                                  color: AppColors.fillControl,
-                                ),
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.lyrics_outlined,
-                                        size: 64,
-                                        color: AppColors.textMuted,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Text(
-                                        context.t('fullScreen.lyricsPlaceholder'),
-                                        style: AppTypography.title.copyWith(
-                                          color: AppColors.textMuted,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                            if (widget.settingsStore.settings.showLyricsInFullScreen) ...[
+                              const SizedBox(width: 48),
+                              Expanded(
+                                flex: 5,
+                                child: LyricsView(
+                                  controller: _lyricsController,
+                                  playbackController: widget.controller,
+                                  settingsStore: widget.settingsStore,
+                                  navigator: widget.navigator,
+                                  showHeader: false,
                                 ),
                               ),
-                            ),
+                            ],
                           ],
                         );
                       },

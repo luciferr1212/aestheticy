@@ -48,6 +48,9 @@ enum AppDestination {
 
   /// Recently played tracks screen.
   recentlyPlayed,
+
+  /// Synchronized and plain lyrics screen.
+  lyrics,
 }
 
 /// Navigation state coordinator managing active destination and detail selection.
@@ -112,7 +115,11 @@ class AppNavigator extends ChangeNotifier {
     }
 
     if (destination == AppDestination.nowPlaying) {
-      if (_current != AppDestination.fullScreen) {
+      if (_current != AppDestination.fullScreen && _current != AppDestination.lyrics) {
+        _saveCurrentState();
+      }
+    } else if (destination == AppDestination.lyrics) {
+      if (_current != AppDestination.fullScreen && _current != AppDestination.nowPlaying) {
         _saveCurrentState();
       }
     } else if (destination == AppDestination.fullScreen) {
@@ -133,6 +140,7 @@ class AppNavigator extends ChangeNotifier {
     _current = destination;
     if (destination != AppDestination.albumDetail &&
         destination != AppDestination.nowPlaying &&
+        destination != AppDestination.lyrics &&
         destination != AppDestination.fullScreen &&
         destination != AppDestination.audioPanels) {
       _selectedAlbumId = null;
@@ -140,6 +148,7 @@ class AppNavigator extends ChangeNotifier {
     }
     if (destination != AppDestination.artistDetail &&
         destination != AppDestination.nowPlaying &&
+        destination != AppDestination.lyrics &&
         destination != AppDestination.fullScreen &&
         destination != AppDestination.audioPanels) {
       _selectedArtistId = null;
@@ -147,6 +156,7 @@ class AppNavigator extends ChangeNotifier {
     }
     if (destination != AppDestination.playlistDetail &&
         destination != AppDestination.nowPlaying &&
+        destination != AppDestination.lyrics &&
         destination != AppDestination.fullScreen &&
         destination != AppDestination.audioPanels) {
       _selectedPlaylistId = null;
@@ -175,6 +185,9 @@ class AppNavigator extends ChangeNotifier {
     _selectedPlaylist = _savedPlaylist;
     _fullScreenCameFromNowPlaying = false;
   }
+
+  /// Opens the synchronized lyrics view.
+  void openLyrics() => navigateTo(AppDestination.lyrics);
 
   /// Opens the full Now Playing screen.
   void openNowPlaying() => navigateTo(AppDestination.nowPlaying);
@@ -247,6 +260,10 @@ class AppNavigator extends ChangeNotifier {
       notifyListeners();
       return true;
     } else if (_current == AppDestination.nowPlaying) {
+      _restoreSavedState();
+      notifyListeners();
+      return true;
+    } else if (_current == AppDestination.lyrics) {
       _restoreSavedState();
       notifyListeners();
       return true;

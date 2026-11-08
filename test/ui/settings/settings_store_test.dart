@@ -47,6 +47,10 @@ void main() {
       expect(store.settings.mediaControls, isTrue);
       expect(store.settings.preventSleepWhilePlaying, isTrue);
       expect(store.settings.closeBehavior, equals('quit'));
+      expect(store.settings.lyricsSource, equals('localThenOnline'));
+      expect(store.settings.lyricsHighlight, equals('word'));
+      expect(store.settings.showLyricsInFullScreen, isTrue);
+      expect(store.settings.seekStepSeconds, equals(2));
 
       final file = File(p.join(tempDir.path, 'ui_settings.json'));
       expect(file.existsSync(), isFalse);
@@ -78,6 +82,10 @@ void main() {
             mediaControls: false,
             preventSleepWhilePlaying: false,
             closeBehavior: 'tray',
+            lyricsSource: 'onlineThenLocal',
+            lyricsHighlight: 'line',
+            showLyricsInFullScreen: false,
+            seekStepSeconds: 5,
           ));
       await store1.flush();
       store1.dispose();
@@ -106,6 +114,10 @@ void main() {
       expect(store2.settings.mediaControls, isFalse);
       expect(store2.settings.preventSleepWhilePlaying, isFalse);
       expect(store2.settings.closeBehavior, equals('tray'));
+      expect(store2.settings.lyricsSource, equals('onlineThenLocal'));
+      expect(store2.settings.lyricsHighlight, equals('line'));
+      expect(store2.settings.showLyricsInFullScreen, isFalse);
+      expect(store2.settings.seekStepSeconds, equals(5));
       store2.dispose();
     });
 
@@ -142,6 +154,10 @@ void main() {
         'mediaControls': 'invalid_bool',
         'preventSleepWhilePlaying': 123,
         'closeBehavior': 'hibernate',
+        'lyricsSource': 'invalid_source',
+        'lyricsHighlight': 'paragraph',
+        'showLyricsInFullScreen': 'not_a_bool',
+        'seekStepSeconds': 42,
       }));
 
       final store = SettingsStore(directory: tempDir);
@@ -166,6 +182,10 @@ void main() {
       expect(store.settings.mediaControls, isTrue);
       expect(store.settings.preventSleepWhilePlaying, isTrue);
       expect(store.settings.closeBehavior, equals('quit'));
+      expect(store.settings.lyricsSource, equals('localThenOnline'));
+      expect(store.settings.lyricsHighlight, equals('word'));
+      expect(store.settings.showLyricsInFullScreen, isTrue);
+      expect(store.settings.seekStepSeconds, equals(2));
       store.dispose();
     });
 

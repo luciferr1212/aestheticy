@@ -220,11 +220,29 @@ void main() {
 
     testWidgets('Keyboard shortcuts in Full Screen: Space, Left, Right, Esc', (tester) async {
       setupDesktopViewport(tester);
+      final repo = SqliteLibraryRepository.inMemory();
+      await repo.addFolder('C:\\Music');
+      final scanService = ScanService(repository: repo);
+
       final tracks = createSampleTracks();
       await controller.playQueue(tracks, startIndex: 0);
       navigator.openFullScreen();
 
-      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GlassScope(
+            controller: GlassController(quality: GlassQuality.full),
+            child: AppShell(
+              engine: engine,
+              controller: controller,
+              repository: repo,
+              scanService: scanService,
+              settingsStore: settingsStore,
+              navigator: navigator,
+            ),
+          ),
+        ),
+      );
       await tester.pump(const Duration(milliseconds: 50));
 
       // Space: toggle play/pause
@@ -233,12 +251,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(controller.currentState, equals(PlaybackState.paused));
 
-      // Left arrow: seek -5s
+      // Left arrow: seek
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump(const Duration(milliseconds: 50));
       expect(engine.lastSeekTarget, isNotNull);
 
-      // Right arrow: seek +5s
+      // Right arrow: seek
       engine.lastSeekTarget = null;
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pump(const Duration(milliseconds: 50));

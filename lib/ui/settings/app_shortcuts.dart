@@ -50,6 +50,12 @@ enum AppShortcutId {
 
   /// Global shortcut: decrease volume by 5% (Ctrl + Down).
   volumeDown,
+
+  /// Space chord: skip to next track (Space + →).
+  chordNext,
+
+  /// Space chord: skip to previous track (Space + ←).
+  chordPrevious,
 }
 
 /// Representation of an active keyboard shortcut in Aestheticy.
@@ -103,14 +109,28 @@ const List<AppShortcutItem> kAppShortcuts = [
     keyCombination: '←',
     descriptionKey: 'shortcuts.seekBackward',
     activator: SingleActivator(LogicalKeyboardKey.arrowLeft),
-    scope: AppShortcutScope.nowPlaying,
+    scope: AppShortcutScope.global,
   ),
   AppShortcutItem(
     id: AppShortcutId.seekForward,
     keyCombination: '→',
     descriptionKey: 'shortcuts.seekForward',
     activator: SingleActivator(LogicalKeyboardKey.arrowRight),
-    scope: AppShortcutScope.nowPlaying,
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.chordNext,
+    keyCombination: 'Space + →',
+    descriptionKey: 'shortcuts.chordNext',
+    activator: SingleActivator(LogicalKeyboardKey.arrowRight),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.chordPrevious,
+    keyCombination: 'Space + ←',
+    descriptionKey: 'shortcuts.chordPrevious',
+    activator: SingleActivator(LogicalKeyboardKey.arrowLeft),
+    scope: AppShortcutScope.global,
   ),
   AppShortcutItem(
     id: AppShortcutId.gallery,
@@ -198,6 +218,21 @@ bool matchesShortcut(KeyEvent event, AppShortcutId id) {
     }
   }
   return false;
+}
+
+/// Checks whether a [KeyEvent] represents the Space key.
+bool isSpaceKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.space;
+}
+
+/// Checks whether a [KeyEvent] represents the Left arrow key.
+bool isArrowLeftKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.arrowLeft;
+}
+
+/// Checks whether a [KeyEvent] represents the Right arrow key.
+bool isArrowRightKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.arrowRight;
 }
 
 /// Checks whether a [KeyEvent] represents the Up arrow key.

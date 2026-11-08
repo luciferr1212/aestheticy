@@ -25,6 +25,9 @@ import '../now_playing/now_playing_view.dart';
 import '../artist_names/artist_name_store.dart';
 import '../audio_panels/audio_panels_view.dart';
 import '../audio_panels/eq_controller.dart';
+import '../../features/lyrics/lyrics_controller.dart';
+import '../../features/lyrics/lyrics_repository.dart';
+import '../lyrics/lyrics_view.dart';
 import '../quick_search/quick_search_overlay.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/audio_settings_applier.dart';
@@ -72,6 +75,9 @@ class AppShell extends StatefulWidget {
   /// Optional user collections coordinator.
   final UserCollections? userCollections;
 
+  /// Optional lyrics controller.
+  final LyricsController? lyricsController;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -86,20 +92,39 @@ class AppShell extends StatefulWidget {
     this.artistNameStore,
     this.eqController,
     this.userCollections,
+    this.lyricsController,
   });
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UserCollections _userCollections;
+  late final LyricsController _lyricsController;
+  bool _createdLyricsControllerLocally = false;
   List<LibraryFolder> _folders = [];
   bool _isLoadingFolders = true;
+
+  bool _isSpaceDown = false;
+  bool _spaceChordUsed = false;
+  int _arrowHeldDirection = 0;
+  DateTime? _lastSeekTimestamp;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.lyricsController != null) {
+      _lyricsController = widget.lyricsController!;
+    } else {
+      _lyricsController = LyricsController(
+        playbackController: widget.controller,
+        repository: LyricsRepository(),
+        settingsStore: widget.settingsStore,
+      );
+      _createdLyricsControllerLocally = true;
+    }
     _userCollections = widget.userCollections ??
         UserCollections(repository: widget.repository);
     if (!_userCollections.isLoaded) {
@@ -113,10 +138,28 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_createdLyricsControllerLocally) {
+      _lyricsController.dispose();
+    }
     widget.navigator.removeListener(_onNavigatorChange);
     widget.scanService.removeListener(_onScanChange);
     widget.settingsStore.removeListener(_onSettingsChange);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _resetKeyboardState();
+    }
+  }
+
+  void _resetKeyboardState() {
+    _isSpaceDown = false;
+    _spaceChordUsed = false;
+    _arrowHeldDirection = 0;
+    _lastSeekTimestamp = null;
   }
 
   void _onSettingsChange() {
@@ -307,52 +350,76 @@ class _AppShellState extends State<AppShell> {
           _openFolders();
         });
         return const SizedBox.shrink();
+      case AppDestination.lyrics:
       case AppDestination.nowPlaying:
       case AppDestination.fullScreen:
         return const SizedBox.shrink();
     }
   }
 
+  bool _isDeepWidgetConsumed({required bool isArrow}) {
+    final focusNode = FocusManager.instance.primaryFocus;
+    final focusContext = focusNode?.context;
+    if (focusContext == null) return false;
+
+    // Editable text (search, text inputs)
+    if (focusContext.widget is EditableText ||
+        focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return true;
+    }
+
+    // Modal routes, popups, dialogs
+    final route = ModalRoute.of(focusContext);
+    if (route is PopupRoute ||
+        focusContext.findAncestorWidgetOfExactType<Dialog>() != null) {
+      return true;
+    }
+
+    // Sliders handle arrow keys directly
+    if (isArrow && focusContext.findAncestorWidgetOfExactType<Slider>() != null) {
+      return true;
+    }
+
+    // Buttons consume Space
+    if (!isArrow &&
+        (focusContext.findAncestorWidgetOfExactType<ButtonStyleButton>() != null ||
+            focusContext.findAncestorWidgetOfExactType<IconButton>() != null)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  void _performSeek(Duration delta) {
+    final currentPos = widget.controller.currentPosition;
+    final totalDuration = widget.controller.currentDuration;
+
+    var target = currentPos + delta;
+    if (target < Duration.zero) {
+      target = Duration.zero;
+    } else if (totalDuration > Duration.zero && target > totalDuration) {
+      target = totalDuration;
+    }
+
+    widget.controller.seek(target);
+  }
+
   KeyEventResult _handleRootKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-    if (matchesShortcut(event, AppShortcutId.playPause) ||
-        matchesShortcut(event, AppShortcutId.mediaPlayPause)) {
-      final focusNode = FocusManager.instance.primaryFocus;
-      final focusContext = focusNode?.context;
-      if (focusContext != null) {
-        if (focusContext.widget is EditableText ||
-            focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
-          return KeyEventResult.ignored;
-        }
-        final route = ModalRoute.of(focusContext);
-        if (route is PopupRoute ||
-            focusContext.findAncestorWidgetOfExactType<Dialog>() != null) {
-          return KeyEventResult.ignored;
-        }
-        if (focusContext.findAncestorWidgetOfExactType<ButtonStyleButton>() !=
-                null ||
-            focusContext.findAncestorWidgetOfExactType<IconButton>() != null) {
-          return KeyEventResult.ignored;
-        }
+    // 1. Esc key (Back)
+    if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.back)) {
+      if (widget.navigator.current == AppDestination.fullScreen) {
+        widget.navigator.navigateTo(AppDestination.albums);
+        return KeyEventResult.handled;
       }
-      widget.controller.togglePlayPause();
-      return KeyEventResult.handled;
+      if (widget.navigator.current == AppDestination.nowPlaying ||
+          widget.navigator.current == AppDestination.lyrics) {
+        widget.navigator.goBack();
+        return KeyEventResult.handled;
+      }
     }
 
-    if (matchesShortcut(event, AppShortcutId.nextTrack) ||
-        matchesShortcut(event, AppShortcutId.mediaNext)) {
-      widget.controller.skipNext();
-      return KeyEventResult.handled;
-    }
-
-    if (matchesShortcut(event, AppShortcutId.previousTrack) ||
-        matchesShortcut(event, AppShortcutId.mediaPrevious)) {
-      widget.controller.skipPrevious();
-      return KeyEventResult.handled;
-    }
-
-    if (matchesShortcut(event, AppShortcutId.volumeUp)) {
+    // 2. Volume controls (Ctrl + Up / Down)
+    if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.volumeUp)) {
       final currentVol = widget.settingsStore.settings.volume;
       final newVol = (currentVol + 0.05).clamp(0.0, 1.0);
       final rounded = (newVol * 100).round() / 100.0;
@@ -361,7 +428,7 @@ class _AppShellState extends State<AppShell> {
       return KeyEventResult.handled;
     }
 
-    if (matchesShortcut(event, AppShortcutId.volumeDown)) {
+    if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.volumeDown)) {
       final currentVol = widget.settingsStore.settings.volume;
       final newVol = (currentVol - 0.05).clamp(0.0, 1.0);
       final rounded = (newVol * 100).round() / 100.0;
@@ -370,14 +437,99 @@ class _AppShellState extends State<AppShell> {
       return KeyEventResult.handled;
     }
 
-    if (matchesShortcut(event, AppShortcutId.back)) {
-      if (widget.navigator.current == AppDestination.fullScreen) {
-        widget.navigator.navigateTo(AppDestination.albums);
+    // 3. Media keys & Ctrl + Left / Right
+    if (event is KeyDownEvent) {
+      if (matchesShortcut(event, AppShortcutId.mediaPlayPause)) {
+        widget.controller.togglePlayPause();
         return KeyEventResult.handled;
       }
-      if (widget.navigator.current == AppDestination.nowPlaying) {
-        widget.navigator.goBack();
+      if (matchesShortcut(event, AppShortcutId.nextTrack) ||
+          matchesShortcut(event, AppShortcutId.mediaNext)) {
+        widget.controller.skipNext();
         return KeyEventResult.handled;
+      }
+      if (matchesShortcut(event, AppShortcutId.previousTrack) ||
+          matchesShortcut(event, AppShortcutId.mediaPrevious)) {
+        widget.controller.skipPrevious();
+        return KeyEventResult.handled;
+      }
+    }
+
+    // 4. Space key tracking
+    if (isSpaceKey(event)) {
+      if (_isDeepWidgetConsumed(isArrow: false)) {
+        _resetKeyboardState();
+        return KeyEventResult.ignored;
+      }
+
+      if (event is KeyDownEvent) {
+        _isSpaceDown = true;
+        _spaceChordUsed = false;
+        return KeyEventResult.handled;
+      } else if (event is KeyRepeatEvent) {
+        return KeyEventResult.handled;
+      } else if (event is KeyUpEvent) {
+        final wasDown = _isSpaceDown;
+        final chordUsed = _spaceChordUsed;
+        _isSpaceDown = false;
+        _spaceChordUsed = false;
+        if (wasDown && !chordUsed) {
+          widget.controller.togglePlayPause();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.handled;
+      }
+    }
+
+    // 5. Left and Right arrows (seek or space chord)
+    if (isArrowLeftKey(event) || isArrowRightKey(event)) {
+      final isRight = isArrowRightKey(event);
+
+      // 5A. Space chord: Space + Right / Left
+      if (_isSpaceDown) {
+        if (event is KeyDownEvent) {
+          if (isRight) {
+            widget.controller.skipNext();
+          } else {
+            widget.controller.skipPrevious();
+          }
+          _spaceChordUsed = true;
+          return KeyEventResult.handled;
+        } else if (event is KeyRepeatEvent || event is KeyUpEvent) {
+          return KeyEventResult.handled;
+        }
+      }
+
+      // 5B. Normal Seek arrows: Left / Right
+      if (_isDeepWidgetConsumed(isArrow: true)) {
+        _arrowHeldDirection = 0;
+        _lastSeekTimestamp = null;
+        return KeyEventResult.ignored;
+      }
+
+      final direction = isRight ? 1 : -1;
+      final stepSeconds = widget.settingsStore.settings.seekStepSeconds;
+      final delta = Duration(seconds: direction * stepSeconds);
+
+      if (event is KeyDownEvent) {
+        _arrowHeldDirection = direction;
+        _lastSeekTimestamp = DateTime.now();
+        _performSeek(delta);
+        return KeyEventResult.handled;
+      } else if (event is KeyRepeatEvent) {
+        final now = DateTime.now();
+        if (_lastSeekTimestamp == null ||
+            now.difference(_lastSeekTimestamp!).inMilliseconds >= 120) {
+          _lastSeekTimestamp = now;
+          _performSeek(delta);
+        }
+        return KeyEventResult.handled;
+      } else if (event is KeyUpEvent) {
+        if (_arrowHeldDirection != 0) {
+          _arrowHeldDirection = 0;
+          _lastSeekTimestamp = null;
+          return KeyEventResult.handled;
+        }
       }
     }
 
@@ -398,8 +550,29 @@ class _AppShellState extends State<AppShell> {
 
     final Widget rootScaffold;
 
-    // Now Playing full-screen card view (releases sidebar and bottom bar blur slots)
-    if (currentDestination == AppDestination.nowPlaying) {
+    // Lyrics full-screen view
+    if (currentDestination == AppDestination.lyrics) {
+      rootScaffold = Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            const Positioned.fill(child: AmbientBackground()),
+            Positioned.fill(
+              child: SafeArea(
+                child: LyricsView(
+                  key: const ValueKey('view_lyrics'),
+                  controller: _lyricsController,
+                  playbackController: widget.controller,
+                  settingsStore: widget.settingsStore,
+                  navigator: widget.navigator,
+                  showHeader: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (currentDestination == AppDestination.nowPlaying) {
       rootScaffold = Scaffold(
         backgroundColor: Colors.transparent,
         body: NowPlayingView(
@@ -408,6 +581,7 @@ class _AppShellState extends State<AppShell> {
           engine: widget.engine,
           navigator: widget.navigator,
           settingsStore: widget.settingsStore,
+          lyricsController: _lyricsController,
         ),
       );
     } else if (currentDestination == AppDestination.fullScreen) {
@@ -420,6 +594,7 @@ class _AppShellState extends State<AppShell> {
           engine: widget.engine,
           navigator: widget.navigator,
           settingsStore: widget.settingsStore,
+          lyricsController: _lyricsController,
         ),
       );
     } else {
@@ -500,6 +675,9 @@ class _AppShellState extends State<AppShell> {
       child: Focus(
         autofocus: true,
         onKeyEvent: _handleRootKeyEvent,
+        onFocusChange: (hasFocus) {
+          if (!hasFocus) _resetKeyboardState();
+        },
         child: UserCollectionsScope(
           collections: _userCollections,
           child: rootScaffold,

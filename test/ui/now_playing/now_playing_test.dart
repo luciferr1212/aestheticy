@@ -298,11 +298,29 @@ void main() {
 
     testWidgets('Keyboard shortcuts: Space, Left, Right, Esc', (tester) async {
       setupDesktopViewport(tester);
+      final repo = SqliteLibraryRepository.inMemory();
+      await repo.addFolder('C:\\Music');
+      final scanService = ScanService(repository: repo);
+
       final tracks = createSampleTracks();
       await controller.playQueue(tracks, startIndex: 0);
       navigator.openNowPlaying();
 
-      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GlassScope(
+            controller: GlassController(quality: GlassQuality.full),
+            child: AppShell(
+              engine: engine,
+              controller: controller,
+              repository: repo,
+              scanService: scanService,
+              settingsStore: settingsStore,
+              navigator: navigator,
+            ),
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
 
       // Space: toggle play/pause
@@ -311,12 +329,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.currentState, equals(PlaybackState.paused));
 
-      // Right arrow: seek +5s
+      // Right arrow: seek
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
       expect(engine.lastSeekTarget, isNotNull);
 
-      // Left arrow: seek -5s
+      // Left arrow: seek
       engine.lastSeekTarget = null;
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pumpAndSettle();

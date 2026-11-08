@@ -60,6 +60,7 @@ void main() {
       expect(report, contains('Tray: off'));
       expect(report, contains('Sleep Prevention: on'));
       expect(report, contains('Close Behavior: quit'));
+      expect(report, contains('Lyrics Source: localThenOnline'));
       expect(report, contains('Session Restore: restored 10 items, dropped 0'));
       expect(report, contains('=== Recent Logs (Last 100 lines) ==='));
       expect(report, contains('Engine started'));

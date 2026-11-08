@@ -68,6 +68,18 @@ class AppSettings {
   /// Window close button behavior ('quit' or 'tray').
   final String closeBehavior;
 
+  /// Active lyrics retrieval strategy ('localThenOnline', 'onlineThenLocal', 'localOnly', 'onlineOnly', 'off').
+  final String lyricsSource;
+
+  /// Highlighting granularity ('line' or 'word').
+  final String lyricsHighlight;
+
+  /// Whether lyrics are shown in full-screen playback mode.
+  final bool showLyricsInFullScreen;
+
+  /// Step size in seconds for arrow-key seeking (1, 2, or 5).
+  final int seekStepSeconds;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -92,11 +104,24 @@ class AppSettings {
     this.mediaControls = true,
     this.preventSleepWhilePlaying = true,
     String closeBehavior = 'quit',
+    String lyricsSource = 'localThenOnline',
+    String lyricsHighlight = 'word',
+    this.showLyricsInFullScreen = true,
+    int seekStepSeconds = 2,
   })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
         volume = volume < 0.0 ? 0.0 : (volume > 1.0 ? 1.0 : volume),
-        closeBehavior = closeBehavior == 'tray' ? 'tray' : 'quit';
+        closeBehavior = closeBehavior == 'tray' ? 'tray' : 'quit',
+        lyricsSource = (lyricsSource == 'onlineThenLocal' ||
+                lyricsSource == 'localOnly' ||
+                lyricsSource == 'onlineOnly' ||
+                lyricsSource == 'off')
+            ? lyricsSource
+            : 'localThenOnline',
+        lyricsHighlight = lyricsHighlight == 'line' ? 'line' : 'word',
+        seekStepSeconds =
+            (seekStepSeconds == 1 || seekStepSeconds == 5) ? seekStepSeconds : 2;
 
   static double _clampPreamp(num? value) {
     if (value == null) return 0.0;
@@ -136,6 +161,10 @@ class AppSettings {
     bool? mediaControls,
     bool? preventSleepWhilePlaying,
     String? closeBehavior,
+    String? lyricsSource,
+    String? lyricsHighlight,
+    bool? showLyricsInFullScreen,
+    int? seekStepSeconds,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -164,6 +193,11 @@ class AppSettings {
       preventSleepWhilePlaying:
           preventSleepWhilePlaying ?? this.preventSleepWhilePlaying,
       closeBehavior: closeBehavior ?? this.closeBehavior,
+      lyricsSource: lyricsSource ?? this.lyricsSource,
+      lyricsHighlight: lyricsHighlight ?? this.lyricsHighlight,
+      showLyricsInFullScreen:
+          showLyricsInFullScreen ?? this.showLyricsInFullScreen,
+      seekStepSeconds: seekStepSeconds ?? this.seekStepSeconds,
     );
   }
 
@@ -192,6 +226,10 @@ class AppSettings {
       'mediaControls': mediaControls,
       'preventSleepWhilePlaying': preventSleepWhilePlaying,
       'closeBehavior': closeBehavior,
+      'lyricsSource': lyricsSource,
+      'lyricsHighlight': lyricsHighlight,
+      'showLyricsInFullScreen': showLyricsInFullScreen,
+      'seekStepSeconds': seekStepSeconds,
     };
   }
 
@@ -313,6 +351,26 @@ class AppSettings {
     final closeBehavior =
         rawCloseBehavior == 'tray' ? 'tray' : 'quit';
 
+    final rawLyricsSource = json['lyricsSource'];
+    final lyricsSource = (rawLyricsSource == 'onlineThenLocal' ||
+            rawLyricsSource == 'localOnly' ||
+            rawLyricsSource == 'onlineOnly' ||
+            rawLyricsSource == 'off')
+        ? rawLyricsSource as String
+        : 'localThenOnline';
+
+    final rawLyricsHighlight = json['lyricsHighlight'];
+    final lyricsHighlight =
+        rawLyricsHighlight == 'line' ? 'line' : 'word';
+
+    final rawShowLyricsInFS = json['showLyricsInFullScreen'];
+    final showLyricsInFullScreen =
+        rawShowLyricsInFS is bool ? rawShowLyricsInFS : true;
+
+    final rawSeekStep = json['seekStepSeconds'];
+    final seekStepSeconds =
+        (rawSeekStep == 1 || rawSeekStep == 5) ? rawSeekStep as int : 2;
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -336,6 +394,10 @@ class AppSettings {
       mediaControls: mediaControls,
       preventSleepWhilePlaying: preventSleepWhilePlaying,
       closeBehavior: closeBehavior,
+      lyricsSource: lyricsSource,
+      lyricsHighlight: lyricsHighlight,
+      showLyricsInFullScreen: showLyricsInFullScreen,
+      seekStepSeconds: seekStepSeconds,
     );
   }
 
@@ -365,7 +427,11 @@ class AppSettings {
           volume == other.volume &&
           mediaControls == other.mediaControls &&
           preventSleepWhilePlaying == other.preventSleepWhilePlaying &&
-          closeBehavior == other.closeBehavior;
+          closeBehavior == other.closeBehavior &&
+          lyricsSource == other.lyricsSource &&
+          lyricsHighlight == other.lyricsHighlight &&
+          showLyricsInFullScreen == other.showLyricsInFullScreen &&
+          seekStepSeconds == other.seekStepSeconds;
 
   @override
   int get hashCode => Object.hashAll([
@@ -391,5 +457,9 @@ class AppSettings {
         mediaControls,
         preventSleepWhilePlaying,
         closeBehavior,
+        lyricsSource,
+        lyricsHighlight,
+        showLyricsInFullScreen,
+        seekStepSeconds,
       ]);
 }

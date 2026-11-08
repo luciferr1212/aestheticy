@@ -13,6 +13,7 @@ void main() {
       Directory('lib/ui/theme'),
       Directory('lib/ui/audio_panels'),
       Directory('lib/ui/quick_search'),
+      Directory('lib/ui/lyrics'),
     ];
 
     final textRegex = RegExp(r"""\bText\(\s*['"]([^'"]+)['"]""");

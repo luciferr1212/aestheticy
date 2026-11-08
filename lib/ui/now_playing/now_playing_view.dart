@@ -10,12 +10,15 @@ import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
 import '../../audio/playback_queue.dart';
 import '../../features/collections/user_collections.dart';
+import '../../features/lyrics/lyrics_controller.dart';
+import '../../features/lyrics/lyrics_repository.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
+import '../lyrics/lyrics_view.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/settings_scope.dart';
 import '../settings/settings_store.dart';
@@ -40,6 +43,9 @@ class NowPlayingView extends StatefulWidget {
   /// User settings store.
   final SettingsStore settingsStore;
 
+  /// Optional lyrics controller.
+  final LyricsController? lyricsController;
+
   /// Optional callback invoked when track metadata is built (for test counters).
   final VoidCallback? onMetadataBuild;
 
@@ -50,6 +56,7 @@ class NowPlayingView extends StatefulWidget {
     required this.engine,
     required this.navigator,
     required this.settingsStore,
+    this.lyricsController,
     this.onMetadataBuild,
   });
 
@@ -59,22 +66,30 @@ class NowPlayingView extends StatefulWidget {
 
 class _NowPlayingViewState extends State<NowPlayingView> {
   final FocusNode _focusNode = FocusNode();
+  late final LyricsController _lyricsController;
+  bool _createdLyricsControllerLocally = false;
   StreamSubscription<AudioSource?>? _currentSub;
-  StreamSubscription<Duration>? _posSub;
-  Duration _currentPos = Duration.zero;
   CoverPalette _palette = CoverPalette.fallback;
   int _activeTabIndex = 0; // 0: Up next, 1: Lyrics
 
   @override
   void initState() {
     super.initState();
+    if (widget.lyricsController != null) {
+      _lyricsController = widget.lyricsController!;
+    } else {
+      _lyricsController = LyricsController(
+        playbackController: widget.controller,
+        repository: LyricsRepository(),
+        settingsStore: widget.settingsStore,
+      );
+      _createdLyricsControllerLocally = true;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
     _updatePalette(widget.controller.queue.current?.extras?['coverKey']);
-    _posSub = widget.engine.positionStream.listen((pos) {
-      _currentPos = pos;
-    });
     _currentSub = widget.controller.currentStream.listen((source) {
       if (!mounted) return;
       _updatePalette(source?.extras?['coverKey']);
@@ -92,7 +107,9 @@ class _NowPlayingViewState extends State<NowPlayingView> {
 
   @override
   void dispose() {
-    _posSub?.cancel();
+    if (_createdLyricsControllerLocally) {
+      _lyricsController.dispose();
+    }
     _currentSub?.cancel();
     _focusNode.dispose();
     super.dispose();
@@ -130,25 +147,8 @@ class _NowPlayingViewState extends State<NowPlayingView> {
       widget.navigator.goBack();
       return KeyEventResult.handled;
     }
-    if (matchesShortcut(event, AppShortcutId.playPause)) {
-      widget.controller.togglePlayPause();
-      return KeyEventResult.handled;
-    }
-    if (matchesShortcut(event, AppShortcutId.seekBackward)) {
-      _seekRelative(-const Duration(seconds: 5));
-      return KeyEventResult.handled;
-    }
-    if (matchesShortcut(event, AppShortcutId.seekForward)) {
-      _seekRelative(const Duration(seconds: 5));
-      return KeyEventResult.handled;
-    }
 
     return KeyEventResult.ignored;
-  }
-
-  void _seekRelative(Duration delta) {
-    final target = _currentPos + delta;
-    widget.engine.seek(target < Duration.zero ? Duration.zero : target);
   }
 
   @override
@@ -297,6 +297,15 @@ class _NowPlayingViewState extends State<NowPlayingView> {
           onPressed: () => widget.navigator.goBack(),
         ),
         const Spacer(),
+        // Lyrics button
+        GlassIconButton(
+          key: const Key('now_playing_lyrics_button'),
+          icon: Icons.lyrics_outlined,
+          tooltip: context.t('common.lyrics'),
+          semanticLabel: context.t('common.lyrics'),
+          onPressed: () => widget.navigator.openLyrics(),
+        ),
+        const SizedBox(width: 8),
         // Full screen button
         GlassIconButton(
           key: const Key('now_playing_fullscreen_button'),
@@ -506,43 +515,22 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                 ),
                 const SizedBox(width: 8),
 
-                // Lyrics tab with "Soon" badge
+                // Lyrics tab
                 InkWell(
                   borderRadius: BorderRadius.circular(AppSpacing.r12),
                   onTap: () => setState(() => _activeTabIndex = 1),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          context.t('nowPlaying.lyrics'),
-                          style: AppTypography.bodyStrong.copyWith(
-                            color: _activeTabIndex == 1
-                                ? AppColors.text
-                                : AppColors.textMuted,
-                            fontWeight: _activeTabIndex == 1
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.fillControl,
-                            borderRadius: BorderRadius.circular(AppSpacing.r12),
-                            border: Border.all(color: AppColors.borderSubtle),
-                          ),
-                          child: Text(
-                            context.t('common.soon'),
-                            style: AppTypography.micro.copyWith(
-                              color: AppColors.textMuted,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      context.t('nowPlaying.lyrics'),
+                      style: AppTypography.bodyStrong.copyWith(
+                        color: _activeTabIndex == 1
+                            ? AppColors.text
+                            : AppColors.textMuted,
+                        fontWeight: _activeTabIndex == 1
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
                     ),
                   ),
                 ),
@@ -570,7 +558,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
           Expanded(
             child: _activeTabIndex == 0
                 ? _buildUpcomingList(context)
-                : _buildLyricsPlaceholder(context),
+                : _buildLyricsView(context),
           ),
           const SizedBox(height: 12),
 
@@ -710,19 +698,13 @@ class _NowPlayingViewState extends State<NowPlayingView> {
     );
   }
 
-  Widget _buildLyricsPlaceholder(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.lyrics_outlined, size: 48, color: AppColors.textMuted),
-          const SizedBox(height: 12),
-          Text(
-            context.t('fullScreen.lyricsPlaceholder'),
-            style: AppTypography.bodyStrong.copyWith(color: AppColors.textMuted),
-          ),
-        ],
-      ),
+  Widget _buildLyricsView(BuildContext context) {
+    return LyricsView(
+      controller: _lyricsController,
+      playbackController: widget.controller,
+      settingsStore: widget.settingsStore,
+      navigator: widget.navigator,
+      showHeader: false,
     );
   }
 }

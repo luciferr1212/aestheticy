@@ -36,6 +36,9 @@ class RawTags {
   /// Embedded front album artwork image bytes, if present.
   final Uint8List? embeddedCover;
 
+  /// Embedded lyrics text from tags, if present.
+  final String? lyrics;
+
   /// Creates a [RawTags] container.
   const RawTags({
     this.title,
@@ -47,11 +50,12 @@ class RawTags {
     this.year,
     this.durationMs,
     this.embeddedCover,
+    this.lyrics,
   });
 
   @override
   String toString() =>
-      'RawTags(title: $title, artist: $artist, album: $album, trackNo: $trackNo, year: $year, durationMs: $durationMs)';
+      'RawTags(title: $title, artist: $artist, album: $album, trackNo: $trackNo, year: $year, durationMs: $durationMs, lyrics: ${lyrics != null})';
 }
 
 /// Abstract contract for reading audio metadata tags from local audio files.
@@ -98,6 +102,9 @@ class AudioMetadataTagReader implements TagReader {
       year: metadata.year?.year,
       durationMs: metadata.duration?.inMilliseconds,
       embeddedCover: coverBytes,
+      lyrics: metadata.lyrics != null && metadata.lyrics!.trim().isNotEmpty
+          ? metadata.lyrics!.trim()
+          : null,
     );
   }
 }

@@ -545,13 +545,15 @@ class _EndControlsArea extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        // Lyrics (disabled)
+        // Lyrics (enabled)
         GlassIconButton(
+          key: const Key('player_lyrics_button'),
           icon: Icons.lyrics_outlined,
           tooltip: context.t('common.lyrics'),
           semanticLabel: context.t('common.lyrics'),
           size: GlassButtonSize.small,
-          onPressed: null,
+          onPressed:
+              navigator != null ? () => navigator!.openLyrics() : null,
         ),
         const SizedBox(width: 4),
 
