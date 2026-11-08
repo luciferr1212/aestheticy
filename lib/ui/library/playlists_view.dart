@@ -139,16 +139,29 @@ class PlaylistsView extends StatelessWidget {
                                   .copyWith(color: AppColors.textMuted),
                             ),
                             const SizedBox(height: 20),
-                            GlassPillButton(
-                              key: const Key('empty_new_playlist_button'),
-                              label: context.t('playlists.new'),
-                              leadingIcon: Icons.add,
-                              variant: GlassButtonVariant.primary,
-                              size: GlassButtonSize.medium,
-                              onPressed: () => showCreatePlaylistDialog(
-                                context,
-                                collections: collections,
-                              ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                GlassPillButton(
+                                  key: const Key('empty_new_playlist_button'),
+                                  label: context.t('playlists.new'),
+                                  leadingIcon: Icons.add,
+                                  variant: GlassButtonVariant.primary,
+                                  size: GlassButtonSize.medium,
+                                  onPressed: () => showCreatePlaylistDialog(
+                                    context,
+                                    collections: collections,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                GlassPillButton(
+                                  key: const Key('empty_import_m3u_button'),
+                                  label: context.t('playlist.importM3u'),
+                                  leadingIcon: Icons.file_upload_outlined,
+                                  size: GlassButtonSize.medium,
+                                  onPressed: () => doImport(context),
+                                ),
+                              ],
                             ),
                           ],
                         ),

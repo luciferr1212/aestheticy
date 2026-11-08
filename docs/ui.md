@@ -274,7 +274,7 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
   4. **Artist Names:** Display name mode selector: `asTagged` (raw tag strings), `followLanguage` (Arabic replacement if Arabic interface, raw otherwise), or `alwaysArabic` (uses Arabic replacement if known). Includes list of custom mappings with add/edit dialog, diacritic/case-insensitive exact whole-name matching, and delete actions.
   5. **Audio:** Output device dropdown populated from `engine.devices` with refresh button; Exclusive mode toggle (disabled with helpful explanation when `engine.capabilities.exclusiveMode` is false); ReplayGain mode segmented selector (Off / Track / Album); ReplayGain preamp slider (-15 to +15 dB, clamped, displaying dB value); Crossfade row disabled with "Soon" badge. All audio adjustments go through `AudioSettingsApplier` and surface localized inline errors on failure.
   6. **Library:** Music folders row with "Manage" button navigating to the folder manager; live read-only folder count and track count badges.
-  7. **Shortcuts:** Canonical read-only list derived from `kAppShortcuts` representing only implemented key bindings in the app (`Space`, `Esc`, `←`, `→`, `Ctrl + Shift + G`, `Ctrl + K`). Each shortcut displays its localized scope badge (`Global` vs `Now Playing`).
+  7. **Shortcuts:** Canonical read-only list derived from `kAppShortcuts` representing only implemented key bindings in the app (`Space` global play/pause, `Ctrl + →` next track, `Ctrl + ←` previous track, `Ctrl + ↑` volume +5%, `Ctrl + ↓` volume -5%, `Esc` back, `←` / `→` seek, `Ctrl + Shift + G` glass diagnostic toggle, `Ctrl + K` search). Each shortcut displays its localized scope badge (`Global` vs `Now Playing`).
   8. **About:** Minimalist branding card with "Aestheticy" and "by mido" credit text.
 
 ---
@@ -437,7 +437,7 @@ Every row in `TrackTable` and album detail views exposes a unified `TrackActions
 - Each card displays derived album artwork (from the first resolvable song), playlist title, track count, and formatted total duration.
 - Card context menu allows renaming, deleting, and exporting as M3U.
 - Top bar features a "New playlist" glass button and "Import M3U" button.
-- Localized empty state when no playlists exist.
+- Localized empty state when no playlists exist, with "New playlist" and "Import M3U" action buttons.
 
 ### Playlist Detail View (`PlaylistDetailView`)
 - Back button navigation restoring previous destination history.
@@ -447,9 +447,9 @@ Every row in `TrackTable` and album detail views exposes a unified `TrackActions
 - Interactive `TrackTable` with row reordering (Move up, Move down) and removal.
 
 ### Favorites View (`FavoritesView`)
-- Displays all favorited tracks in reverse chronological order (`newest favorite first`).
+- Displays all favorited tracks in reverse chronological order (`newest favorite first`), synchronously bound to in-memory `UserCollections.favoriteTracks`.
 - "Play" and "Shuffle" header controls.
-- Reactive live removal: when an item is unfavorited from the menu or bottom bar, the row immediately unmounts from the view.
+- Reactive live addition and removal: when an item is favorited or unfavorited, heart icons and rows update immediately in the same frame without asynchronous repository reloads.
 - Localized empty state when no favorites exist.
 
 ### Recently Played View (`RecentlyPlayedView`)
@@ -525,13 +525,17 @@ All native Windows integrations are encapsulated behind lightweight, testable in
 
 ### 28.5 Application Shutdown Coordinator (`AppShutdownCoordinator`)
 - **Location:** `lib/features/integration/app_shutdown.dart`.
-- **Execution Order (Idempotent & Failure-Tolerant):**
-  1. Synchronous session snapshot (`SessionSaver.saveSnapshotSync`).
-  2. Finalize active play recorder listening session (`PlayRecorder.dispose`).
-  3. Flush settings store (`SettingsStore.flush`).
-  4. Flush diagnostics logger (`AppLogger.flush`).
-  5. Disable media session and release sleep inhibitor.
-  6. Hide system tray icon.
+- **Fast Close & Execution Flow (Idempotent & Failure-Tolerant):**
+  1. **Immediate Close UI Response:** On close/quit, immediately pauses audio output and hides desktop window via `WindowService.hide()` so close feel is instantaneous.
+  2. **Step 1 (Synchronous & First):** Synchronous session snapshot (`SessionSaver.saveSnapshotSync`) directly persists latest playback position and state before asynchronous teardown.
+  3. **Parallel Teardown with 1.5s Timeout:** Runs independent disposal steps concurrently via `Future.wait` with 1500ms timeout per step:
+     - `PlayRecorder.dispose()`
+     - `SettingsStore.flush()`
+     - `MediaSessionService.disable()`
+     - `SleepInhibitor.release()`
+     - `TrayService.hide()`
+  4. **Duration Timing:** `AppLogger` logs individual step durations in milliseconds and total shutdown duration.
+  5. **Last Step:** `AppLogger.flush()` is executed as the final step before `WindowService.destroy()`.
 - Handled uniformly for window close requests, tray Quit activations, and `AppLifecycleListener` shutdown events.
 
 ### 28.6 Sleep Prevention (`SleepInhibitor` & `SleepController`)

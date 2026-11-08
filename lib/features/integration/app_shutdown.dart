@@ -42,63 +42,82 @@ class AppShutdownCoordinator {
   Future<void> shutdown() async {
     if (_hasShutdown || _isShuttingDown) return;
     _isShuttingDown = true;
+    final totalSw = Stopwatch()..start();
 
-    // Step 1: Final session snapshot with synchronous write
+    // Step 1: Final session snapshot with synchronous write (first and synchronous)
+    final step1Sw = Stopwatch()..start();
     try {
       sessionSaver?.saveSnapshotSync();
     } catch (e, st) {
       logger.error('Shutdown', 'Step 1 (session snapshot) failed: $e', e, st);
     }
+    step1Sw.stop();
+    logger.info('Shutdown',
+        'Step 1 (session snapshot) finished in ${step1Sw.elapsedMilliseconds}ms');
 
-    // Step 2: Finalize open play recorder session
-    try {
-      if (playRecorder != null) {
-        await playRecorder!.dispose();
-      }
-    } catch (e, st) {
-      logger.error('Shutdown', 'Step 2 (play recorder) failed: $e', e, st);
-    }
+    // Steps 2-6: Independent steps in parallel with 1.5-second timeout
+    final parallelSw = Stopwatch()..start();
+    await Future.wait([
+      _runStep('Step 2 (play recorder)', () async {
+        if (playRecorder != null) {
+          await playRecorder!.dispose();
+        }
+      }),
+      _runStep('Step 3 (settings flush)', () async {
+        if (settingsStore != null) {
+          await settingsStore!.flush();
+        }
+      }),
+      _runStep('Step 4 (media session disable)', () async {
+        if (mediaSessionService != null) {
+          await mediaSessionService!.disable();
+        }
+      }),
+      _runStep('Step 5 (sleep inhibitor release)', () async {
+        sleepInhibitor?.release();
+      }),
+      _runStep('Step 6 (tray hide)', () async {
+        if (trayService != null) {
+          await trayService!.hide();
+        }
+      }),
+    ]);
+    parallelSw.stop();
+    logger.info('Shutdown',
+        'Parallel steps finished in ${parallelSw.elapsedMilliseconds}ms');
 
-    // Step 3: Flush settings store
-    try {
-      if (settingsStore != null) {
-        await settingsStore!.flush();
-      }
-    } catch (e, st) {
-      logger.error('Shutdown', 'Step 3 (settings flush) failed: $e', e, st);
-    }
+    totalSw.stop();
+    logger.info('Shutdown',
+        'Total shutdown finished in ${totalSw.elapsedMilliseconds}ms');
 
-    // Step 4: Flush logger
+    // Final step: logger flush is LAST before window destruction
+    final flushSw = Stopwatch()..start();
     try {
       await logger.flush();
-    } catch (e, st) {
-      logger.error('Shutdown', 'Step 4 (logger flush) failed: $e', e, st);
+    } catch (_) {
+      // Ignore flush failure on exit
     }
-
-    // Step 5: Disable media session and release sleep inhibitor
-    try {
-      if (mediaSessionService != null) {
-        await mediaSessionService!.disable();
-      }
-    } catch (e, st) {
-      logger.error('Shutdown', 'Step 5a (media session disable) failed: $e', e, st);
-    }
-    try {
-      sleepInhibitor?.release();
-    } catch (e, st) {
-      logger.error('Shutdown', 'Step 5b (sleep inhibitor release) failed: $e', e, st);
-    }
-
-    // Step 6: Hide tray icon
-    try {
-      if (trayService != null) {
-        await trayService!.hide();
-      }
-    } catch (e, st) {
-      logger.error('Shutdown', 'Step 6 (tray hide) failed: $e', e, st);
-    }
+    flushSw.stop();
 
     _hasShutdown = true;
     _isShuttingDown = false;
+  }
+
+  Future<void> _runStep(String name, FutureOr<void> Function() action) async {
+    final sw = Stopwatch()..start();
+    try {
+      await Future<void>.sync(action)
+          .timeout(const Duration(milliseconds: 1500));
+      sw.stop();
+      logger.info('Shutdown', '$name finished in ${sw.elapsedMilliseconds}ms');
+    } on TimeoutException {
+      sw.stop();
+      logger.warning('Shutdown',
+          '$name timed out after 1500ms (took ${sw.elapsedMilliseconds}ms)');
+    } catch (e, st) {
+      sw.stop();
+      logger.error('Shutdown',
+          '$name failed after ${sw.elapsedMilliseconds}ms: $e', e, st);
+    }
   }
 }

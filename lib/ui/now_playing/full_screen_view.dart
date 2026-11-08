@@ -78,6 +78,9 @@ class FullScreenViewState extends State<FullScreenView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
 
     _updatePalette(widget.controller.queue.current?.extras?['coverKey']);
     _posSub = widget.engine.positionStream.listen((pos) {
@@ -455,6 +458,7 @@ class FullScreenViewState extends State<FullScreenView>
                   onExit: (_) => setState(() => _isHoveringProgress = false),
                   child: _SlenderProgressLine(
                     engine: widget.engine,
+                    controller: widget.controller,
                     isHovered: _isHoveringProgress,
                   ),
                 ),
@@ -560,10 +564,12 @@ class _BlobPainter extends CustomPainter {
 /// Slender 2dp progress line spanning the bottom edge of the screen.
 class _SlenderProgressLine extends StatelessWidget {
   final AudioEngine engine;
+  final PlaybackController? controller;
   final bool isHovered;
 
   const _SlenderProgressLine({
     required this.engine,
+    this.controller,
     required this.isHovered,
   });
 
@@ -571,15 +577,21 @@ class _SlenderProgressLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<Duration>(
       stream: engine.durationStream,
-      initialData: engine.currentDuration,
+      initialData: controller?.currentDuration ?? engine.currentDuration,
       builder: (context, durSnapshot) {
-        final total = durSnapshot.data ?? Duration.zero;
+        final total = (controller != null && controller!.currentState == PlaybackState.idle)
+            ? controller!.currentDuration
+            : (durSnapshot.data != null && durSnapshot.data! > Duration.zero
+                ? durSnapshot.data!
+                : (controller?.currentDuration ?? Duration.zero));
 
         return StreamBuilder<Duration>(
           stream: engine.positionStream,
-          initialData: engine.currentPosition,
+          initialData: controller?.currentPosition ?? engine.currentPosition,
           builder: (context, posSnapshot) {
-            final pos = posSnapshot.data ?? Duration.zero;
+            final pos = (controller != null && controller!.currentState == PlaybackState.idle)
+                ? controller!.currentPosition
+                : (posSnapshot.data ?? controller?.currentPosition ?? Duration.zero);
             final progress = total.inMilliseconds > 0
                 ? (pos.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
                 : 0.0;

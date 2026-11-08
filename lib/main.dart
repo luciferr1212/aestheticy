@@ -658,7 +658,14 @@ class _AestheticyAppState extends State<AestheticyApp> {
 
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
+        try {
+          await widget.controller?.pause();
+        } catch (_) {}
+        try {
+          await widget.windowService?.hide();
+        } catch (_) {}
         await _shutdownCoordinator.shutdown();
+        await widget.windowService?.destroy();
         return AppExitResponse.exit;
       },
       onDetach: () {

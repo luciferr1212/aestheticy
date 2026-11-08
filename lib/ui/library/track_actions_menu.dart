@@ -385,7 +385,7 @@ abstract final class TrackActionsMenu {
             color: isFav ? AppColors.accent : null,
           ),
           onPressed: () {
-            collections.toggleFavorite(track.path);
+            collections.toggleFavorite(track.path, track: track);
           },
           child: Text(
             isFav

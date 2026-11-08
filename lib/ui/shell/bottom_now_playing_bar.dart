@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -308,7 +309,7 @@ class _CenterTransportArea extends StatelessWidget {
 }
 
 /// Leaf seek bar widget that rebuilds independently on position updates.
-class _NowPlayingSeekBarLeaf extends StatelessWidget {
+class _NowPlayingSeekBarLeaf extends StatefulWidget {
   final AudioEngine engine;
   final bool hasTrack;
   final PlaybackController? controller;
@@ -320,8 +321,44 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
   });
 
   @override
+  State<_NowPlayingSeekBarLeaf> createState() => _NowPlayingSeekBarLeafState();
+}
+
+class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
+  StreamSubscription<Duration>? _seekSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _seekSub = widget.controller?.seekStream.listen((_) {
+      if (mounted && widget.controller?.currentState == PlaybackState.idle) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _NowPlayingSeekBarLeaf oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _seekSub?.cancel();
+      _seekSub = widget.controller?.seekStream.listen((_) {
+        if (mounted && widget.controller?.currentState == PlaybackState.idle) {
+          setState(() {});
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _seekSub?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!hasTrack) {
+    if (!widget.hasTrack) {
       return SizedBox(
         height: 18,
         child: Row(
@@ -347,17 +384,26 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
       );
     }
 
+    final controller = widget.controller;
+    final engine = widget.engine;
+
     return StreamBuilder<Duration>(
       stream: engine.durationStream,
       initialData: controller?.currentDuration ?? engine.currentDuration,
       builder: (context, durSnapshot) {
-        final totalDuration = durSnapshot.data ?? Duration.zero;
+        final totalDuration = (controller != null && controller.currentState == PlaybackState.idle)
+            ? controller.currentDuration
+            : (durSnapshot.data != null && durSnapshot.data! > Duration.zero
+                ? durSnapshot.data!
+                : (controller?.currentDuration ?? Duration.zero));
 
         return StreamBuilder<Duration>(
           stream: engine.positionStream,
           initialData: controller?.currentPosition ?? engine.currentPosition,
           builder: (context, posSnapshot) {
-            final position = posSnapshot.data ?? Duration.zero;
+            final position = (controller != null && controller.currentState == PlaybackState.idle)
+                ? controller.currentPosition
+                : (posSnapshot.data ?? controller?.currentPosition ?? Duration.zero);
             final maxMs = totalDuration.inMilliseconds.toDouble();
             final currentMs =
                 position.inMilliseconds.toDouble().clamp(0.0, maxMs > 0 ? maxMs : 1.0);
@@ -388,7 +434,15 @@ class _NowPlayingSeekBarLeaf extends StatelessWidget {
                         value: maxMs > 0 ? currentMs : 0.0,
                         max: maxMs > 0 ? maxMs : 1.0,
                         onChanged: (val) {
-                          engine.seek(Duration(milliseconds: val.toInt()));
+                          final target = Duration(milliseconds: val.toInt());
+                          if (controller != null) {
+                            controller.seek(target);
+                          } else {
+                            engine.seek(target);
+                          }
+                          if (controller?.currentState == PlaybackState.idle) {
+                            setState(() {});
+                          }
                         },
                       ),
                     ),

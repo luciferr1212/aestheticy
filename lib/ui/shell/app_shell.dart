@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/playback_controller.dart';
@@ -312,6 +313,77 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  KeyEventResult _handleRootKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    if (matchesShortcut(event, AppShortcutId.playPause) ||
+        matchesShortcut(event, AppShortcutId.mediaPlayPause)) {
+      final focusNode = FocusManager.instance.primaryFocus;
+      final focusContext = focusNode?.context;
+      if (focusContext != null) {
+        if (focusContext.widget is EditableText ||
+            focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
+          return KeyEventResult.ignored;
+        }
+        final route = ModalRoute.of(focusContext);
+        if (route is PopupRoute ||
+            focusContext.findAncestorWidgetOfExactType<Dialog>() != null) {
+          return KeyEventResult.ignored;
+        }
+        if (focusContext.findAncestorWidgetOfExactType<ButtonStyleButton>() !=
+                null ||
+            focusContext.findAncestorWidgetOfExactType<IconButton>() != null) {
+          return KeyEventResult.ignored;
+        }
+      }
+      widget.controller.togglePlayPause();
+      return KeyEventResult.handled;
+    }
+
+    if (matchesShortcut(event, AppShortcutId.nextTrack) ||
+        matchesShortcut(event, AppShortcutId.mediaNext)) {
+      widget.controller.skipNext();
+      return KeyEventResult.handled;
+    }
+
+    if (matchesShortcut(event, AppShortcutId.previousTrack) ||
+        matchesShortcut(event, AppShortcutId.mediaPrevious)) {
+      widget.controller.skipPrevious();
+      return KeyEventResult.handled;
+    }
+
+    if (matchesShortcut(event, AppShortcutId.volumeUp)) {
+      final currentVol = widget.settingsStore.settings.volume;
+      final newVol = (currentVol + 0.05).clamp(0.0, 1.0);
+      final rounded = (newVol * 100).round() / 100.0;
+      widget.engine.setVolume(rounded);
+      widget.settingsStore.update((s) => s.copyWith(volume: rounded));
+      return KeyEventResult.handled;
+    }
+
+    if (matchesShortcut(event, AppShortcutId.volumeDown)) {
+      final currentVol = widget.settingsStore.settings.volume;
+      final newVol = (currentVol - 0.05).clamp(0.0, 1.0);
+      final rounded = (newVol * 100).round() / 100.0;
+      widget.engine.setVolume(rounded);
+      widget.settingsStore.update((s) => s.copyWith(volume: rounded));
+      return KeyEventResult.handled;
+    }
+
+    if (matchesShortcut(event, AppShortcutId.back)) {
+      if (widget.navigator.current == AppDestination.fullScreen) {
+        widget.navigator.navigateTo(AppDestination.albums);
+        return KeyEventResult.handled;
+      }
+      if (widget.navigator.current == AppDestination.nowPlaying) {
+        widget.navigator.goBack();
+        return KeyEventResult.handled;
+      }
+    }
+
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoadingFolders) {
@@ -426,7 +498,8 @@ class _AppShellState extends State<AppShell> {
         shortcutById(AppShortcutId.quickSearch).activator: _toggleQuickSearch,
       },
       child: Focus(
-        autofocus: false,
+        autofocus: true,
+        onKeyEvent: _handleRootKeyEvent,
         child: UserCollectionsScope(
           collections: _userCollections,
           child: rootScaffold,

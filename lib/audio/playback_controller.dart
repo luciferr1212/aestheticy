@@ -119,6 +119,9 @@ class PlaybackController {
   /// Seeks to [position] within the current track.
   Future<void> seek(Duration position) async {
     _currentPosition = position;
+    if (_currentState == PlaybackState.idle) {
+      armResume(position);
+    }
     await engine.seek(position);
     if (!_disposed) {
       _seekCtrl.add(position);
@@ -143,7 +146,16 @@ class PlaybackController {
   }
 
   /// The current track duration, or [Duration.zero] if none.
-  Duration get currentDuration => engine.currentDuration;
+  Duration get currentDuration {
+    final engineDur = engine.currentDuration;
+    if (engineDur > Duration.zero) return engineDur;
+    final extras = queue.current?.extras;
+    if (extras != null && extras.containsKey('durationMs')) {
+      final ms = int.tryParse(extras['durationMs'] ?? '');
+      if (ms != null && ms > 0) return Duration(milliseconds: ms);
+    }
+    return Duration.zero;
+  }
 
   /// The current software volume.
   double get currentVolume => engine.currentVolume;

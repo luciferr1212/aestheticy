@@ -38,6 +38,18 @@ enum AppShortcutId {
 
   /// Global media key: skip to previous track.
   mediaPrevious,
+
+  /// Global shortcut: skip to next track (Ctrl + Right).
+  nextTrack,
+
+  /// Global shortcut: skip to previous track (Ctrl + Left).
+  previousTrack,
+
+  /// Global shortcut: increase volume by 5% (Ctrl + Up).
+  volumeUp,
+
+  /// Global shortcut: decrease volume by 5% (Ctrl + Down).
+  volumeDown,
 }
 
 /// Representation of an active keyboard shortcut in Aestheticy.
@@ -77,7 +89,7 @@ const List<AppShortcutItem> kAppShortcuts = [
     keyCombination: 'Space',
     descriptionKey: 'shortcuts.playPause',
     activator: SingleActivator(LogicalKeyboardKey.space),
-    scope: AppShortcutScope.nowPlaying,
+    scope: AppShortcutScope.global,
   ),
   AppShortcutItem(
     id: AppShortcutId.back,
@@ -140,6 +152,34 @@ const List<AppShortcutItem> kAppShortcuts = [
     keyCombination: 'Media Previous',
     descriptionKey: 'shortcuts.mediaPrevious',
     activator: SingleActivator(LogicalKeyboardKey.mediaTrackPrevious),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.nextTrack,
+    keyCombination: 'Ctrl + Right',
+    descriptionKey: 'shortcuts.nextTrack',
+    activator: SingleActivator(LogicalKeyboardKey.arrowRight, control: true),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.previousTrack,
+    keyCombination: 'Ctrl + Left',
+    descriptionKey: 'shortcuts.previousTrack',
+    activator: SingleActivator(LogicalKeyboardKey.arrowLeft, control: true),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.volumeUp,
+    keyCombination: 'Ctrl + Up',
+    descriptionKey: 'shortcuts.volumeUp',
+    activator: SingleActivator(LogicalKeyboardKey.arrowUp, control: true),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.volumeDown,
+    keyCombination: 'Ctrl + Down',
+    descriptionKey: 'shortcuts.volumeDown',
+    activator: SingleActivator(LogicalKeyboardKey.arrowDown, control: true),
     scope: AppShortcutScope.global,
   ),
 ];

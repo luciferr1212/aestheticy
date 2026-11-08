@@ -132,14 +132,21 @@ class TrayWindowController {
     if (_disposed) return;
 
     if (settingsStore.settings.closeBehavior == 'tray') {
-      // Hide window, save session snapshot, keep running
+      // Hide window, save session snapshot, keep running (do NOT stop playback or run shutdown)
       try {
         sessionSaver?.saveSnapshotSync();
       } catch (_) {}
       await windowService.hide();
       _isWindowVisible = false;
     } else {
-      // 'quit' mode: full shutdown then destroy
+      // (1) Immediately stop audio output and hide window for instant close feel
+      try {
+        await playbackController.pause();
+      } catch (_) {}
+      await windowService.hide();
+      _isWindowVisible = false;
+
+      // (2)-(4) Shutdown coordinator runs snapshot first, parallel steps, then logger flush
       await shutdownCoordinator.shutdown();
       await windowService.destroy();
       onExit?.call();
@@ -190,6 +197,11 @@ class TrayWindowController {
       case TrayMenuItemId.previous:
         await playbackController.skipPrevious();
       case TrayMenuItemId.quit:
+        try {
+          await playbackController.pause();
+        } catch (_) {}
+        await windowService.hide();
+        _isWindowVisible = false;
         await shutdownCoordinator.shutdown();
         await windowService.destroy();
         onExit?.call();
