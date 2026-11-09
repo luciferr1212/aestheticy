@@ -536,8 +536,21 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                 ),
                 const SizedBox(width: 16),
 
-                // Clear upcoming button (visible only in Up next tab)
-                if (_activeTabIndex == 0)
+                // Open queue & Clear upcoming buttons (visible only in Up next tab)
+                if (_activeTabIndex == 0) ...[
+                  TextButton(
+                    key: const Key('now_playing_open_queue_button'),
+                    onPressed: () => widget.navigator.openQueue(),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                    child: Text(
+                      context.t('nowPlaying.openQueue'),
+                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   TextButton(
                     onPressed: _clearUpcoming,
                     style: TextButton.styleFrom(
@@ -549,6 +562,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                       style: AppTypography.caption.copyWith(color: AppColors.textMuted),
                     ),
                   ),
+                ],
               ],
             ),
           ),

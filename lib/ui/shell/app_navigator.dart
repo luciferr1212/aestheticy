@@ -51,6 +51,9 @@ enum AppDestination {
 
   /// Synchronized and plain lyrics screen.
   lyrics,
+
+  /// Interactive playback queue screen.
+  queue,
 }
 
 /// Navigation state coordinator managing active destination and detail selection.
@@ -68,6 +71,7 @@ class AppNavigator extends ChangeNotifier {
   int? _savedPlaylistId;
   PlaylistSummary? _savedPlaylist;
   bool _fullScreenCameFromNowPlaying = false;
+  bool _queueCameFromNowPlaying = false;
 
   String? _selectedAlbumId;
   AlbumSummary? _selectedAlbum;
@@ -115,12 +119,25 @@ class AppNavigator extends ChangeNotifier {
     }
 
     if (destination == AppDestination.nowPlaying) {
-      if (_current != AppDestination.fullScreen && _current != AppDestination.lyrics) {
+      if (_current != AppDestination.fullScreen &&
+          _current != AppDestination.lyrics &&
+          _current != AppDestination.queue) {
         _saveCurrentState();
       }
     } else if (destination == AppDestination.lyrics) {
-      if (_current != AppDestination.fullScreen && _current != AppDestination.nowPlaying) {
+      if (_current != AppDestination.fullScreen &&
+          _current != AppDestination.nowPlaying &&
+          _current != AppDestination.queue) {
         _saveCurrentState();
+      }
+    } else if (destination == AppDestination.queue) {
+      if (_current == AppDestination.nowPlaying) {
+        _queueCameFromNowPlaying = true;
+      } else {
+        _queueCameFromNowPlaying = false;
+        if (_current != AppDestination.fullScreen && _current != AppDestination.lyrics) {
+          _saveCurrentState();
+        }
       }
     } else if (destination == AppDestination.fullScreen) {
       if (_current == AppDestination.nowPlaying) {
@@ -141,6 +158,7 @@ class AppNavigator extends ChangeNotifier {
     if (destination != AppDestination.albumDetail &&
         destination != AppDestination.nowPlaying &&
         destination != AppDestination.lyrics &&
+        destination != AppDestination.queue &&
         destination != AppDestination.fullScreen &&
         destination != AppDestination.audioPanels) {
       _selectedAlbumId = null;
@@ -149,6 +167,7 @@ class AppNavigator extends ChangeNotifier {
     if (destination != AppDestination.artistDetail &&
         destination != AppDestination.nowPlaying &&
         destination != AppDestination.lyrics &&
+        destination != AppDestination.queue &&
         destination != AppDestination.fullScreen &&
         destination != AppDestination.audioPanels) {
       _selectedArtistId = null;
@@ -157,6 +176,7 @@ class AppNavigator extends ChangeNotifier {
     if (destination != AppDestination.playlistDetail &&
         destination != AppDestination.nowPlaying &&
         destination != AppDestination.lyrics &&
+        destination != AppDestination.queue &&
         destination != AppDestination.fullScreen &&
         destination != AppDestination.audioPanels) {
       _selectedPlaylistId = null;
@@ -188,6 +208,9 @@ class AppNavigator extends ChangeNotifier {
 
   /// Opens the synchronized lyrics view.
   void openLyrics() => navigateTo(AppDestination.lyrics);
+
+  /// Opens the interactive queue view.
+  void openQueue() => navigateTo(AppDestination.queue);
 
   /// Opens the full Now Playing screen.
   void openNowPlaying() => navigateTo(AppDestination.nowPlaying);
@@ -265,6 +288,15 @@ class AppNavigator extends ChangeNotifier {
       return true;
     } else if (_current == AppDestination.lyrics) {
       _restoreSavedState();
+      notifyListeners();
+      return true;
+    } else if (_current == AppDestination.queue) {
+      if (_queueCameFromNowPlaying) {
+        _current = AppDestination.nowPlaying;
+      } else {
+        _restoreSavedState();
+      }
+      _queueCameFromNowPlaying = false;
       notifyListeners();
       return true;
     } else if (_current == AppDestination.playlistDetail) {

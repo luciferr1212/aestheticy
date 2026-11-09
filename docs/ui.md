@@ -556,3 +556,54 @@ All native Windows integrations are encapsulated behind lightweight, testable in
 ### 28.8 Known Limitations & Integration Notes
 - **Local Native Execution:** As Visual Studio C++ is not installed on the development PC, real SMTC and tray plugins run exclusively in GitHub Actions release builds. All local behavior is fully verified using platform abstraction fakes and contract tests.
 - **Win32 Raw Key Simulator:** Flutter's test raw event simulator on Windows omits `mediaTrackNext` and `mediaTrackPrevious` virtual keycodes. Tests dispatch synthetic key events directly to focus nodes and verify activator acceptance deterministically.
+
+---
+
+## 29. Queue View (`lib/ui/queue/queue_view.dart`) — Phase 4, Prompt 2
+
+### 29.1 Overview & Navigation
+- **Destination:** Added `AppDestination.queue` to `AppNavigator`.
+- **Access Points:**
+  - Bottom player bar queue button (`bottom_now_playing_bar.dart`).
+  - "Open queue" text button in the Up Next section of Now Playing (`now_playing_view.dart`).
+- **Return Behavior:** Esc key or back button returns to the previous screen. If opened from Now Playing, Esc returns directly to Now Playing.
+
+### 29.2 Header & Summary
+- **Header Structure:** Title ("Queue" / "قائمة الانتظار"), localized item count, bullet separator, and total duration of upcoming tracks (`HH:MM:SS` or `MM:SS`).
+- **Actions:**
+  - **Clear upcoming:** Calls `controller.clearUpcoming()`, disabled when no upcoming tracks remain.
+  - **Clear all:** Displays confirmation dialog with warning; on confirm, stops playback and empties queue completely.
+  - **Save as playlist:** Primary action button invoking the save workflow (Section 29.5).
+
+### 29.3 List Architecture & Virtualization
+- **Single List with Visual Groups:** Built in active playback order with three distinct visual zones:
+  - **History:** Items preceding the active cursor (`index < currentIndex`), dimmed with 0.50 opacity.
+  - **Current Item:** Emphasized with accent border and background highlight, accompanied by `_PlayingIndicator` that dynamically reflects playing vs paused state via `controller.stateStream`.
+  - **Upcoming:** Standard track rows remaining in queue.
+- **Lazy Rendering (5,000+ Items at 60 FPS):** Uses `ReorderableListView.builder` with fixed `itemExtent: 56.0` to eliminate layout recomputation. Rebuilds occur strictly on `queueChangeStream` and `currentStream` (never per-frame position ticks).
+- **Auto-Scroll:** Opening the view scrolls the current track into view instantly. While the user has not manually scrolled, track transitions smoothly center the new current track (or instantly when `reduceMotion` is enabled).
+
+### 29.4 Row Interactions & Shortcuts
+- **Reordering:** Drag handle utilizing `ReorderableDragStartListener`. Reorder callback maps indices accurately across forward and backward movements (`widget.controller.moveInQueue`).
+- **Item Selection & Delete:** Single-click selects row and focuses view. Pressing `Delete` key calls `controller.removeFromQueue(index)` on the selected track (ignored if an `EditableText` text field is currently focused).
+- **Jump to Track:** Tapping jumps immediately to track via `controller.playTrack(index)`.
+- **More Actions Menu:**
+  - "Play next" (`controller.playNextFromQueue`).
+  - "Remove" (`controller.removeFromQueue`).
+  - "Add to playlist" (nested submenu).
+  - "Move up" / "Move down" (single-step reorder for keyboard/accessibility).
+  - "Go to album" / "Go to artist" (navigates via existing `AppNavigator` methods).
+
+### 29.5 Save as Playlist Workflow
+- **Dialog:** Prompts for playlist name with a pre-filled localized default (`Queue YYYY-MM-DD` / `قائمة الانتظار YYYY-MM-DD`, respecting `usesArabicIndicDigits`).
+- **Validation:** Inline empty-name error ("Name cannot be empty") and duplicate-name validation matching existing playlist behavior.
+- **Order Preservation:** Preserves active playback order (history, current, upcoming) across shuffle on and off.
+- **Filtering & Feedback:** Non-library tracks (e.g. invalid URIs) are filtered out, and the skipped count is detailed in the confirmation SnackBar with a "View playlist" action button.
+
+### 29.6 Architectural Decisions
+- **SessionSaver & MediaSession Integration:** `SessionSaver` already subscribes to `controller.queueChangeStream` with `debounce: false` so queue mutations persist immediately without extra plumbing. `MediaSessionController` listens to `currentStream` to update SMTC states.
+- **Playing Indicator State Isolation:** Current row playback state is tracked inside a lightweight `_PlayingIndicator` stateful widget listening to `controller.stateStream` to ensure zero re-render overhead for the 5000-item queue list on play/pause toggles.
+
+### 29.7 Known Limitations
+- Multi-row selection is not yet supported.
+- Slide-over queue panel on desktop is planned for a later phase (currently a full main content destination).

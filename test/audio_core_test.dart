@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,9 @@ import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
+import 'package:aestheticy/features/session/session_saver.dart';
+import 'package:aestheticy/features/session/session_store.dart';
+import 'package:aestheticy/ui/settings/settings_store.dart';
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -1140,6 +1144,308 @@ void main() {
           'file:///end1.flac',
           'file:///end2.flac',
         ]);
+      });
+    });
+
+    group('PlaybackController S1 queue operations (moveInQueue, removeFromQueue, playNextFromQueue)', () {
+      test('move before, after, and around current item keeps current item and updates index math', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c'), _src('d'), _src('e')], startIndex: 2);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 2);
+
+        // Move before current (0 -> 1)
+        await controller.moveInQueue(0, 1);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 2);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///a.flac',
+          'file:///c.flac',
+          'file:///d.flac',
+          'file:///e.flac',
+        ]);
+
+        // Move after current (4 -> 3)
+        await controller.moveInQueue(4, 3);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 2);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///a.flac',
+          'file:///c.flac',
+          'file:///e.flac',
+          'file:///d.flac',
+        ]);
+
+        // Move around current: from before (0) to after (4)
+        await controller.moveInQueue(0, 4);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 1);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///a.flac',
+          'file:///c.flac',
+          'file:///e.flac',
+          'file:///d.flac',
+          'file:///b.flac',
+        ]);
+
+        // Move around current: from after (4) to before (0)
+        await controller.moveInQueue(4, 0);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 2);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///a.flac',
+          'file:///c.flac',
+          'file:///e.flac',
+          'file:///d.flac',
+        ]);
+      });
+
+      test('move with shuffle on keeps active playback order and cursor index math', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c'), _src('d'), _src('e')], startIndex: 0);
+        queue.setShuffle(true);
+        expect(queue.isShuffled, isTrue);
+        expect(queue.currentIndex, 0);
+        expect(queue.current?.uri, 'file:///a.flac');
+
+        final activeItems = List<AudioSource>.from(queue.items);
+        final item2 = activeItems[2];
+        final item3 = activeItems[3];
+
+        await controller.moveInQueue(2, 3);
+        expect(queue.current?.uri, 'file:///a.flac');
+        expect(queue.currentIndex, 0);
+        expect(queue.items[2].uri, item3.uri);
+        expect(queue.items[3].uri, item2.uri);
+      });
+
+      test('moving the current item does not call engine.open', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c')], startIndex: 1);
+        expect(engine.openCallCount, 1);
+        expect(queue.current?.uri, 'file:///b.flac');
+
+        await controller.moveInQueue(1, 0);
+        expect(queue.current?.uri, 'file:///b.flac');
+        expect(queue.currentIndex, 0);
+        expect(engine.openCallCount, 1); // Not reopened
+      });
+
+      test('remove a non-current item (before and after cursor) keeps playing without engine.open', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c'), _src('d')], startIndex: 2);
+        expect(engine.openCallCount, 1);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 2);
+
+        // Remove before cursor (index 0)
+        await controller.removeFromQueue(0);
+        expect(engine.openCallCount, 1);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 1);
+        expect(queue.items.map((s) => s.uri), ['file:///b.flac', 'file:///c.flac', 'file:///d.flac']);
+
+        // Remove after cursor (index 2)
+        await controller.removeFromQueue(2);
+        expect(engine.openCallCount, 1);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 1);
+        expect(queue.items.map((s) => s.uri), ['file:///b.flac', 'file:///c.flac']);
+      });
+
+      test('remove the current item opens the new current exactly once', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c')], startIndex: 1);
+        expect(engine.openCallCount, 1);
+        expect(queue.current?.uri, 'file:///b.flac');
+
+        await controller.removeFromQueue(1);
+        expect(engine.openCallCount, 2);
+        expect(queue.current?.uri, 'file:///c.flac');
+        expect(queue.currentIndex, 1);
+        expect(queue.items.map((s) => s.uri), ['file:///a.flac', 'file:///c.flac']);
+      });
+
+      test('remove the last item while current moves cursor to last valid one and opens it', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c')], startIndex: 2);
+        expect(engine.openCallCount, 1);
+        expect(queue.current?.uri, 'file:///c.flac');
+
+        await controller.removeFromQueue(2);
+        expect(engine.openCallCount, 2);
+        expect(queue.current?.uri, 'file:///b.flac');
+        expect(queue.currentIndex, 1);
+        expect(queue.items.map((s) => s.uri), ['file:///a.flac', 'file:///b.flac']);
+      });
+
+      test('remove the only item stops engine and clears current track', () async {
+        await controller.playQueue([_src('only')]);
+        expect(queue.length, 1);
+        expect(queue.current?.uri, 'file:///only.flac');
+
+        AudioSource? lastEmitted;
+        final sub = controller.currentStream.listen((s) => lastEmitted = s);
+
+        await controller.removeFromQueue(0);
+        expect(queue.isEmpty, isTrue);
+        expect(queue.current, isNull);
+        expect(engine.state, PlaybackState.idle);
+        expect(lastEmitted, isNull);
+
+        await sub.cancel();
+      });
+
+      test('invalid indexes are ignored by move, remove, and playNextFromQueue', () async {
+        await controller.playQueue([_src('a'), _src('b')], startIndex: 0);
+
+        await controller.removeFromQueue(-1);
+        await controller.removeFromQueue(5);
+        expect(queue.length, 2);
+
+        await controller.moveInQueue(-1, 0);
+        await controller.moveInQueue(0, -1);
+        await controller.moveInQueue(0, 5);
+        await controller.moveInQueue(5, 0);
+        expect(queue.items.map((s) => s.uri), ['file:///a.flac', 'file:///b.flac']);
+
+        await controller.playNextFromQueue(-1);
+        await controller.playNextFromQueue(5);
+        expect(queue.items.map((s) => s.uri), ['file:///a.flac', 'file:///b.flac']);
+      });
+
+      test('playNextFromQueue moves item to directly after current (no-op if current or already next)', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c'), _src('d')], startIndex: 1);
+        expect(queue.current?.uri, 'file:///b.flac');
+        expect(queue.currentIndex, 1);
+
+        // Move d (index 3) to after b -> should be placed at index 2
+        await controller.playNextFromQueue(3);
+        expect(queue.current?.uri, 'file:///b.flac');
+        expect(queue.currentIndex, 1);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///a.flac',
+          'file:///b.flac',
+          'file:///d.flac',
+          'file:///c.flac',
+        ]);
+
+        // Move a (index 0) to after b -> should be placed at index 1 (b shifts to 0)
+        await controller.playNextFromQueue(0);
+        expect(queue.current?.uri, 'file:///b.flac');
+        expect(queue.currentIndex, 0);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///a.flac',
+          'file:///d.flac',
+          'file:///c.flac',
+        ]);
+
+        // Already current (0) -> no-op
+        await controller.playNextFromQueue(0);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///a.flac',
+          'file:///d.flac',
+          'file:///c.flac',
+        ]);
+
+        // Already next (1) -> no-op
+        await controller.playNextFromQueue(1);
+        expect(queue.items.map((s) => s.uri), [
+          'file:///b.flac',
+          'file:///a.flac',
+          'file:///d.flac',
+          'file:///c.flac',
+        ]);
+      });
+
+      test('preload is refreshed after each queue operation', () async {
+        await engine.dispose();
+        final gaplessEngine = _GaplessFakeEngine();
+        await gaplessEngine.init();
+        final ctrl = PlaybackController(engine: gaplessEngine, queue: queue);
+        await ctrl.init();
+
+        await ctrl.playQueue([_src('a'), _src('b'), _src('c'), _src('d')], startIndex: 0);
+        expect(gaplessEngine.preloadedNext?.uri, 'file:///b.flac');
+
+        // Move c (index 2) to 1 -> new next is c
+        await ctrl.moveInQueue(2, 1);
+        expect(gaplessEngine.preloadedNext?.uri, 'file:///c.flac');
+
+        // Remove c (index 1) -> new next is b
+        await ctrl.removeFromQueue(1);
+        expect(gaplessEngine.preloadedNext?.uri, 'file:///b.flac');
+
+        // playNextFromQueue on d (index 2) -> new next is d
+        await ctrl.playNextFromQueue(2);
+        expect(gaplessEngine.preloadedNext?.uri, 'file:///d.flac');
+
+        // clearUpcoming -> new next is null
+        await ctrl.clearUpcoming();
+        expect(gaplessEngine.preloadedNext, isNull);
+
+        await ctrl.dispose();
+        await gaplessEngine.dispose();
+      });
+
+      test('queueChangeStream emits once per operation', () async {
+        await controller.playQueue([_src('a'), _src('b'), _src('c'), _src('d')], startIndex: 0);
+
+        var emissions = 0;
+        final sub = controller.queueChangeStream.listen((_) => emissions++);
+
+        await controller.moveInQueue(2, 1);
+        expect(emissions, 1);
+
+        await controller.playNextFromQueue(3);
+        expect(emissions, 2);
+
+        await controller.removeFromQueue(1);
+        expect(emissions, 3);
+
+        await controller.clearUpcoming();
+        expect(emissions, 4);
+
+        await sub.cancel();
+      });
+
+      test('session snapshot reflects a reorder', () async {
+        final tempDir = Directory.systemTemp.createTempSync('session_reorder_test_');
+        addTearDown(() {
+          try {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          } catch (_) {}
+        });
+
+        final settingsStore = SettingsStore(directory: tempDir);
+        await settingsStore.init();
+        final sessionStore = SessionStore(directory: tempDir);
+        await sessionStore.init();
+
+        final saver = SessionSaver(
+          controller: controller,
+          sessionStore: sessionStore,
+          settingsStore: settingsStore,
+        );
+
+        await controller.playQueue([_src('a'), _src('b'), _src('c')], startIndex: 0);
+        expect(sessionStore.session.queue.map((i) => i.uri), [
+          'file:///a.flac',
+          'file:///b.flac',
+          'file:///c.flac',
+        ]);
+
+        await controller.moveInQueue(2, 1);
+        expect(sessionStore.session.queue.map((i) => i.uri), [
+          'file:///a.flac',
+          'file:///c.flac',
+          'file:///b.flac',
+        ]);
+
+        await saver.dispose();
+        sessionStore.dispose();
+        settingsStore.dispose();
       });
     });
   });

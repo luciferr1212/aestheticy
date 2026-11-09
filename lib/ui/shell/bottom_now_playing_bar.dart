@@ -557,7 +557,7 @@ class _EndControlsArea extends StatelessWidget {
         ),
         const SizedBox(width: 4),
 
-        // Queue (opens Now Playing)
+        // Queue (opens Queue)
         GlassIconButton(
           key: const Key('player_queue_button'),
           icon: Icons.queue_music,
@@ -565,7 +565,7 @@ class _EndControlsArea extends StatelessWidget {
           semanticLabel: context.t('common.queue'),
           size: GlassButtonSize.small,
           onPressed:
-              navigator != null ? () => navigator!.openNowPlaying() : null,
+              navigator != null ? () => navigator!.openQueue() : null,
         ),
         const SizedBox(width: 4),
 

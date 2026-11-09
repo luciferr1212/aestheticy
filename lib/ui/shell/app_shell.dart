@@ -28,6 +28,7 @@ import '../audio_panels/eq_controller.dart';
 import '../../features/lyrics/lyrics_controller.dart';
 import '../../features/lyrics/lyrics_repository.dart';
 import '../lyrics/lyrics_view.dart';
+import '../queue/queue_view.dart';
 import '../quick_search/quick_search_overlay.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/audio_settings_applier.dart';
@@ -343,6 +344,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           settingsStore: widget.settingsStore,
           collections: _userCollections,
         );
+      case AppDestination.queue:
+        return QueueView(
+          key: const ValueKey('view_queue'),
+          controller: widget.controller,
+          navigator: widget.navigator,
+          settingsStore: widget.settingsStore,
+          userCollections: _userCollections,
+        );
       case AppDestination.folders:
         // Revert to albums and open modal
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -412,7 +421,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         return KeyEventResult.handled;
       }
       if (widget.navigator.current == AppDestination.nowPlaying ||
-          widget.navigator.current == AppDestination.lyrics) {
+          widget.navigator.current == AppDestination.lyrics ||
+          widget.navigator.current == AppDestination.queue) {
         widget.navigator.goBack();
         return KeyEventResult.handled;
       }

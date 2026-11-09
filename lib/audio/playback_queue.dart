@@ -94,9 +94,8 @@ class PlaybackQueue {
   /// same order position (or moves to the last valid one).
   void remove(int index) {
     if (index < 0 || index >= _order.length) return;
-    final currentItem = current;
     final wasCurrent = _orderIndex == index;
-    final originalIdx = _order[index];
+    final originalIdx = _order.removeAt(index);
 
     _items.removeAt(originalIdx);
     if (_items.isEmpty) {
@@ -105,11 +104,18 @@ class PlaybackQueue {
       return;
     }
 
+    for (var i = 0; i < _order.length; i++) {
+      if (_order[i] > originalIdx) {
+        _order[i]--;
+      }
+    }
+
     if (wasCurrent) {
-      _rebuildOrder(prevItem: null);
       _orderIndex = index.clamp(0, _order.length - 1);
-    } else {
-      _rebuildOrder(prevItem: currentItem);
+    } else if (index < _orderIndex) {
+      _orderIndex--;
+    } else if (_orderIndex >= _order.length) {
+      _orderIndex = _order.length - 1;
     }
   }
 

@@ -255,6 +255,7 @@ class PlaybackController {
   Future<void> clearUpcoming() async {
     if (_openedUri == null || queue.current == null) {
       queue.clear();
+      notifyQueueChanged();
       await stop();
       return;
     }
@@ -328,6 +329,81 @@ class PlaybackController {
 
     notifyQueueChanged();
     unawaited(_preloadNext());
+  }
+
+  /// Reorders the item at [from] to [to] in active playback order.
+  ///
+  /// Validates indices, preserves the currently playing track without restarting,
+  /// notifies listeners, and refreshes the gapless preload.
+  Future<void> moveInQueue(int from, int to) async {
+    if (from < 0 || from >= queue.length) return;
+    if (to < 0 || to >= queue.length) return;
+    if (from == to) return;
+
+    queue.move(from, to);
+    notifyQueueChanged();
+    await _preloadNext();
+  }
+
+  /// Safely removes the track at [index] in active playback order.
+  ///
+  /// - If [index] is invalid, this is a no-op.
+  /// - If [index] is not current, removes it, notifies listeners, and refreshes preload
+  ///   without interrupting current playback.
+  /// - If [index] is current and other items remain, removes it, resets error/resume state,
+  ///   plays the item now at the cursor, and notifies listeners.
+  /// - If [index] was the only item, clears the queue, stops the engine, and emits null current track.
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= queue.length) return;
+
+    if (queue.length == 1) {
+      queue.clear();
+      _openedUri = null;
+      _armedResumePosition = null;
+      _armedResumeUri = null;
+      notifyQueueChanged();
+      await engine.stop();
+      _emitCurrent(null);
+      await _preloadNext();
+      return;
+    }
+
+    final isCurrent = index == queue.currentIndex;
+    if (!isCurrent) {
+      queue.remove(index);
+      notifyQueueChanged();
+      await _preloadNext();
+      return;
+    }
+
+    queue.remove(index);
+    notifyQueueChanged();
+    _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
+    final nextSource = queue.current;
+    if (nextSource != null) {
+      _openedUri = nextSource.uri;
+      await engine.open(nextSource, autoPlay: true);
+      _checkArmedResume();
+      _emitCurrent(nextSource);
+    } else {
+      _openedUri = null;
+      await engine.stop();
+      _emitCurrent(null);
+    }
+    await _preloadNext();
+  }
+
+  /// Moves the item at [index] in active playback order to directly after the current track.
+  ///
+  /// No-op if [index] is invalid, is currently playing, or is already immediately next.
+  Future<void> playNextFromQueue(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    final cur = queue.currentIndex;
+    if (cur < 0 || index == cur || index == cur + 1) return;
+    final target = index > cur ? cur + 1 : cur;
+    await moveInQueue(index, target);
   }
 
   /// Pauses playback.

@@ -250,3 +250,8 @@ bool isEnterKey(KeyEvent event) {
   return event.logicalKey == LogicalKeyboardKey.enter ||
       event.logicalKey == LogicalKeyboardKey.numpadEnter;
 }
+
+/// Checks whether a [KeyEvent] represents the Delete key.
+bool isDeleteKey(KeyEvent event) {
+  return event.logicalKey == LogicalKeyboardKey.delete;
+}

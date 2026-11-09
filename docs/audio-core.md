@@ -109,11 +109,39 @@ To implement smooth crossfading in a future phase:
 
 ---
 
+## Queue Architecture & Controller Operations (Phase 4, Prompt 2)
+
+### Active Playback Order
+All queue indices across `PlaybackQueue` and `PlaybackController` operate strictly in **active playback order**:
+- When shuffle is off: active order matches the underlying user insertion order.
+- When shuffle is on: active order reflects the shuffled playlist order (with the current track pinned to index 0 on shuffle enable).
+- Deletions and movements retain indices in active playback order without unprovoked reshuffling, ensuring consistent index math between UI, controller, and tests.
+
+### Controller Operations
+1. `Future<void> moveInQueue(int from, int to)`:
+   - Validates indices against active queue bounds (ignores invalid indices safely).
+   - Calls `queue.move(from, to)`, keeping the active cursor synchronized with the current item.
+   - Moving the playing item itself is supported without reloading or restarting audio (`engine.open` is not called).
+   - Emits `queueChangeStream` once and refreshes gapless preloading.
+2. `Future<void> removeFromQueue(int index)`:
+   - Non-current item: safely removed via `queue.remove(index)`. The playing track continues uninterrupted without calling `engine.open`. Cursor index is adjusted, `queueChangeStream` emits once, and gapless preload is refreshed.
+   - Current item (with other items remaining): removed from queue. The track that shifts into the active cursor position is immediately opened and played via `engine.open` (resetting armed resume and consecutive fatal error counters). This guarantees the engine never continues playing a track that has been deleted from the queue.
+   - Current item (only item left): queue is cleared, playback stops via `engine.stop()`, and `_emitCurrent(null)` is dispatched.
+   - Out-of-bounds indices are safely ignored.
+3. `Future<void> playNextFromQueue(int index)`:
+   - Moves the track at `index` to immediately follow the current playing track (`currentIndex + 1`).
+   - No-op if `index` is already the current track or already next in sequence.
+   - Notifies `queueChangeStream` and refreshes gapless preloading.
+
+### Media Session & Persistence Integration
+- **SessionSaver:** Already subscribes directly to `controller.queueChangeStream` to immediately persist reorders and item removals into `session.json` (`debounce: false`), ensuring accurate queue state on app restore.
+- **MediaSessionController:** Synchronized via `controller.currentStream` which fires whenever the current track changes or ends, keeping SMTC timeline and metadata aligned.
+
+---
+
 ## Queue Known Limitations
 
-These are known and accepted for Phase 1. Revisit them when the queue UI is built.
-
-1. **Individual item queue additions / mutations do not notify the controller.** After manual add, move, or remove of individual items, the track that mpv preloaded is not refreshed. Note: Clearing upcoming items (`PlaybackController.clearUpcoming()`) and replacing the queue (`PlaybackController.playQueue(...)`) explicitly refresh gapless preloading and preserve active playback.
+1. **Individual item additions via raw queue do not notify controller.** When mutating `PlaybackQueue` directly instead of through `PlaybackController`, controller notifications and preloading must be manually invoked. Always use `PlaybackController.moveInQueue`, `removeFromQueue`, `playNextFromQueue`, and `clearUpcoming`.
 2. **Synthetic `completed` for gapless.** When mpv moves to the preloaded track by itself, `MpvAudioEngine` emits a `completed` event so the controller advances. This works as long as the package reports another state (for example `playing`) between two transitions. A dedicated `trackAdvanced` event would be cleaner.
 3. **Duplicate tracks in the queue.** The cursor is kept by track identity (the URI), so after an add or a shuffle toggle it can jump to the first copy of a track that appears twice.
 4. **Repeat one grows mpv's playlist.** Every repeat appends one more entry to mpv's internal playlist. The effect is tiny but it is never trimmed.
