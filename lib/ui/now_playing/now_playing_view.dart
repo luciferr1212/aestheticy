@@ -888,17 +888,19 @@ class _TrackStarRatingControl extends StatelessWidget {
 }
 
 /// Isolated seekbar leaf listening to position and duration streams.
-class _IsolatedSeekBar extends StatefulWidget {
+class NowPlayingSeekBar extends StatefulWidget {
   final AudioEngine engine;
   final PlaybackController? controller;
 
-  const _IsolatedSeekBar({required this.engine, this.controller});
+  const NowPlayingSeekBar({super.key, required this.engine, this.controller});
 
   @override
-  State<_IsolatedSeekBar> createState() => _IsolatedSeekBarState();
+  State<NowPlayingSeekBar> createState() => _NowPlayingSeekBarState();
 }
 
-class _IsolatedSeekBarState extends State<_IsolatedSeekBar> {
+typedef _IsolatedSeekBar = NowPlayingSeekBar;
+
+class _NowPlayingSeekBarState extends State<NowPlayingSeekBar> {
   StreamSubscription<Duration>? _seekSub;
 
   @override
@@ -912,7 +914,7 @@ class _IsolatedSeekBarState extends State<_IsolatedSeekBar> {
   }
 
   @override
-  void didUpdateWidget(covariant _IsolatedSeekBar oldWidget) {
+  void didUpdateWidget(covariant NowPlayingSeekBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       _seekSub?.cancel();

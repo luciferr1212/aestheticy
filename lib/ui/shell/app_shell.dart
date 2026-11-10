@@ -10,6 +10,8 @@ import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../features/collections/user_collections.dart';
 import '../../library/scan_service.dart';
+import '../../platform/window_service.dart';
+import '../mini_player/mini_player_controller.dart';
 import '../library/album_detail_view.dart';
 import '../library/albums_view.dart';
 import '../library/artist_detail_view.dart';
@@ -79,6 +81,12 @@ class AppShell extends StatefulWidget {
   /// Optional lyrics controller.
   final LyricsController? lyricsController;
 
+  /// Optional native window lifecycle and geometry service.
+  final WindowService? windowService;
+
+  /// Optional mini player window controller.
+  final MiniPlayerController? miniPlayerController;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -94,6 +102,8 @@ class AppShell extends StatefulWidget {
     this.eqController,
     this.userCollections,
     this.lyricsController,
+    this.windowService,
+    this.miniPlayerController,
   });
 
   @override
@@ -111,6 +121,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _spaceChordUsed = false;
   int _arrowHeldDirection = 0;
   DateTime? _lastSeekTimestamp;
+  bool _wasFullScreen = false;
+  bool _wasMaximizedBeforeFullScreen = false;
 
   @override
   void initState() {
@@ -143,6 +155,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
     }
+    if (_wasFullScreen) {
+      _wasFullScreen = false;
+      widget.windowService?.setFullScreen(false);
+    }
     widget.navigator.removeListener(_onNavigatorChange);
     widget.scanService.removeListener(_onScanChange);
     widget.settingsStore.removeListener(_onSettingsChange);
@@ -167,7 +183,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  void _onNavigatorChange() {
+  void _onNavigatorChange() async {
+    final isFullScreen = widget.navigator.current == AppDestination.fullScreen;
+    if (isFullScreen && !_wasFullScreen) {
+      _wasFullScreen = true;
+      if (widget.windowService != null) {
+        final geo = await widget.windowService!.getGeometry();
+        _wasMaximizedBeforeFullScreen = geo.isMaximized;
+        await widget.windowService!.setFullScreen(true);
+      }
+    } else if (!isFullScreen && _wasFullScreen) {
+      _wasFullScreen = false;
+      if (widget.windowService != null) {
+        await widget.windowService!.setFullScreen(false);
+        if (_wasMaximizedBeforeFullScreen) {
+          await widget.windowService!.maximize();
+        }
+      }
+    }
     if (mounted) setState(() {});
   }
 
@@ -417,7 +450,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // 1. Esc key (Back)
     if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.back)) {
       if (widget.navigator.current == AppDestination.fullScreen) {
-        widget.navigator.navigateTo(AppDestination.albums);
+        widget.navigator.goBack();
         return KeyEventResult.handled;
       }
       if (widget.navigator.current == AppDestination.nowPlaying ||
@@ -426,6 +459,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         widget.navigator.goBack();
         return KeyEventResult.handled;
       }
+    }
+
+    // Full screen toggle (F11)
+    if (event is KeyDownEvent &&
+        matchesShortcut(event, AppShortcutId.toggleFullScreen)) {
+      widget.navigator.toggleFullScreen();
+      return KeyEventResult.handled;
+    }
+
+    // Mini player enter (Ctrl + M)
+    if (event is KeyDownEvent &&
+        matchesShortcut(event, AppShortcutId.miniPlayer)) {
+      widget.miniPlayerController?.enter();
+      return KeyEventResult.handled;
     }
 
     // 2. Volume controls (Ctrl + Up / Down)
@@ -605,6 +652,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           navigator: widget.navigator,
           settingsStore: widget.settingsStore,
           lyricsController: _lyricsController,
+          miniPlayerController: widget.miniPlayerController,
         ),
       );
     } else {
@@ -665,6 +713,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           child: BottomNowPlayingBar(
                             controller: widget.controller,
                             navigator: widget.navigator,
+                            miniPlayerController: widget.miniPlayerController,
                           ),
                         ),
                       ],

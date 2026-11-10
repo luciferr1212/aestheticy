@@ -80,6 +80,21 @@ class AppSettings {
   /// Step size in seconds for arrow-key seeking (1, 2, or 5).
   final int seekStepSeconds;
 
+  /// Window shape in mini player mode ('wide' or 'square').
+  final String miniPlayerShape;
+
+  /// Default desktop placement position for mini player ('bottomRight', 'topCenter', or 'remember').
+  final String miniPlayerPosition;
+
+  /// Whether mini player window stays pinned always on top of other windows.
+  final bool miniPlayerAlwaysOnTop;
+
+  /// Last remembered X coordinate in logical pixels (used when position is 'remember').
+  final double? miniPlayerLastX;
+
+  /// Last remembered Y coordinate in logical pixels (used when position is 'remember').
+  final double? miniPlayerLastY;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -108,6 +123,11 @@ class AppSettings {
     String lyricsHighlight = 'word',
     this.showLyricsInFullScreen = true,
     int seekStepSeconds = 2,
+    String miniPlayerShape = 'wide',
+    String miniPlayerPosition = 'bottomRight',
+    this.miniPlayerAlwaysOnTop = true,
+    this.miniPlayerLastX,
+    this.miniPlayerLastY,
   })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
@@ -121,7 +141,12 @@ class AppSettings {
             : 'localThenOnline',
         lyricsHighlight = lyricsHighlight == 'line' ? 'line' : 'word',
         seekStepSeconds =
-            (seekStepSeconds == 1 || seekStepSeconds == 5) ? seekStepSeconds : 2;
+            (seekStepSeconds == 1 || seekStepSeconds == 5) ? seekStepSeconds : 2,
+        miniPlayerShape = (miniPlayerShape == 'square') ? 'square' : 'wide',
+        miniPlayerPosition = (miniPlayerPosition == 'topCenter' ||
+                miniPlayerPosition == 'remember')
+            ? miniPlayerPosition
+            : 'bottomRight';
 
   static double _clampPreamp(num? value) {
     if (value == null) return 0.0;
@@ -165,6 +190,11 @@ class AppSettings {
     String? lyricsHighlight,
     bool? showLyricsInFullScreen,
     int? seekStepSeconds,
+    String? miniPlayerShape,
+    String? miniPlayerPosition,
+    bool? miniPlayerAlwaysOnTop,
+    double? miniPlayerLastX,
+    double? miniPlayerLastY,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -198,6 +228,12 @@ class AppSettings {
       showLyricsInFullScreen:
           showLyricsInFullScreen ?? this.showLyricsInFullScreen,
       seekStepSeconds: seekStepSeconds ?? this.seekStepSeconds,
+      miniPlayerShape: miniPlayerShape ?? this.miniPlayerShape,
+      miniPlayerPosition: miniPlayerPosition ?? this.miniPlayerPosition,
+      miniPlayerAlwaysOnTop:
+          miniPlayerAlwaysOnTop ?? this.miniPlayerAlwaysOnTop,
+      miniPlayerLastX: miniPlayerLastX ?? this.miniPlayerLastX,
+      miniPlayerLastY: miniPlayerLastY ?? this.miniPlayerLastY,
     );
   }
 
@@ -230,6 +266,11 @@ class AppSettings {
       'lyricsHighlight': lyricsHighlight,
       'showLyricsInFullScreen': showLyricsInFullScreen,
       'seekStepSeconds': seekStepSeconds,
+      'miniPlayerShape': miniPlayerShape,
+      'miniPlayerPosition': miniPlayerPosition,
+      'miniPlayerAlwaysOnTop': miniPlayerAlwaysOnTop,
+      'miniPlayerLastX': miniPlayerLastX,
+      'miniPlayerLastY': miniPlayerLastY,
     };
   }
 
@@ -371,6 +412,32 @@ class AppSettings {
     final seekStepSeconds =
         (rawSeekStep == 1 || rawSeekStep == 5) ? rawSeekStep as int : 2;
 
+    final rawMiniShape = json['miniPlayerShape'];
+    final miniPlayerShape = (rawMiniShape is String &&
+            (rawMiniShape == 'wide' || rawMiniShape == 'square'))
+        ? rawMiniShape
+        : 'wide';
+
+    final rawMiniPos = json['miniPlayerPosition'];
+    final miniPlayerPosition = (rawMiniPos is String &&
+            (rawMiniPos == 'bottomRight' ||
+                rawMiniPos == 'topCenter' ||
+                rawMiniPos == 'remember'))
+        ? rawMiniPos
+        : 'bottomRight';
+
+    final rawMiniPin = json['miniPlayerAlwaysOnTop'];
+    final miniPlayerAlwaysOnTop =
+        rawMiniPin is bool ? rawMiniPin : true;
+
+    final rawLastX = json['miniPlayerLastX'];
+    final miniPlayerLastX =
+        rawLastX is num ? rawLastX.toDouble() : null;
+
+    final rawLastY = json['miniPlayerLastY'];
+    final miniPlayerLastY =
+        rawLastY is num ? rawLastY.toDouble() : null;
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -398,6 +465,11 @@ class AppSettings {
       lyricsHighlight: lyricsHighlight,
       showLyricsInFullScreen: showLyricsInFullScreen,
       seekStepSeconds: seekStepSeconds,
+      miniPlayerShape: miniPlayerShape,
+      miniPlayerPosition: miniPlayerPosition,
+      miniPlayerAlwaysOnTop: miniPlayerAlwaysOnTop,
+      miniPlayerLastX: miniPlayerLastX,
+      miniPlayerLastY: miniPlayerLastY,
     );
   }
 
@@ -431,7 +503,12 @@ class AppSettings {
           lyricsSource == other.lyricsSource &&
           lyricsHighlight == other.lyricsHighlight &&
           showLyricsInFullScreen == other.showLyricsInFullScreen &&
-          seekStepSeconds == other.seekStepSeconds;
+          seekStepSeconds == other.seekStepSeconds &&
+          miniPlayerShape == other.miniPlayerShape &&
+          miniPlayerPosition == other.miniPlayerPosition &&
+          miniPlayerAlwaysOnTop == other.miniPlayerAlwaysOnTop &&
+          miniPlayerLastX == other.miniPlayerLastX &&
+          miniPlayerLastY == other.miniPlayerLastY;
 
   @override
   int get hashCode => Object.hashAll([
@@ -461,5 +538,10 @@ class AppSettings {
         lyricsHighlight,
         showLyricsInFullScreen,
         seekStepSeconds,
+        miniPlayerShape,
+        miniPlayerPosition,
+        miniPlayerAlwaysOnTop,
+        miniPlayerLastX,
+        miniPlayerLastY,
       ]);
 }

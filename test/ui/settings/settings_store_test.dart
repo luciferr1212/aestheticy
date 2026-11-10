@@ -51,6 +51,11 @@ void main() {
       expect(store.settings.lyricsHighlight, equals('word'));
       expect(store.settings.showLyricsInFullScreen, isTrue);
       expect(store.settings.seekStepSeconds, equals(2));
+      expect(store.settings.miniPlayerShape, equals('wide'));
+      expect(store.settings.miniPlayerPosition, equals('bottomRight'));
+      expect(store.settings.miniPlayerAlwaysOnTop, isTrue);
+      expect(store.settings.miniPlayerLastX, isNull);
+      expect(store.settings.miniPlayerLastY, isNull);
 
       final file = File(p.join(tempDir.path, 'ui_settings.json'));
       expect(file.existsSync(), isFalse);
@@ -86,6 +91,11 @@ void main() {
             lyricsHighlight: 'line',
             showLyricsInFullScreen: false,
             seekStepSeconds: 5,
+            miniPlayerShape: 'square',
+            miniPlayerPosition: 'remember',
+            miniPlayerAlwaysOnTop: false,
+            miniPlayerLastX: 250.0,
+            miniPlayerLastY: 180.0,
           ));
       await store1.flush();
       store1.dispose();
@@ -118,7 +128,46 @@ void main() {
       expect(store2.settings.lyricsHighlight, equals('line'));
       expect(store2.settings.showLyricsInFullScreen, isFalse);
       expect(store2.settings.seekStepSeconds, equals(5));
+      expect(store2.settings.miniPlayerShape, equals('square'));
+      expect(store2.settings.miniPlayerPosition, equals('remember'));
+      expect(store2.settings.miniPlayerAlwaysOnTop, isFalse);
+      expect(store2.settings.miniPlayerLastX, equals(250.0));
+      expect(store2.settings.miniPlayerLastY, equals(180.0));
       store2.dispose();
+    });
+
+    test('mini player invalid values fall back to defaults in fromJson', () {
+      final json = <String, Object?>{
+        'miniPlayerShape': 'invalid_shape',
+        'miniPlayerPosition': 'unknown_pos',
+        'miniPlayerAlwaysOnTop': 'not_a_bool',
+        'miniPlayerLastX': 'not_a_num',
+        'miniPlayerLastY': null,
+      };
+
+      final settings = AppSettings.fromJson(json);
+      expect(settings.miniPlayerShape, equals('wide'));
+      expect(settings.miniPlayerPosition, equals('bottomRight'));
+      expect(settings.miniPlayerAlwaysOnTop, isTrue);
+      expect(settings.miniPlayerLastX, isNull);
+      expect(settings.miniPlayerLastY, isNull);
+    });
+
+    test('mini player copyWith updates fields properly', () {
+      const initial = AppSettings();
+      final updated = initial.copyWith(
+        miniPlayerShape: 'square',
+        miniPlayerPosition: 'topCenter',
+        miniPlayerAlwaysOnTop: false,
+        miniPlayerLastX: 120.0,
+        miniPlayerLastY: 240.0,
+      );
+
+      expect(updated.miniPlayerShape, equals('square'));
+      expect(updated.miniPlayerPosition, equals('topCenter'));
+      expect(updated.miniPlayerAlwaysOnTop, isFalse);
+      expect(updated.miniPlayerLastX, equals(120.0));
+      expect(updated.miniPlayerLastY, equals(240.0));
     });
 
     test('corrupt JSON falls back to defaults and creates .bad file', () async {
@@ -186,6 +235,11 @@ void main() {
       expect(store.settings.lyricsHighlight, equals('word'));
       expect(store.settings.showLyricsInFullScreen, isTrue);
       expect(store.settings.seekStepSeconds, equals(2));
+      expect(store.settings.miniPlayerShape, equals('wide'));
+      expect(store.settings.miniPlayerPosition, equals('bottomRight'));
+      expect(store.settings.miniPlayerAlwaysOnTop, isTrue);
+      expect(store.settings.miniPlayerLastX, isNull);
+      expect(store.settings.miniPlayerLastY, isNull);
       store.dispose();
     });
 

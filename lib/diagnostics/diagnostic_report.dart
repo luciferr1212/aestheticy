@@ -30,6 +30,8 @@ String buildDiagnosticReport({
   bool sleepPreventionEnabled = true,
   String closeBehavior = 'quit',
   String lyricsSource = 'localThenOnline',
+  String? miniPlayerShape,
+  String? miniPlayerPosition,
   required List<String> logLines,
   String? userNameToScrub,
 }) {
@@ -57,6 +59,12 @@ String buildDiagnosticReport({
   sb.writeln('Sleep Prevention: ${sleepPreventionEnabled ? 'on' : 'off'}');
   sb.writeln('Close Behavior: $closeBehavior');
   sb.writeln('Lyrics Source: $lyricsSource');
+  if (miniPlayerShape != null) {
+    sb.writeln('Mini Player Shape: $miniPlayerShape');
+  }
+  if (miniPlayerPosition != null) {
+    sb.writeln('Mini Player Position: $miniPlayerPosition');
+  }
   if (sessionRestoreSummary != null) {
     sb.writeln('Session Restore: $sessionRestoreSummary');
   }

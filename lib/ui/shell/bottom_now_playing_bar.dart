@@ -8,6 +8,7 @@ import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
 import '../../features/collections/user_collections.dart';
 import '../../library/cover_cache.dart';
+import '../mini_player/mini_player_controller.dart';
 import 'app_navigator.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
@@ -28,6 +29,9 @@ class BottomNowPlayingBar extends StatelessWidget {
   /// Optional navigation coordinator.
   final AppNavigator? navigator;
 
+  /// Optional mini player window mode controller.
+  final MiniPlayerController? miniPlayerController;
+
   /// Optional callback invoked when the track info area is built (for test counters).
   final VoidCallback? onTrackInfoBuild;
 
@@ -36,6 +40,7 @@ class BottomNowPlayingBar extends StatelessWidget {
     super.key,
     required this.controller,
     this.navigator,
+    this.miniPlayerController,
     this.onTrackInfoBuild,
   });
 
@@ -71,6 +76,7 @@ class BottomNowPlayingBar extends StatelessWidget {
           _EndControlsArea(
             controller: controller,
             navigator: navigator,
+            miniPlayerController: miniPlayerController,
           ),
         ],
       ),
@@ -469,10 +475,12 @@ class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
 class _EndControlsArea extends StatelessWidget {
   final PlaybackController controller;
   final AppNavigator? navigator;
+  final MiniPlayerController? miniPlayerController;
 
   const _EndControlsArea({
     required this.controller,
     this.navigator,
+    this.miniPlayerController,
   });
 
   void _showVolumePopup(BuildContext context) {
@@ -590,6 +598,19 @@ class _EndControlsArea extends StatelessWidget {
         ),
         const SizedBox(width: 4),
 
+        // Mini player
+        GlassIconButton(
+          key: const Key('player_mini_player_button'),
+          icon: Icons.picture_in_picture_alt,
+          tooltip: context.t('player.miniPlayer'),
+          semanticLabel: context.t('player.miniPlayer'),
+          size: GlassButtonSize.small,
+          onPressed: miniPlayerController != null
+              ? () => miniPlayerController!.enter()
+              : null,
+        ),
+        const SizedBox(width: 4),
+
         // Full Screen
         GlassIconButton(
           key: const Key('player_fullscreen_button'),
@@ -605,10 +626,15 @@ class _EndControlsArea extends StatelessWidget {
   }
 }
 
-class _PlayerFavoriteButton extends StatelessWidget {
+class PlayerFavoriteButton extends StatelessWidget {
   final String path;
+  final Key? buttonKey;
 
-  const _PlayerFavoriteButton({required this.path});
+  const PlayerFavoriteButton({
+    super.key,
+    required this.path,
+    this.buttonKey,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -625,7 +651,7 @@ class _PlayerFavoriteButton extends StatelessWidget {
               ? context.t('track.unfavorite')
               : context.t('track.favorite'),
           child: InkResponse(
-            key: const Key('bottom_bar_favorite_button'),
+            key: buttonKey ?? const Key('bottom_bar_favorite_button'),
             radius: 12,
             onTap: () => collections.toggleFavorite(path),
             child: SizedBox(
@@ -645,3 +671,5 @@ class _PlayerFavoriteButton extends StatelessWidget {
     );
   }
 }
+
+typedef _PlayerFavoriteButton = PlayerFavoriteButton;

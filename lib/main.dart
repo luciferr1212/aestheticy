@@ -43,6 +43,8 @@ import 'package:aestheticy/ui/audio_panels/eq_store.dart';
 import 'package:aestheticy/ui/gallery/design_gallery_screen.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/l10n/locale_controller.dart';
+import 'package:aestheticy/ui/mini_player/mini_player_controller.dart';
+import 'package:aestheticy/ui/mini_player/mini_player_view.dart';
 import 'package:aestheticy/ui/quick_search/quick_search_overlay.dart';
 import 'package:aestheticy/ui/settings/app_shortcuts.dart';
 import 'package:aestheticy/ui/settings/audio_settings_applier.dart';
@@ -222,6 +224,7 @@ void main() {
       mediaSessionService: mediaSessionService,
       sleepInhibitor: sleepInhibitor,
       trayService: trayService,
+      windowService: windowService,
     );
 
     final mediaSessionController = MediaSessionController(
@@ -567,6 +570,9 @@ class AestheticyApp extends StatefulWidget {
   /// Optional lyrics controller.
   final LyricsController? lyricsController;
 
+  /// Optional mini player window mode controller.
+  final MiniPlayerController? miniPlayerController;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -594,6 +600,7 @@ class AestheticyApp extends StatefulWidget {
     this.sleepController,
     this.trayWindowController,
     this.lyricsController,
+    this.miniPlayerController,
   });
 
   @override
@@ -611,6 +618,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   late final AppNavigator _navigator;
   late final SessionStore _sessionStore;
   late final AppShutdownCoordinator _shutdownCoordinator;
+  late final MiniPlayerController _miniPlayerController;
   MediaSessionController? _mediaSessionController;
   SleepController? _sleepController;
   TrayWindowController? _trayWindowController;
@@ -646,6 +654,15 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _sessionStore = widget.sessionStore ?? SessionStore();
     _sessionSaver = widget.sessionSaver;
     _playRecorder = widget.playRecorder;
+
+    _miniPlayerController = widget.miniPlayerController ??
+        MiniPlayerController(
+          windowService: widget.windowService ??
+              (Platform.isWindows
+                  ? WindowsWindowService()
+                  : FakeWindowService()),
+          settingsStore: _settingsStore,
+        );
 
     _shutdownCoordinator = widget.shutdownCoordinator ??
         AppShutdownCoordinator(
@@ -687,6 +704,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
 
   @override
   void dispose() {
+    _miniPlayerController.dispose();
     _trayWindowController?.dispose();
     _sleepController?.dispose();
     _mediaSessionController?.dispose();
@@ -750,6 +768,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
         _glassController,
         _artistNameStore,
         _eqController,
+        _miniPlayerController,
       ]),
       builder: (context, _) {
         final scaleFactor = switch (_settingsStore.settings.textScale) {
@@ -802,20 +821,27 @@ class _AestheticyAppState extends State<AestheticyApp> {
                     ),
                   ),
                 ),
-                home: AppShell(
-                  engine: effectiveEngine,
-                  controller: effectiveController,
-                  repository: effectiveRepo,
-                  scanService: effectiveScanService,
-                  settingsStore: _settingsStore,
-                  navigator: _navigator,
-                  directoryPicker: widget.directoryPicker,
-                  audioSettingsApplier: _audioSettingsApplier,
-                  artistNameStore: _artistNameStore,
-                  eqController: _eqController,
-                  userCollections: _userCollections,
-                  lyricsController: widget.lyricsController,
-                ),
+                home: _miniPlayerController.isMini
+                    ? MiniPlayerView(
+                        controller: _miniPlayerController,
+                        playbackController: effectiveController,
+                      )
+                    : AppShell(
+                        engine: effectiveEngine,
+                        controller: effectiveController,
+                        repository: effectiveRepo,
+                        scanService: effectiveScanService,
+                        settingsStore: _settingsStore,
+                        navigator: _navigator,
+                        directoryPicker: widget.directoryPicker,
+                        audioSettingsApplier: _audioSettingsApplier,
+                        artistNameStore: _artistNameStore,
+                        eqController: _eqController,
+                        userCollections: _userCollections,
+                        lyricsController: widget.lyricsController,
+                        windowService: widget.windowService,
+                        miniPlayerController: _miniPlayerController,
+                      ),
               ),
             ),
           ),

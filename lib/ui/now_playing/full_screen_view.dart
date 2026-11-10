@@ -19,6 +19,7 @@ import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
 import '../lyrics/lyrics_view.dart';
+import '../mini_player/mini_player_controller.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
@@ -44,6 +45,9 @@ class FullScreenView extends StatefulWidget {
   /// Optional lyrics controller.
   final LyricsController? lyricsController;
 
+  /// Optional mini player controller.
+  final MiniPlayerController? miniPlayerController;
+
   /// Optional callback invoked on ticker frame (for test verification).
   final VoidCallback? onTickerFrame;
 
@@ -55,6 +59,7 @@ class FullScreenView extends StatefulWidget {
     required this.navigator,
     required this.settingsStore,
     this.lyricsController,
+    this.miniPlayerController,
     this.onTickerFrame,
   });
 
@@ -409,6 +414,19 @@ class FullScreenViewState extends State<FullScreenView>
                                 : GlassButtonVariant.normal,
                             onPressed: _toggleGlassShapes,
                           ),
+                          if (widget.miniPlayerController != null) ...[
+                            const SizedBox(width: 12),
+                            GlassIconButton(
+                              key: const Key('fullscreen_mini_player_button'),
+                              icon: Icons.picture_in_picture_alt_outlined,
+                              tooltip: context.t('miniPlayer.enterTooltip'),
+                              semanticLabel: context.t('miniPlayer.enterTooltip'),
+                              onPressed: () {
+                                widget.navigator.goBack();
+                                widget.miniPlayerController?.enter();
+                              },
+                            ),
+                          ],
                           const SizedBox(width: 12),
 
                           // Exit full screen button

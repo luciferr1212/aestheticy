@@ -4,6 +4,7 @@ import '../../diagnostics/app_logger.dart';
 import '../../platform/media_session_service.dart';
 import '../../platform/sleep_inhibitor.dart';
 import '../../platform/tray_service.dart';
+import '../../platform/window_service.dart';
 import '../../ui/settings/settings_store.dart';
 import '../history/play_recorder.dart';
 import '../session/session_saver.dart';
@@ -20,6 +21,7 @@ class AppShutdownCoordinator {
   final MediaSessionService? mediaSessionService;
   final SleepInhibitor? sleepInhibitor;
   final TrayService? trayService;
+  final WindowService? windowService;
 
   bool _isShuttingDown = false;
   bool _hasShutdown = false;
@@ -33,6 +35,7 @@ class AppShutdownCoordinator {
     this.mediaSessionService,
     this.sleepInhibitor,
     this.trayService,
+    this.windowService,
   }) : logger = logger ?? AppLogger.instance;
 
   /// Whether shutdown has completed.
@@ -79,6 +82,11 @@ class AppShutdownCoordinator {
       _runStep('Step 6 (tray hide)', () async {
         if (trayService != null) {
           await trayService!.hide();
+        }
+      }),
+      _runStep('Step 7 (full screen exit)', () async {
+        if (windowService != null) {
+          await windowService!.setFullScreen(false);
         }
       }),
     ]);

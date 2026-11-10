@@ -56,6 +56,12 @@ enum AppShortcutId {
 
   /// Space chord: skip to previous track (Space + ←).
   chordPrevious,
+
+  /// Global shortcut: enter mini player mode (Ctrl + M).
+  miniPlayer,
+
+  /// Global shortcut: toggle native full screen (F11).
+  toggleFullScreen,
 }
 
 /// Representation of an active keyboard shortcut in Aestheticy.
@@ -200,6 +206,20 @@ const List<AppShortcutItem> kAppShortcuts = [
     keyCombination: 'Ctrl + Down',
     descriptionKey: 'shortcuts.volumeDown',
     activator: SingleActivator(LogicalKeyboardKey.arrowDown, control: true),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.miniPlayer,
+    keyCombination: 'Ctrl + M',
+    descriptionKey: 'shortcuts.miniPlayer',
+    activator: SingleActivator(LogicalKeyboardKey.keyM, control: true),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.toggleFullScreen,
+    keyCombination: 'F11',
+    descriptionKey: 'shortcuts.toggleFullScreen',
+    activator: SingleActivator(LogicalKeyboardKey.f11),
     scope: AppShortcutScope.global,
   ),
 ];

@@ -15,6 +15,7 @@ void main() {
       Directory('lib/ui/quick_search'),
       Directory('lib/ui/lyrics'),
       Directory('lib/ui/queue'),
+      Directory('lib/ui/mini_player'),
     ];
 
     final textRegex = RegExp(r"""\bText\(\s*['"]([^'"]+)['"]""");

@@ -218,6 +218,15 @@ class AppNavigator extends ChangeNotifier {
   /// Opens the immersive Full Screen view.
   void openFullScreen() => navigateTo(AppDestination.fullScreen);
 
+  /// Toggles between [AppDestination.fullScreen] and the previous view.
+  void toggleFullScreen() {
+    if (_current == AppDestination.fullScreen) {
+      goBack();
+    } else {
+      openFullScreen();
+    }
+  }
+
   /// Opens the Playlists view.
   void openPlaylists() => navigateTo(AppDestination.playlists);
 

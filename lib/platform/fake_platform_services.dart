@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'media_session_service.dart';
 import 'sleep_inhibitor.dart';
@@ -175,6 +176,25 @@ class FakeWindowService implements WindowService {
   bool isDestroyed = false;
   bool isDisposed = false;
 
+  WindowGeometry currentGeometry;
+  bool isAlwaysOnTopState = false;
+  bool isResizableState = true;
+  DisplaySizeProvider displaySizeProvider;
+
+  /// Creates a [FakeWindowService] with optional geometry and display size provider.
+  FakeWindowService({
+    WindowGeometry? initialGeometry,
+    DisplaySizeProvider? displaySizeProvider,
+  })  : currentGeometry = initialGeometry ??
+            const WindowGeometry(
+              position: Offset(100, 100),
+              size: Size(1280, 800),
+              isMaximized: false,
+              isFullScreen: false,
+            ),
+        displaySizeProvider =
+            displaySizeProvider ?? (() => const Size(1920, 1080));
+
   @override
   Future<void> setPreventClose(bool prevent) async {
     calls.add('setPreventClose($prevent)');
@@ -212,6 +232,57 @@ class FakeWindowService implements WindowService {
   Future<void> destroy() async {
     calls.add('destroy');
     isDestroyed = true;
+  }
+
+  @override
+  Future<WindowGeometry> getGeometry() async {
+    calls.add('getGeometry');
+    return currentGeometry;
+  }
+
+  @override
+  Future<void> applyGeometry(Offset position, Size size) async {
+    calls.add('applyGeometry(pos: $position, size: $size)');
+    currentGeometry = currentGeometry.copyWith(
+      position: position,
+      size: size,
+    );
+  }
+
+  @override
+  Future<void> setAlwaysOnTop(bool isAlwaysOnTop) async {
+    calls.add('setAlwaysOnTop($isAlwaysOnTop)');
+    isAlwaysOnTopState = isAlwaysOnTop;
+  }
+
+  @override
+  Future<void> setResizable(bool isResizable) async {
+    calls.add('setResizable($isResizable)');
+    isResizableState = isResizable;
+  }
+
+  @override
+  Future<void> setFullScreen(bool isFullScreen) async {
+    calls.add('setFullScreen($isFullScreen)');
+    currentGeometry = currentGeometry.copyWith(isFullScreen: isFullScreen);
+  }
+
+  @override
+  Future<void> maximize() async {
+    calls.add('maximize');
+    currentGeometry = currentGeometry.copyWith(isMaximized: true);
+  }
+
+  @override
+  Future<void> unmaximize() async {
+    calls.add('unmaximize');
+    currentGeometry = currentGeometry.copyWith(isMaximized: false);
+  }
+
+  @override
+  Future<Size> getDisplaySize() async {
+    calls.add('getDisplaySize');
+    return displaySizeProvider();
   }
 
   @override

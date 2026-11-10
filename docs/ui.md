@@ -607,3 +607,88 @@ All native Windows integrations are encapsulated behind lightweight, testable in
 ### 29.7 Known Limitations
 - Multi-row selection is not yet supported.
 - Slide-over queue panel on desktop is planned for a later phase (currently a full main content destination).
+
+---
+
+## 30. Mini Player & Windows Full Screen Coordination (`lib/ui/mini_player/`, `lib/platform/`) — Phase 4, Prompt 3
+
+### 30.1 Overview & Architecture
+Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows Full Screen mode:
+- **Single Window Architecture:** Rather than spinning up a secondary desktop window or secondary Flutter engine (which introduces complex inter-engine memory isolation, IPC sync, and media key contention), Aestheticy resizes and reconfigures the primary native window via `WindowService`.
+- **Decoupled Business & Audio State:** All background controllers—`PlaybackController`, `PlaybackQueue`, `AudioEngine`, `MediaSessionController` (SMTC), `TrayWindowController`, `PlayRecorder`, and `SessionSaver`—are constructed in `main.dart` above both `AppShell` and `MiniPlayerView`. They remain active, unthrottled, and fully operational regardless of whether the normal shell, mini player, or full screen view is mounted.
+
+### 30.2 WindowService Contract & Testing Platform
+- **Contract Interface (`lib/platform/window_service.dart`):**
+  - `Future<WindowGeometry> getGeometry()`: Reads current position, size, maximized state, and full-screen state in an immutable `WindowGeometry` record.
+  - `Future<void> applyGeometry(Offset position, Size size)`: Atomically updates window position and size.
+  - `Future<void> setAlwaysOnTop(bool isAlwaysOnTop)`: Configures window z-order pinning.
+  - `Future<void> setResizable(bool isResizable)`: Locks window borders in mini mode to prevent visual distortion.
+  - `Future<void> setFullScreen(bool isFullScreen)`: Enters or exits native OS full-screen mode.
+  - `Future<void> maximize()` / `Future<void> unmaximize()`: Controls maximized window state.
+  - `Future<Size> getDisplaySize()`: Returns the display resolution in logical pixels via `DisplaySizeProvider` (derived from `PlatformDispatcher` / `View` display metrics without adding external packages).
+- **Windows Implementation (`lib/platform/windows/windows_window_service.dart`):**
+  - Backed by `window_manager` 0.4.3.
+  - Every call is guarded by try/catch with class-only logging (`AppLogger.error(e.runtimeType.toString())`), guaranteeing native window API failures never crash the app.
+- **Fake Implementation (`lib/platform/fake_platform_services.dart`):**
+  - `FakeWindowService` implements the identical interface, sequentially recording all invocations into a `calls` list for deterministic assertion in widget and unit tests without requiring native desktop bindings or C++ compilation.
+
+### 30.3 Mini Player Controller & Geometry Management
+`MiniPlayerController` (`lib/ui/mini_player/mini_player_controller.dart`) is a plain `ChangeNotifier` owning `MiniPlayerMode` (`normal` or `mini`). The app always starts in `normal` mode.
+- **Entering Mini Mode (`enter()`):**
+  1. If already in mini mode, no-op (idempotent).
+  2. Queries current window geometry via `getGeometry()` and remembers it.
+  3. If currently in full screen, calls `setFullScreen(false)` first.
+  4. If currently maximized, calls `unmaximize()`.
+  5. Sets `setResizable(false)` to fix window dimensions.
+  6. Calculates placement coordinates:
+     - Target sizes: Wide layout = `480 x 170` logical px; Square layout = `340 x 440` logical px.
+     - Presets:
+       - `bottomRight`: Clamped to screen right and bottom with 16 px side margin and 64 px taskbar bottom margin.
+       - `topCenter`: Horizontally centered, 16 px from top.
+       - `remember`: Uses `miniPlayerLastX` / `miniPlayerLastY` if entirely contained within display bounds; falls back to `bottomRight` if off-screen or uninitialized.
+  7. Applies position and size via `applyGeometry()`.
+  8. Configures `setAlwaysOnTop(miniPlayerAlwaysOnTop)`.
+  9. Flips mode to `mini` and notifies listeners.
+- **Exiting Mini Mode (`exit()`):**
+  1. If not in mini mode, no-op (idempotent).
+  2. If position preset is `'remember'`, records current window X/Y coordinates into `AppSettings`.
+  3. Releases always-on-top (`setAlwaysOnTop(false)`).
+  4. Restores resizability (`setResizable(true)`).
+  5. Restores original window geometry (size, position, and re-maximizes if previously maximized).
+  6. Flips mode to `normal` and notifies listeners.
+- **Live Adaptation:**
+  - Toggling shape (`setShape` / `toggleShape`) resizes the window dynamically, keeping the top-left corner clamped within display boundaries.
+  - Toggling pin (`toggleAlwaysOnTop`) immediately updates `windowService.setAlwaysOnTop` and persists `miniPlayerAlwaysOnTop` to settings.
+
+### 30.4 Responsive Mini Player UI (`lib/ui/mini_player/mini_player_view.dart`)
+- **Constraint-Driven Layout:** Automatically chooses between Wide (`BoxConstraints.maxWidth >= 400`) and Square layouts based on available box constraints rather than static settings, ensuring clean rendering in any container size.
+  - **Wide Layout (480x170):** Cover artwork on the leading side; title, artist (with `textDirectionFor` and ellipsis), seekbar (`NowPlayingSeekBar`), and glass transport controls (`previous`, `play/pause`, `next`, `favorite`, `pin`, `expand`) on the trailing side.
+  - **Square Layout (340x440):** Prominent square cover artwork on top, followed by track title/artist, seekbar with elapsed and remaining timestamps, and centered glass transport controls.
+- **Empty State:** Calm localized label (`"Nothing playing"` / `"لا يوجد تشغيل حالياً"`) with disabled controls.
+- **Glass & Resource Budget:** Uses at most a single background gradient layer derived from album art palette (`paletteForCover`) with `GlassSurface` (falling back to solid `AppColors.base` when glass is disabled). Zero continuous CPU animation loops while paused or hidden.
+
+### 30.5 Shortcuts & Window Full Screen Coordination
+- **Keyboard Shortcuts:**
+  - `Ctrl + M`: Registered in `kAppShortcuts` (`AppShortcutId.miniPlayer`, scope `global`). Toggles or enters mini player mode.
+  - `F11`: Registered in `kAppShortcuts` (`AppShortcutId.toggleFullScreen`, scope `global`). Toggles native full-screen mode on and off.
+  - `Esc`: In mini player mode, exits to normal mode. In full screen mode, exits back to previous navigation destination.
+  - `Space` & Chords: Play/pause and seek/skip chords remain functional across both full screen and mini player.
+- **Real Full Screen Coordination:**
+  - Entering `AppDestination.fullScreen` records whether the window was maximized, then invokes `windowService.setFullScreen(true)`.
+  - Exiting full screen calls `windowService.setFullScreen(false)`, and if the window was previously maximized, restores maximized state via `windowService.maximize()`.
+  - Entering mini player while in full screen automatically exits full screen first, restores normal window geometry, and then shrinks to mini mode.
+  - On application shutdown (`app_shutdown.dart`), step 7 calls best-effort `windowService?.setFullScreen(false)` to prevent leaving the Windows desktop in an invalid full-screen state.
+
+### 30.6 Architectural Decisions & Trade-Offs
+1. **Single Native Window vs Secondary Window:**
+   - *Decision:* Reconfigured the main desktop window via bounds animation instead of spawning a second native Win32 window or Flutter view.
+   - *Rationale:* Multi-window Flutter on Windows requires multiple engine instances or complex platform channels, creating IPC synchronization overhead, race conditions in audio playback state, and conflicting system media transport key bindings. Resizing the main window is lightweight, reliable, instantaneous, and maintains a single authoritative UI state.
+2. **Display Size Calculation Without New Dependencies:**
+   - *Decision:* Sourced display dimensions via `PlatformDispatcher.instance.views` / `View.of(context)` logical pixel metrics through an injectable `DisplaySizeProvider` function.
+   - *Rationale:* Avoided adding heavy third-party display querying packages, keeping `pubspec.yaml` pinned and locked.
+3. **Tray Menu Toggle Limitation:**
+   - *Decision:* Did not inject a dynamic "Mini player" menu item into the tray menu.
+   - *Rationale:* `TrayService` and `TrayMenuLabels` have a strict 5-item immutable contract (`playPause`, `next`, `previous`, `show`, `quit`). Adding a dynamic 6th item would break existing cross-platform contract tests and integration points without native C++ plugin updates. Mini mode toggling is provided via bottom bar icon, full screen view icon, settings view, and the `Ctrl+M` global shortcut.
+4. **Isolated Seekbar & Favorite Button Reusability:**
+   - *Decision:* Reused `NowPlayingSeekBar` and `PlayerFavoriteButton` directly from existing components rather than duplicating slider or favorite logic.
+   - *Rationale:* Ensures identical seek-scrubbing behavior, armed-resume edge-case handling, and favorite state responsiveness across the entire app.

@@ -741,4 +741,70 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 500));
   }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('Mini player section updates settings store and renders in RTL Large text', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _buildTestSettingsApp(
+        engine: engine,
+        repository: repository,
+        settingsStore: settingsStore,
+        navigator: navigator,
+        audioSettingsApplier: audioSettingsApplier,
+        artistNameStore: artistNameStore,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollFinder = find.byType(Scrollable).first;
+
+    // 1. Mini player section header
+    final miniPlayerHeader = find.text('Mini player');
+    await tester.scrollUntilVisible(miniPlayerHeader, 100.0, scrollable: scrollFinder);
+    expect(miniPlayerHeader, findsOneWidget);
+
+    // 2. Shape selector (switch to Square)
+    final squareOption = find.text('Square');
+    await tester.scrollUntilVisible(squareOption, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(squareOption);
+    await tester.pumpAndSettle();
+    await tester.tap(squareOption);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.miniPlayerShape, equals('square'));
+
+    // 3. Position selector (switch to Top center)
+    final topCenterOption = find.text('Top center');
+    await tester.scrollUntilVisible(topCenterOption, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(topCenterOption);
+    await tester.pumpAndSettle();
+    await tester.tap(topCenterOption);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.miniPlayerPosition, equals('topCenter'));
+
+    // 4. Always on top switch (switch to off)
+    final aotSwitch = find.byKey(const Key('settings_mini_player_always_on_top_switch'));
+    await tester.scrollUntilVisible(aotSwitch, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(aotSwitch);
+    await tester.pumpAndSettle();
+    await tester.tap(aotSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.miniPlayerAlwaysOnTop, isFalse);
+
+    // 5. Test in Arabic RTL with Large text scale
+    settingsStore.update((s) => s.copyWith(
+          language: 'ar',
+          textScale: 'large',
+        ));
+    await tester.pumpAndSettle();
+
+    final arMiniPlayerHeader = find.text('المشغل المصغر');
+    await tester.scrollUntilVisible(arMiniPlayerHeader, 100.0, scrollable: scrollFinder);
+    expect(arMiniPlayerHeader, findsOneWidget);
+    expect(tester.takeException(), isNull, reason: 'Mini player in RTL Large text must not throw overflow');
+
+    await tester.pump(const Duration(milliseconds: 500));
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }

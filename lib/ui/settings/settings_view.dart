@@ -229,6 +229,10 @@ class _SettingsViewState extends State<SettingsView> {
                               const SizedBox(height: 20),
                             ],
 
+                            // Mini player
+                            _buildMiniPlayerSection(context, settings),
+                            const SizedBox(height: 20),
+
                             // 7. Library
                             _buildLibrarySection(context),
                             const SizedBox(height: 20),
@@ -1021,6 +1025,80 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
+  // ── Mini Player ────────────────────────────────────────────────────────
+  Widget _buildMiniPlayerSection(BuildContext context, AppSettings settings) {
+    return _SettingsCard(
+      title: context.t('settings.sectionMiniPlayer'),
+      children: [
+        // Shape
+        _SettingsRow(
+          title: context.t('settings.miniPlayerShape'),
+          control: _SegmentedControl<String>(
+            key: const Key('settings_mini_player_shape_segmented'),
+            value: settings.miniPlayerShape,
+            options: [
+              _SegmentedOption(
+                value: 'wide',
+                label: context.t('miniPlayer.shapeWide'),
+              ),
+              _SegmentedOption(
+                value: 'square',
+                label: context.t('miniPlayer.shapeSquare'),
+              ),
+            ],
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(miniPlayerShape: val));
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // Position
+        _SettingsRow(
+          title: context.t('settings.miniPlayerPosition'),
+          control: _SegmentedControl<String>(
+            key: const Key('settings_mini_player_position_segmented'),
+            value: settings.miniPlayerPosition,
+            options: [
+              _SegmentedOption(
+                value: 'bottomRight',
+                label: context.t('miniPlayer.posBottomRight'),
+              ),
+              _SegmentedOption(
+                value: 'topCenter',
+                label: context.t('miniPlayer.posTopCenter'),
+              ),
+              _SegmentedOption(
+                value: 'remember',
+                label: context.t('miniPlayer.posRemember'),
+              ),
+            ],
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(miniPlayerPosition: val));
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+
+        // Always on top
+        _SettingsRow(
+          title: context.t('settings.miniPlayerAlwaysOnTop'),
+          control: Switch(
+            key: const Key('settings_mini_player_always_on_top_switch'),
+            value: settings.miniPlayerAlwaysOnTop,
+            activeThumbColor: AppColors.accent,
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(miniPlayerAlwaysOnTop: val));
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── 7. Library ────────────────────────────────────────────────────────
   Widget _buildLibrarySection(BuildContext context) {
     return _SettingsCard(
@@ -1228,6 +1306,8 @@ class _SettingsViewState extends State<SettingsView> {
                   sleepPreventionEnabled: settings.preventSleepWhilePlaying,
                   closeBehavior: settings.closeBehavior,
                   lyricsSource: settings.lyricsSource,
+                  miniPlayerShape: settings.miniPlayerShape,
+                  miniPlayerPosition: settings.miniPlayerPosition,
                   logLines: logLines,
                   userNameToScrub: settings.userName,
                 );
