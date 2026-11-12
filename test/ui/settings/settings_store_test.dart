@@ -34,6 +34,7 @@ void main() {
       expect(store.settings.sidebarCompact, isFalse);
       expect(store.settings.libraryViewMode, equals('square'));
       expect(store.settings.albumSort, equals('recentlyAdded'));
+      expect(store.settings.albumsSortReversed, isFalse);
       expect(store.settings.trackSort, equals('title'));
       expect(store.settings.fullScreenGlassShapes, isTrue);
       expect(store.settings.arabicNumerals, isFalse);
@@ -76,6 +77,7 @@ void main() {
             sidebarCompact: true,
             libraryViewMode: 'wide',
             albumSort: 'title',
+            albumsSortReversed: true,
             trackSort: 'artist',
             fullScreenGlassShapes: false,
             arabicNumerals: true,
@@ -115,6 +117,7 @@ void main() {
       expect(store2.settings.sidebarCompact, isTrue);
       expect(store2.settings.libraryViewMode, equals('wide'));
       expect(store2.settings.albumSort, equals('title'));
+      expect(store2.settings.albumsSortReversed, isTrue);
       expect(store2.settings.trackSort, equals('artist'));
       expect(store2.settings.fullScreenGlassShapes, isFalse);
       expect(store2.settings.arabicNumerals, isTrue);
@@ -232,6 +235,7 @@ void main() {
       expect(store.settings.glassQuality, equals(GlassQuality.full));
       expect(store.settings.libraryViewMode, equals('square'));
       expect(store.settings.albumSort, equals('recentlyAdded'));
+      expect(store.settings.albumsSortReversed, isFalse);
       expect(store.settings.trackSort, equals('title'));
       expect(store.settings.fullScreenGlassShapes, isTrue);
       expect(store.settings.arabicNumerals, isFalse);

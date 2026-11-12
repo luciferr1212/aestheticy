@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -856,6 +857,179 @@ void main() {
         await lyricsController.retry();
         await tester.pump();
         expect(find.byKey(const Key('lyrics_sync_control')), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'S2: far seek forward and backward, >1.5s jump cancels manual pause, and reduceMotion uses zero durations',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        final lines = List<LyricsLine>.generate(
+          100,
+          (i) => LyricsLine(
+            startMs: (i + 1) * 1000,
+            text: 'Synced line $i',
+          ),
+        );
+        fakeRepo.resultToReturn = LyricsResultFound(
+          LyricsDocument(
+            kind: LyricsKind.synced,
+            lines: lines,
+            source: LyricsSourceOrigin.local,
+            hasWordTiming: false,
+          ),
+        );
+        final tracks = [
+          const AudioSource(
+            'file:///music/long.mp3',
+            extras: {'title': 'Long Song', 'durationMs': '120000'},
+          ),
+        ];
+        engine.fakeDuration = const Duration(seconds: 120);
+        await tester.runAsync(() async {
+          await playbackController.playQueue(tracks, startIndex: 0);
+          await lyricsController.retry();
+        });
+
+        expect(lyricsController.state, isA<LyricsStateFound>());
+        await tester.pumpWidget(buildTestApp());
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('Synced line 0'), findsOneWidget);
+        expect(find.text('Synced line 99'), findsNothing);
+
+        // Manually scroll to activate the 4s pause.
+        await tester.drag(find.byType(ListView), const Offset(0, -120));
+        await tester.pump();
+
+        // Seek far forward to line 99 (while manual-scroll pause is active).
+        await tester.runAsync(() => playbackController.seek(const Duration(seconds: 100)));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(find.text('Synced line 99'), findsOneWidget);
+
+        // Seek to middle line 50 and verify alignment near 0.38 of ListView viewport.
+        await tester.runAsync(() => playbackController.seek(const Duration(seconds: 51)));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(find.text('Synced line 50'), findsOneWidget);
+        final listRect = tester.getRect(find.byType(ListView));
+        final line50Rect = tester.getRect(find.text('Synced line 50'));
+        final relTop = (line50Rect.top - listRect.top) / listRect.height;
+        expect(relTop, closeTo(0.38, 0.15));
+
+        // Direct position jump > 1.5s without seekStream cancels manual pause and follows back to line 0.
+        await tester.drag(find.byType(ListView), const Offset(0, -80));
+        await tester.pump();
+        await tester.runAsync(() => engine.seek(const Duration(seconds: 1)));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.text('Synced line 0'), findsOneWidget);
+
+        // Enable reduceMotion and jump forward again: completes immediately without lingering timers.
+        settingsStore.update((s) => s.copyWith(reduceMotion: true));
+        await tester.pump();
+        await tester.runAsync(() => playbackController.seek(const Duration(seconds: 80)));
+        await tester.pump();
+        await tester.pump();
+        expect(find.text('Synced line 79'), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 5));
+        await tester.runAsync(() => settingsStore.flush());
+      },
+    );
+
+    testWidgets(
+      'S3: user scrollbar appears only on wheel/drag and hides after 1s, never on programmatic scroll',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        final lines = List<LyricsLine>.generate(
+          60,
+          (i) => LyricsLine(startMs: (i + 1) * 1000, text: 'Scroll line $i'),
+        );
+        fakeRepo.resultToReturn = LyricsResultFound(
+          LyricsDocument(
+            kind: LyricsKind.synced,
+            lines: lines,
+            source: LyricsSourceOrigin.local,
+            hasWordTiming: false,
+          ),
+        );
+        await tester.runAsync(() async {
+          await playbackController.playQueue([
+            const AudioSource(
+              'file:///music/scroll.mp3',
+              extras: {'title': 'Scroll', 'durationMs': '70000'},
+            ),
+          ], startIndex: 0);
+          await lyricsController.retry();
+        });
+
+        expect(lyricsController.state, isA<LyricsStateFound>());
+        await tester.pumpWidget(buildTestApp());
+        await tester.pump();
+        await tester.pump();
+
+        RawScrollbar scrollbar() => tester.widget<RawScrollbar>(
+              find.byKey(const Key('lyrics_user_scrollbar')),
+            );
+
+        expect(scrollbar().thumbVisibility, isFalse);
+
+        // Programmatic animateTo / ensureVisible must NOT show scrollbar.
+        final listView = tester.widget<ListView>(find.byType(ListView));
+        listView.controller!.animateTo(
+          300,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.linear,
+        );
+        await tester.pump(const Duration(milliseconds: 150));
+        expect(scrollbar().thumbVisibility, isFalse);
+
+        await tester.runAsync(() => playbackController.seek(const Duration(seconds: 40)));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(scrollbar().thumbVisibility, isFalse);
+
+        // Mouse wheel over lyrics shows scrollbar and hides after 1s.
+        final pointer = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(
+          pointer.hover(tester.getCenter(find.byType(ListView))),
+        );
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, 120)));
+        await tester.pump();
+        expect(scrollbar().thumbVisibility, isTrue);
+
+        await tester.pump(const Duration(milliseconds: 1100));
+        expect(scrollbar().thumbVisibility, isFalse);
+
+        // Dragging list shows scrollbar and hides 1s after drag.
+        await tester.drag(find.byType(ListView), const Offset(0, -150));
+        await tester.pump();
+        expect(scrollbar().thumbVisibility, isTrue);
+
+        await tester.pump(const Duration(milliseconds: 1100));
+        expect(scrollbar().thumbVisibility, isFalse);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 5));
+        await tester.runAsync(() => settingsStore.flush());
       },
     );
   });

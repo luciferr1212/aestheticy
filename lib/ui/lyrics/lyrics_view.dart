@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -131,6 +132,18 @@ List<WordCharRange>? mapWordsToLineRanges(
   return ranges;
 }
 
+/// Layout density mode for [LyricsView] typography, padding, and chrome.
+enum LyricsViewDensity {
+  /// Dedicated Lyrics navigation destination.
+  page,
+
+  /// Full Screen now playing view.
+  fullScreen,
+
+  /// Compact expanded panel inside the frameless Mini Player.
+  mini,
+}
+
 /// Presentation widget for time-synchronized and plain lyrics with calm motion and typography.
 class LyricsView extends StatefulWidget {
   /// The lyrics state coordinator.
@@ -151,6 +164,12 @@ class LyricsView extends StatefulWidget {
   /// Whether this view is rendered in full screen mode.
   final bool isFullScreen;
 
+  /// Optional density override (defaults from [isFullScreen] when omitted).
+  final LyricsViewDensity? density;
+
+  /// Whether mini density renders inside the wide horizontal layout.
+  final bool isWideMini;
+
   /// Optional test hook invoked whenever a synced line item builds.
   @visibleForTesting
   final void Function(int index)? onLineBuild;
@@ -164,6 +183,8 @@ class LyricsView extends StatefulWidget {
     this.navigator,
     this.showHeader = true,
     this.isFullScreen = false,
+    this.density,
+    this.isWideMini = false,
     this.onLineBuild,
   });
 
@@ -174,24 +195,69 @@ class LyricsView extends StatefulWidget {
 class _LyricsViewState extends State<LyricsView>
     with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _plainScrollController = ScrollController();
   final Map<int, GlobalKey> _lineKeys = {};
   final ValueNotifier<double> _wordProgressNotifier = ValueNotifier<double>(0.0);
   final ValueNotifier<int> _activeWordNotifier = ValueNotifier<int>(-1);
 
   StreamSubscription<PlaybackState>? _playbackStateSub;
   StreamSubscription<AudioSource?>? _currentTrackSub;
+  StreamSubscription<Duration>? _seekSub;
   Ticker? _ticker;
   Timer? _autoFollowTimer;
+  Timer? _scrollbarHideTimer;
   bool _isAutoFollowPaused = false;
+  bool _userScrollbarVisible = false;
+  bool _isPointerDown = false;
+  bool _handlingSeek = false;
   int _lastScrolledLine = -1;
   String? _currentTrackUri;
+  Duration? _lastObservedPosition;
   LyricsControllerState? _lastStructuralState;
   String? _lastHighlightMode;
   bool? _lastReduceMotion;
   String? _lastLanguage;
   bool _needsInitialJump = false;
-  int _initialJumpToken = 0;
+  int _scrollToken = 0;
+  int? _inFlightTargetLine;
   int _lastOffsetMs = 0;
+
+  LyricsViewDensity get _effectiveDensity =>
+      widget.density ??
+      (widget.isFullScreen
+          ? LyricsViewDensity.fullScreen
+          : LyricsViewDensity.page);
+
+  double _defaultLineExtent() => switch (_effectiveDensity) {
+        LyricsViewDensity.mini => widget.isWideMini ? 36.0 : 40.0,
+        LyricsViewDensity.fullScreen => 84.0,
+        LyricsViewDensity.page => 68.0,
+      };
+
+  double _syncedVerticalPadding() => switch (_effectiveDensity) {
+        LyricsViewDensity.mini => 24.0,
+        LyricsViewDensity.fullScreen => 140.0,
+        LyricsViewDensity.page => 100.0,
+      };
+
+  double _scrollAlignment() =>
+      _effectiveDensity == LyricsViewDensity.mini ? 0.40 : 0.38;
+
+  Widget _buildMiniUnavailable(BuildContext context) {
+    return Center(
+      key: const Key('mini_player_no_lyrics'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          context.t('miniPlayer.noSyncedLyrics'),
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: AppTypography.body.copyWith(color: AppColors.textMuted),
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -204,6 +270,9 @@ class _LyricsViewState extends State<LyricsView>
     _activeWordNotifier.value = widget.controller.currentWordIndex;
     _wordProgressNotifier.value = widget.controller.wordProgress;
     _currentTrackUri = widget.playbackController.queue.current?.uri;
+    if (widget.controller.hasRecordedPosition) {
+      _lastObservedPosition = widget.controller.lastPlaybackPosition;
+    }
 
     widget.controller.addListener(_onControllerChange);
     widget.settingsStore.addListener(_onSettingsChange);
@@ -211,13 +280,18 @@ class _LyricsViewState extends State<LyricsView>
         widget.playbackController.stateStream.listen(_onPlaybackStateChange);
     _currentTrackSub =
         widget.playbackController.currentStream.listen(_onCurrentTrackChange);
+    _seekSub = widget.playbackController.seekStream.listen(_onSeek);
 
     _ticker = createTicker(_onTick);
     _updateTicker();
 
     if (_lastStructuralState is LyricsStateFound) {
       _needsInitialJump = true;
-      _scheduleInitialJump();
+      _scrollToLine(
+        widget.controller.currentLineIndex,
+        force: true,
+        immediate: true,
+      );
     }
   }
 
@@ -231,10 +305,18 @@ class _LyricsViewState extends State<LyricsView>
       _lastOffsetMs = widget.controller.offsetMs;
       _activeWordNotifier.value = widget.controller.currentWordIndex;
       _wordProgressNotifier.value = widget.controller.wordProgress;
+      _lastObservedPosition = widget.controller.hasRecordedPosition
+          ? widget.controller.lastPlaybackPosition
+          : null;
       _lastScrolledLine = -1;
+      _inFlightTargetLine = null;
       if (_lastStructuralState is LyricsStateFound) {
         _needsInitialJump = true;
-        _scheduleInitialJump();
+        _scrollToLine(
+          widget.controller.currentLineIndex,
+          force: true,
+          immediate: true,
+        );
       }
     }
     if (oldWidget.settingsStore != widget.settingsStore) {
@@ -247,10 +329,12 @@ class _LyricsViewState extends State<LyricsView>
     if (oldWidget.playbackController != widget.playbackController) {
       _playbackStateSub?.cancel();
       _currentTrackSub?.cancel();
+      _seekSub?.cancel();
       _playbackStateSub =
           widget.playbackController.stateStream.listen(_onPlaybackStateChange);
       _currentTrackSub =
           widget.playbackController.currentStream.listen(_onCurrentTrackChange);
+      _seekSub = widget.playbackController.seekStream.listen(_onSeek);
     }
     _updateTicker();
   }
@@ -269,16 +353,48 @@ class _LyricsViewState extends State<LyricsView>
     }
   }
 
+  void _cancelAutoFollowPause() {
+    _isAutoFollowPaused = false;
+    _autoFollowTimer?.cancel();
+    _autoFollowTimer = null;
+  }
+
+  void _onSeek(Duration position) {
+    if (!mounted) return;
+    _cancelAutoFollowPause();
+    _lastObservedPosition = position;
+    _inFlightTargetLine = null;
+
+    _handlingSeek = true;
+    try {
+      widget.controller.updatePosition(position);
+    } finally {
+      _handlingSeek = false;
+    }
+
+    final doc = widget.controller.document;
+    if (doc != null && doc.kind == LyricsKind.synced && doc.lines.isNotEmpty) {
+      final currentLine = widget.controller.currentLineIndex;
+      final targetLine = currentLine >= 0 ? currentLine : 0;
+      _lastScrolledLine = targetLine;
+      _scrollToLine(targetLine, force: true);
+    }
+  }
+
   void _onCurrentTrackChange(AudioSource? source) {
     final newUri = source?.uri;
     if (newUri != _currentTrackUri) {
       _currentTrackUri = newUri;
+      _lastObservedPosition = null;
       _lastScrolledLine = -1;
+      _inFlightTargetLine = null;
       _needsInitialJump = true;
-      _isAutoFollowPaused = false;
-      _autoFollowTimer?.cancel();
+      _cancelAutoFollowPause();
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(0.0);
+      }
+      if (_plainScrollController.hasClients) {
+        _plainScrollController.jumpTo(0.0);
       }
       if (mounted) setState(() {});
     }
@@ -312,9 +428,29 @@ class _LyricsViewState extends State<LyricsView>
     _activeWordNotifier.value = widget.controller.currentWordIndex;
     _wordProgressNotifier.value = widget.controller.wordProgress;
 
+    if (_handlingSeek) {
+      _lastStructuralState = widget.controller.state;
+      _lastOffsetMs = widget.controller.offsetMs;
+      return;
+    }
+
+    var jumpDetected = false;
+    if (widget.controller.hasRecordedPosition) {
+      final pos = widget.controller.lastPlaybackPosition;
+      final prev = _lastObservedPosition;
+      if (prev != null &&
+          (pos - prev).abs() > const Duration(milliseconds: 1500)) {
+        jumpDetected = true;
+        _cancelAutoFollowPause();
+        _inFlightTargetLine = null;
+      }
+      _lastObservedPosition = pos;
+    }
+
     final newState = widget.controller.state;
     final newOffsetMs = widget.controller.offsetMs;
-    final structuralChanged = !_isSameStructuralState(_lastStructuralState, newState);
+    final structuralChanged =
+        !_isSameStructuralState(_lastStructuralState, newState);
     final offsetChanged = newOffsetMs != _lastOffsetMs;
     final currentLine = widget.controller.currentLineIndex;
 
@@ -324,17 +460,20 @@ class _LyricsViewState extends State<LyricsView>
       if (structuralChanged) {
         _lineKeys.clear();
         _lastScrolledLine = -1;
+        _inFlightTargetLine = null;
         if (newState is LyricsStateFound) {
           _needsInitialJump = true;
-          _scheduleInitialJump();
+          _scrollToLine(currentLine, force: true, immediate: true);
         } else {
           _needsInitialJump = false;
         }
-      } else if (newState is LyricsStateFound &&
-          currentLine != _lastScrolledLine &&
-          currentLine >= 0) {
-        _lastScrolledLine = currentLine;
-        _scrollToCurrentLine(currentLine);
+      } else if (newState is LyricsStateFound) {
+        final targetLine = currentLine >= 0 ? currentLine : 0;
+        if (jumpDetected ||
+            (currentLine != _lastScrolledLine && currentLine >= 0)) {
+          _lastScrolledLine = targetLine;
+          _scrollToLine(targetLine, force: jumpDetected);
+        }
       }
       setState(() {});
       return;
@@ -342,65 +481,148 @@ class _LyricsViewState extends State<LyricsView>
 
     if (newState is LyricsStateFound) {
       if (_needsInitialJump) {
-        _scheduleInitialJump();
+        _scrollToLine(currentLine, force: true, immediate: true);
+      } else if (jumpDetected) {
+        final targetLine = currentLine >= 0 ? currentLine : 0;
+        _lastScrolledLine = targetLine;
+        _scrollToLine(targetLine, force: true);
       } else if (currentLine != _lastScrolledLine && currentLine >= 0) {
         _lastScrolledLine = currentLine;
-        _scrollToCurrentLine(currentLine);
+        _scrollToLine(currentLine);
       }
     }
   }
 
-  void _scheduleInitialJump() {
-    final token = ++_initialJumpToken;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || token != _initialJumpToken) return;
-      final doc = widget.controller.document;
-      if (doc == null || doc.kind != LyricsKind.synced || doc.lines.isEmpty) {
-        _needsInitialJump = false;
-        return;
+  double _measureAverageLineExtent(
+    LyricsDocument doc,
+    ScrollPosition position,
+    double verticalPadding,
+  ) {
+    var totalHeight = 0.0;
+    var count = 0;
+    for (final key in _lineKeys.values) {
+      final ro = key.currentContext?.findRenderObject();
+      if (ro is RenderBox && ro.hasSize && ro.size.height > 0) {
+        totalHeight += ro.size.height;
+        count++;
       }
-      if (!_scrollController.hasClients) return;
+    }
+    if (count > 0) {
+      return totalHeight / count;
+    }
+    if (doc.lines.length > 1 && position.maxScrollExtent > 0) {
+      final contentExtent = position.maxScrollExtent +
+          position.viewportDimension -
+          (verticalPadding * 2);
+      if (contentExtent > 0) {
+        return contentExtent / doc.lines.length;
+      }
+      return position.maxScrollExtent / (doc.lines.length - 1);
+    }
+    return _defaultLineExtent();
+  }
 
-      final activeLine = widget.controller.currentLineIndex;
+  void _scrollToLine(
+    int lineIndex, {
+    bool force = false,
+    bool immediate = false,
+  }) {
+    if (!force && _isAutoFollowPaused) return;
+    final doc = widget.controller.document;
+    if (doc == null || doc.kind != LyricsKind.synced || doc.lines.isEmpty) {
       _needsInitialJump = false;
-      _lastScrolledLine = activeLine;
+      return;
+    }
+    final targetIndex = lineIndex < 0
+        ? 0
+        : (lineIndex >= doc.lines.length ? doc.lines.length - 1 : lineIndex);
 
-      if (activeLine <= 0) {
-        _scrollController.jumpTo(0.0);
+    if (!immediate && _inFlightTargetLine == targetIndex) {
+      return;
+    }
+
+    _inFlightTargetLine = targetIndex;
+    final token = ++_scrollToken;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || token != _scrollToken) return;
+      if (!force && _isAutoFollowPaused) {
+        if (_inFlightTargetLine == targetIndex) {
+          _inFlightTargetLine = null;
+        }
+        return;
+      }
+      final currentDoc = widget.controller.document;
+      if (currentDoc == null ||
+          currentDoc.kind != LyricsKind.synced ||
+          currentDoc.lines.isEmpty) {
+        _needsInitialJump = false;
+        _inFlightTargetLine = null;
+        return;
+      }
+      if (!_scrollController.hasClients) {
+        _inFlightTargetLine = null;
         return;
       }
 
-      final key = _lineKeys[activeLine];
-      final directContext = key?.currentContext;
+      final clampedIndex = targetIndex.clamp(0, currentDoc.lines.length - 1);
+      _needsInitialJump = false;
+      _lastScrolledLine = clampedIndex;
+
+      if (immediate && lineIndex <= 0) {
+        _scrollController.jumpTo(0.0);
+        _inFlightTargetLine = null;
+        return;
+      }
+
+      final reduceMotion = widget.settingsStore.settings.reduceMotion;
+      final directContext = _lineKeys[clampedIndex]?.currentContext;
       if (directContext != null) {
+        final duration = (reduceMotion || immediate)
+            ? Duration.zero
+            : const Duration(milliseconds: 650);
+        final alignment = _scrollAlignment();
         Scrollable.ensureVisible(
           directContext,
-          alignment: 0.38,
-          duration: Duration.zero,
+          alignment: alignment,
+          duration: duration,
+          curve: Curves.easeOutCubic,
         );
+        _inFlightTargetLine = null;
         return;
       }
 
-      // Off-screen target: estimate scroll offset first so the active line is
-      // built, then snap to exact 0.38 alignment with zero animation.
+      // Off-screen target: estimate scroll offset using measured line extent
+      // so the target line is built, then refine to alignment next frame.
       final position = _scrollController.position;
-      final estExtent = doc.lines.length > 1 && position.maxScrollExtent > 0
-          ? position.maxScrollExtent / (doc.lines.length - 1)
-          : (widget.isFullScreen ? 84.0 : 68.0);
-      final targetOffset =
-          (activeLine * estExtent - position.viewportDimension * 0.38)
-              .clamp(0.0, position.maxScrollExtent);
+      final verticalPadding = _syncedVerticalPadding();
+      final alignment = _scrollAlignment();
+      final estExtent = _measureAverageLineExtent(
+        currentDoc,
+        position,
+        verticalPadding,
+      );
+      final estY = verticalPadding + (clampedIndex * estExtent);
+      final targetOffset = (estY - position.viewportDimension * alignment)
+          .clamp(0.0, position.maxScrollExtent);
       _scrollController.jumpTo(targetOffset);
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || token != _initialJumpToken) return;
-        final refinedContext = _lineKeys[activeLine]?.currentContext;
+        if (!mounted || token != _scrollToken) return;
+        final refinedContext = _lineKeys[clampedIndex]?.currentContext;
         if (refinedContext != null) {
+          final refineDuration = (reduceMotion || immediate)
+              ? Duration.zero
+              : const Duration(milliseconds: 350);
           Scrollable.ensureVisible(
             refinedContext,
-            alignment: 0.38,
-            duration: Duration.zero,
+            alignment: alignment,
+            duration: refineDuration,
+            curve: Curves.easeOutCubic,
           );
+        }
+        if (_inFlightTargetLine == targetIndex) {
+          _inFlightTargetLine = null;
         }
       });
     });
@@ -439,29 +661,9 @@ class _LyricsViewState extends State<LyricsView>
     _wordProgressNotifier.value = widget.controller.wordProgress;
   }
 
-  void _scrollToCurrentLine(int lineIndex, {bool force = false}) {
-    if (!force && _isAutoFollowPaused) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!force && _isAutoFollowPaused) return;
-      final key = _lineKeys[lineIndex];
-      final targetContext = key?.currentContext;
-      if (targetContext != null) {
-        final reduceMotion = widget.settingsStore.settings.reduceMotion;
-        Scrollable.ensureVisible(
-          targetContext,
-          alignment: 0.38,
-          duration: reduceMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 650),
-          curve: Curves.easeOutCubic,
-        );
-      }
-    });
-  }
-
   void _pauseAutoFollow() {
     _isAutoFollowPaused = true;
+    _inFlightTargetLine = null;
     _autoFollowTimer?.cancel();
     _autoFollowTimer = Timer(const Duration(seconds: 4), () {
       if (!mounted) return;
@@ -469,26 +671,115 @@ class _LyricsViewState extends State<LyricsView>
       final line = widget.controller.currentLineIndex;
       if (line >= 0) {
         _lastScrolledLine = line;
-        _scrollToCurrentLine(line, force: true);
+        _scrollToLine(line, force: true);
       }
     });
   }
 
+  void _activateUserScrollbar() {
+    _scrollbarHideTimer?.cancel();
+    _scrollbarHideTimer = Timer(const Duration(seconds: 1), () {
+      _scrollbarHideTimer = null;
+      if (!mounted) return;
+      setState(() {
+        _userScrollbarVisible = false;
+      });
+    });
+    if (!_userScrollbarVisible) {
+      setState(() {
+        _userScrollbarVisible = true;
+      });
+    }
+  }
+
+  Widget _buildUserScrollbar({
+    required ScrollController controller,
+    required bool reduceMotion,
+    required Widget child,
+  }) {
+    final fadeDuration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 200);
+
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) {
+        _isPointerDown = true;
+      },
+      onPointerUp: (_) {
+        _isPointerDown = false;
+      },
+      onPointerCancel: (_) {
+        _isPointerDown = false;
+      },
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) {
+          _pauseAutoFollow();
+          _activateUserScrollbar();
+        }
+      },
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: RawScrollbar(
+          key: const Key('lyrics_user_scrollbar'),
+          controller: controller,
+          thumbVisibility: _userScrollbarVisible,
+          trackVisibility: false,
+          thickness: 4.0,
+          radius: const Radius.circular(2.0),
+          thumbColor: AppColors.textMuted.withValues(alpha: 0.45),
+          crossAxisMargin: 2.0,
+          mainAxisMargin: 4.0,
+          fadeDuration: fadeDuration,
+          timeToFade: Duration.zero,
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              final isDragScroll =
+                  (notification is ScrollStartNotification &&
+                          notification.dragDetails != null) ||
+                      (notification is ScrollUpdateNotification &&
+                          (notification.dragDetails != null ||
+                              _isPointerDown)) ||
+                      (notification is OverscrollNotification &&
+                          (notification.dragDetails != null ||
+                              _isPointerDown)) ||
+                      (notification is UserScrollNotification &&
+                          notification.direction != ScrollDirection.idle);
+
+              if (isDragScroll) {
+                _pauseAutoFollow();
+                _activateUserScrollbar();
+                return false;
+              }
+
+              return !_userScrollbarVisible;
+            },
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
-    _initialJumpToken++;
+    _scrollToken++;
     _autoFollowTimer?.cancel();
     _autoFollowTimer = null;
+    _scrollbarHideTimer?.cancel();
+    _scrollbarHideTimer = null;
     widget.controller.removeListener(_onControllerChange);
     widget.settingsStore.removeListener(_onSettingsChange);
     _playbackStateSub?.cancel();
     _currentTrackSub?.cancel();
+    _seekSub?.cancel();
     _ticker?.stop();
     _ticker?.dispose();
     _ticker = null;
     _activeWordNotifier.dispose();
     _wordProgressNotifier.dispose();
     _scrollController.dispose();
+    _plainScrollController.dispose();
     super.dispose();
   }
 
@@ -497,7 +788,8 @@ class _LyricsViewState extends State<LyricsView>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (widget.showHeader) _buildHeader(context),
+        if (widget.showHeader && _effectiveDensity != LyricsViewDensity.mini)
+          _buildHeader(context),
         Expanded(
           child: _buildBody(context),
         ),
@@ -676,39 +968,49 @@ class _LyricsViewState extends State<LyricsView>
   }
 
   Widget _buildLoading(BuildContext context) {
+    final isMini = _effectiveDensity == LyricsViewDensity.mini;
     return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final widthFactor in [0.70, 0.90, 0.55, 0.80, 0.45]) ...[
-              FractionallySizedBox(
-                widthFactor: widthFactor,
-                child: Container(
-                  height: 20,
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppColors.textMuted.withValues(alpha: 0.18),
-                    borderRadius: AppSpacing.br10,
+      child: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: isMini ? 320 : 420),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final widthFactor
+                    in isMini ? const [0.70, 0.90, 0.55] : const [0.70, 0.90, 0.55, 0.80, 0.45]) ...[
+                  FractionallySizedBox(
+                    widthFactor: widthFactor,
+                    child: Container(
+                      height: isMini ? 14 : 20,
+                      margin: EdgeInsets.symmetric(vertical: isMini ? 5 : 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.textMuted.withValues(alpha: 0.18),
+                        borderRadius: AppSpacing.br10,
+                      ),
+                    ),
+                  ),
+                ],
+                SizedBox(height: isMini ? 10 : 24),
+                Text(
+                  context.t('lyrics.state.loading'),
+                  style: AppTypography.body.copyWith(
+                    color: AppColors.textMuted.withValues(alpha: 0.7),
                   ),
                 ),
-              ),
-            ],
-            const SizedBox(height: 24),
-            Text(
-              context.t('lyrics.state.loading'),
-              style: AppTypography.body.copyWith(
-                color: AppColors.textMuted.withValues(alpha: 0.7),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildOff(BuildContext context) {
+    if (_effectiveDensity == LyricsViewDensity.mini) {
+      return _buildMiniUnavailable(context);
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -725,6 +1027,9 @@ class _LyricsViewState extends State<LyricsView>
   }
 
   Widget _buildNotFound(BuildContext context) {
+    if (_effectiveDensity == LyricsViewDensity.mini) {
+      return _buildMiniUnavailable(context);
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -741,6 +1046,9 @@ class _LyricsViewState extends State<LyricsView>
   }
 
   Widget _buildError(BuildContext context, LyricsErrorReason reason) {
+    if (_effectiveDensity == LyricsViewDensity.mini) {
+      return _buildMiniUnavailable(context);
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -790,7 +1098,16 @@ class _LyricsViewState extends State<LyricsView>
 
   Widget _buildPlain(BuildContext context, LyricsDocument doc) {
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
-    final plainFontSize = widget.isFullScreen ? 26.0 : 20.0;
+    final density = _effectiveDensity;
+    if (density == LyricsViewDensity.mini &&
+        doc.lines.every((l) => l.text.trim().isEmpty)) {
+      return _buildMiniUnavailable(context);
+    }
+    final plainFontSize = switch (density) {
+      LyricsViewDensity.mini => widget.isWideMini ? 14.0 : 15.0,
+      LyricsViewDensity.fullScreen => 26.0,
+      LyricsViewDensity.page => 20.0,
+    };
 
     return ShaderMask(
       shaderCallback: (Rect bounds) {
@@ -810,11 +1127,19 @@ class _LyricsViewState extends State<LyricsView>
       child: AnimatedOpacity(
         duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 300),
         opacity: 1.0,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(
-            horizontal: 32,
-            vertical: widget.isFullScreen ? 80 : 48,
-          ),
+        child: _buildUserScrollbar(
+          controller: _plainScrollController,
+          reduceMotion: reduceMotion,
+          child: SingleChildScrollView(
+            controller: _plainScrollController,
+            padding: EdgeInsets.symmetric(
+              horizontal: density == LyricsViewDensity.mini ? 16 : 32,
+              vertical: switch (density) {
+                LyricsViewDensity.mini => 24,
+                LyricsViewDensity.fullScreen => 80,
+                LyricsViewDensity.page => 48,
+              },
+            ),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 680),
@@ -823,7 +1148,9 @@ class _LyricsViewState extends State<LyricsView>
                 children: [
                   for (final line in doc.lines)
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      padding: EdgeInsets.symmetric(
+                        vertical: density == LyricsViewDensity.mini ? 4 : 6,
+                      ),
                       child: Text(
                         line.text,
                         textAlign: TextAlign.center,
@@ -832,7 +1159,7 @@ class _LyricsViewState extends State<LyricsView>
                           fontSize: plainFontSize,
                           fontWeight: FontWeight.normal,
                           color: AppColors.textSecondary,
-                          height: 1.6,
+                          height: density == LyricsViewDensity.mini ? 1.45 : 1.6,
                         ),
                       ),
                     ),
@@ -841,11 +1168,16 @@ class _LyricsViewState extends State<LyricsView>
             ),
           ),
         ),
+        ),
       ),
     );
   }
 
   Widget _buildSyncedList(BuildContext context, LyricsDocument doc) {
+    final density = _effectiveDensity;
+    if (density == LyricsViewDensity.mini && doc.lines.isEmpty) {
+      return _buildMiniUnavailable(context);
+    }
     final highlightMode = widget.settingsStore.settings.lyricsHighlight;
     final hasWordTiming = doc.hasWordTiming;
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
@@ -865,22 +1197,14 @@ class _LyricsViewState extends State<LyricsView>
         ).createShader(bounds);
       },
       blendMode: BlendMode.dstIn,
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (notification) {
-          if (notification is UserScrollNotification &&
-              notification.direction != ScrollDirection.idle) {
-            _pauseAutoFollow();
-          } else if (notification is ScrollStartNotification &&
-              notification.dragDetails != null) {
-            _pauseAutoFollow();
-          }
-          return false;
-        },
+      child: _buildUserScrollbar(
+        controller: _scrollController,
+        reduceMotion: reduceMotion,
         child: ListView.builder(
           controller: _scrollController,
           padding: EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: widget.isFullScreen ? 140 : 100,
+            horizontal: density == LyricsViewDensity.mini ? 12 : 24,
+            vertical: _syncedVerticalPadding(),
           ),
           itemCount: doc.lines.length,
           itemBuilder: (context, index) {
@@ -903,14 +1227,16 @@ class _LyricsViewState extends State<LyricsView>
                 mappedRanges: mappedRanges,
                 reduceMotion: reduceMotion,
                 isFullScreen: widget.isFullScreen,
+                density: density,
+                isWideMini: widget.isWideMini,
                 onBuildProbe: widget.onLineBuild,
                 onTap: () {
-                  _autoFollowTimer?.cancel();
-                  _isAutoFollowPaused = false;
+                  _cancelAutoFollowPause();
+                  _inFlightTargetLine = null;
                   _lastScrolledLine = index;
                   widget.playbackController
                       .seek(Duration(milliseconds: line.startMs));
-                  _scrollToCurrentLine(index, force: true);
+                  _scrollToLine(index, force: true);
                 },
               ),
             );
@@ -932,6 +1258,8 @@ class _SyncedLineItem extends StatefulWidget {
   final List<WordCharRange>? mappedRanges;
   final bool reduceMotion;
   final bool isFullScreen;
+  final LyricsViewDensity density;
+  final bool isWideMini;
   final void Function(int index)? onBuildProbe;
   final VoidCallback onTap;
 
@@ -947,6 +1275,8 @@ class _SyncedLineItem extends StatefulWidget {
     required this.mappedRanges,
     required this.reduceMotion,
     required this.isFullScreen,
+    required this.density,
+    this.isWideMini = false,
     this.onBuildProbe,
     required this.onTap,
   });
@@ -1039,7 +1369,11 @@ class _SyncedLineItemState extends State<_SyncedLineItem> {
         ? Alignment.centerRight
         : Alignment.centerLeft;
 
-    final double constantFontSize = widget.isFullScreen ? 42.0 : 32.0;
+    final double constantFontSize = switch (widget.density) {
+      LyricsViewDensity.mini => widget.isWideMini ? 18.0 : 20.0,
+      LyricsViewDensity.fullScreen => 42.0,
+      LyricsViewDensity.page => 32.0,
+    };
     final baseStyle = AppTypography.title.copyWith(
       fontSize: constantFontSize,
       fontWeight: FontWeight.w700,
@@ -1078,12 +1412,17 @@ class _SyncedLineItemState extends State<_SyncedLineItem> {
             duration: animDuration,
             curve: Curves.easeOutCubic,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: EdgeInsets.symmetric(
+                horizontal: widget.density == LyricsViewDensity.mini ? 8 : 16,
+                vertical: widget.density == LyricsViewDensity.mini ? 5 : 8,
+              ),
               child: Align(
                 alignment: startAlign,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxWidth: widget.isFullScreen ? 760.0 : double.infinity,
+                    maxWidth: widget.density == LyricsViewDensity.fullScreen
+                        ? 760.0
+                        : double.infinity,
                   ),
                   child: SizedBox(
                     width: double.infinity,

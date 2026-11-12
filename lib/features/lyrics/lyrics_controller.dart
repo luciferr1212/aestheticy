@@ -79,7 +79,7 @@ class LyricsController extends ChangeNotifier {
   late final LyricsOffsetStore _offsetStore;
   bool _createdOffsetStoreLocally = false;
 
-  final List<StreamSubscription<dynamic>> _subs = [];
+  final List<StreamSubscription<Object?>> _subs = [];
   int _requestId = 0;
   int _offsetRequestId = 0;
   int _offsetMs = 0;
@@ -165,6 +165,12 @@ class LyricsController extends ChangeNotifier {
 
   /// 0.0 to 1.0 progress of the current word between start and end times.
   double get wordProgress => _wordProgress;
+
+  /// Latest playback position processed by [updatePosition].
+  Duration get lastPlaybackPosition => _lastPlaybackPosition;
+
+  /// Whether at least one playback position update has been recorded for the current track.
+  bool get hasRecordedPosition => _hasRecordedPosition;
 
   /// Current per-track lyrics timing offset in milliseconds (`-15000..+15000`).
   int get offsetMs => _offsetMs;

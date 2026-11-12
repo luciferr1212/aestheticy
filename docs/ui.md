@@ -721,3 +721,44 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
   - Mini player live window resize and screen-bounds clamping when toggling mini lyrics and shapes (`wide` vs `square`) on real DPI displays.
   - Actual audible smoothness of software `fadeGain` ramps (`250 ms` start, `120 ms` resume, `120+60+250 ms` switch, `100 ms` pause, `<= 145 ms` stop/exit) and pause-safe paused-jump behavior via libmpv (`mpv_audio_kit`).
   - Hardware mouse wheel volume over bottom bar, Full Screen ambient 30 fps smoothness, and per-track `lyrics_offsets.json` persistence across restarts.
+
+---
+
+## 32. Phase 4, Prompt 4B — Refinements from Real Testing (Seek, Lyrics, Volume HUD, Frameless Mini Player & Albums Sort Direction)
+
+### 32.1 Full Screen Seek Bar Box & Overlay (`lib/ui/now_playing/full_screen_view.dart`)
+- **Fixed Layout Box:** The bottom seek bar occupies a fixed 36 dp height box anchored to the bottom edge in every state. The track line is a constant 4 dp height at a fixed vertical offset (`bottom: 16 dp`).
+- **Overlay Decoupling:** Elapsed and total timestamps and the drag scrub tooltip are rendered as an overlay `Positioned` layer above the bar inside a `Stack`. Hovering and dragging change only the thumb diameter (scaling from 0 to 12 dp over 140 ms) and fill opacity. Neither hovering nor dragging changes the bar's layout bounds, eliminating any vertical jumping.
+- **Preserved Interactions:** Retains click-to-seek, 120 ms throttled dragging with tooltip commit, RTL fill direction, idle armed-resume updates, semantics actions, and auto-hide suppression during hover or drag.
+
+### 32.2 Smooth Lyrics Follow After Seek (`lib/features/lyrics/lyrics_controller.dart`, `lib/ui/lyrics/lyrics_view.dart`)
+- **Seek / Jump Auto-Follow Restore:** Any seek operation or playback jump `>1.5 s` cancels the manual auto-follow pause immediately, re-engaging active line tracking without waiting for the 4-second user-scroll timeout.
+- **Unified Offset Calculation & Refinement:** `_scrollToLine` computes target scroll offsets using measured layout metrics where available or line index estimates, followed by a post-frame check that animates smoothly to exact line positions without visual glitches.
+
+### 32.3 User-Only Lyrics Scrollbar (`lib/ui/lyrics/lyrics_view.dart`)
+- **Discreet Visibility:** Mounted inside a `RawScrollbar` with ambient `ScrollConfiguration(scrollbars: false)`. The scrollbar thumb appears strictly during user mouse wheel or pointer drag gestures and fades out after 1 second of inactivity.
+- **Hidden on Programmatic Scrolls:** Programmatic auto-follow scrolls never reveal the scrollbar thumb.
+
+### 32.4 Interactive Volume HUD & Material Decoration Fix (`lib/ui/shell/volume_hud.dart`)
+- **No Yellow Double-Underline:** Wrapped in `Material(type: MaterialType.transparency)` with `DefaultTextStyle.merge(decoration: TextDecoration.none)`, completely resolving the missing Material ancestor default underline on Windows desktop.
+- **Interactive Controls:**
+  - Pointer hover pauses the auto-hide timer; exiting restarts the 1.2-second fade-out timer.
+  - Mouse wheel scrolling directly adjusts volume `+/-5%` with clamping.
+  - Interactive volume bar supports direct click seeking and 60 ms throttled drag scrubbing across both LTR and RTL directions.
+  - Integrated mute button with in-memory volume backup: clicking toggles mute/unmute, while external volume adjustments automatically restore playback from mute.
+  - When hidden, the HUD wraps in `IgnorePointer(ignoring: !visible)` to prevent phantom hit test interception.
+
+### 32.5 Frameless Mini Player with Extended Lyrics (`lib/platform/*`, `lib/ui/mini_player/*`)
+- **Native Frameless Window:** Added `setFrameless(bool)` and `startDragging()` to `WindowService`. `WindowsWindowService` toggles `TitleBarStyle.hidden` (`windowButtonVisibility: false`) on mini enter and restores `TitleBarStyle.normal` on mini exit.
+- **Whole-Background Drag:** The entire mini player background surface handles native window dragging via `GestureDetector(onPanStart: (_) => windowService.startDragging())`, while excluding interactive controls (buttons, seek bar, and lyrics view).
+- **Single-Flight Serialized Transitions:** Mini controller transition driver runs through an atomic lock loop, preventing rapid enter/exit toggles from corrupting window state.
+- **Close Button (`mini_player_close`):** Restores native window frame and dispatches either tray hide (in `'tray'` close mode) or graceful shutdown coordinator execution and window destruction (in `'quit'` close mode).
+- **Expanded Mini Lyrics (`LyricsViewDensity.mini`):** Replaces the single-line strip with an expanded `LyricsView(density: LyricsViewDensity.mini)` sized at `480x320` wide and `340x620` square when lyrics are enabled, while preserving compact `480x170` and `340x440` dimensions when lyrics are disabled. Uses compact typography (18/20 pt, height 1.3, alignment 0.40) and centered fallback placeholders.
+
+### 32.6 Albums Sort Direction Toggle (`lib/ui/library/albums_view.dart`, `lib/ui/library/library_header.dart`)
+- **Direction Toggle Button (`albums_sort_direction`):** Positioned beside `sort_button` in the albums header with a 140 ms `AnimatedRotation` arrow flip (0 ms with `reduceMotion`) and localized tooltips (`albums.sortAscending` / `albums.sortDescending`).
+- **State & Reset:** Backed by `AppSettings.albumsSortReversed` (default `false`); switching the sort key in `sort_button` resets `albumsSortReversed` to `false`.
+- **Sorting Logic:**
+  - Non-year sort modes reverse the album list.
+  - Year sort mode reverses the year group sequence (oldest first when reversed) while keeping the `"Unknown year"` section pinned at the end, and preserving within-group alphabetical sorting by artist then title.
+

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -27,18 +28,23 @@ class MiniPlayerController extends ChangeNotifier {
   String _lastShape = 'wide';
   bool _lastAlwaysOnTop = true;
   bool _lastShowLyrics = false;
+  bool _disposed = false;
+  bool? _desiredMini;
+  bool _resizePending = false;
+  bool _isTransitioning = false;
+  final List<Completer<void>> _transitionWaiters = [];
 
   /// Target window size in logical pixels for wide mini layout.
   static const Size wideSize = Size(480, 170);
 
-  /// Target window size in logical pixels for wide mini layout with lyrics strip.
-  static const Size wideLyricsSize = Size(480, 222);
+  /// Target window size in logical pixels for wide mini layout with lyrics panel.
+  static const Size wideLyricsSize = Size(480, 320);
 
   /// Target window size in logical pixels for square mini layout.
   static const Size squareSize = Size(340, 440);
 
-  /// Target window size in logical pixels for square mini layout with lyrics strip.
-  static const Size squareLyricsSize = Size(340, 512);
+  /// Target window size in logical pixels for square mini layout with lyrics panel.
+  static const Size squareLyricsSize = Size(340, 620);
 
   /// Outer side margin in logical pixels.
   static const double sideMargin = 16.0;
@@ -115,11 +121,65 @@ class MiniPlayerController extends ChangeNotifier {
     }
   }
 
-  /// Enters mini player mode, resizing and positioning the native window.
-  Future<void> enter() async {
-    if (_mode == MiniPlayerMode.mini) return;
+  Future<void> _driveTransition({bool? targetMini, bool resize = false}) {
+    if (_disposed) return Future<void>.value();
+    if (targetMini != null) {
+      _desiredMini = targetMini;
+      _resizePending = false;
+    } else if (resize) {
+      _resizePending = true;
+    }
+
+    if (_isTransitioning) {
+      final completer = Completer<void>();
+      _transitionWaiters.add(completer);
+      return completer.future;
+    }
+
+    return _runTransitionLoop();
+  }
+
+  Future<void> _runTransitionLoop() async {
+    _isTransitioning = true;
+    try {
+      while (!_disposed) {
+        final desired = _desiredMini;
+        if (desired == true && _mode != MiniPlayerMode.mini) {
+          await _performEnter();
+        } else if (desired == false && _mode == MiniPlayerMode.mini) {
+          await _performExit();
+        } else if (_resizePending && _mode == MiniPlayerMode.mini) {
+          _resizePending = false;
+          await _applyLayoutSize(
+            settingsStore.settings.miniPlayerShape,
+            showLyrics: settingsStore.settings.miniPlayerShowLyrics,
+          );
+        } else {
+          break;
+        }
+      }
+    } finally {
+      _isTransitioning = false;
+      final waiters = List<Completer<void>>.of(_transitionWaiters);
+      _transitionWaiters.clear();
+      for (final waiter in waiters) {
+        if (!waiter.isCompleted) {
+          waiter.complete();
+        }
+      }
+    }
+  }
+
+  /// Enters mini player mode, hiding the frame and resizing/positioning the native window.
+  Future<void> enter() => _driveTransition(targetMini: true);
+
+  Future<void> _performEnter() async {
+    if (_disposed || _desiredMini == false || _mode == MiniPlayerMode.mini) {
+      return;
+    }
 
     _rememberedGeometry = await windowService.getGeometry();
+    if (_disposed || _desiredMini == false) return;
     if (_rememberedGeometry!.isFullScreen) {
       await windowService.setFullScreen(false);
     }
@@ -143,6 +203,7 @@ class MiniPlayerController extends ChangeNotifier {
       lastY: settingsStore.settings.miniPlayerLastY,
     );
 
+    await windowService.setFrameless(true);
     await windowService.applyGeometry(targetPosition, targetSize);
     await windowService.setAlwaysOnTop(settingsStore.settings.miniPlayerAlwaysOnTop);
 
@@ -150,9 +211,13 @@ class MiniPlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Exits mini player mode, restoring original window dimensions and state.
-  Future<void> exit() async {
-    if (_mode != MiniPlayerMode.mini) return;
+  /// Exits mini player mode, restoring original window dimensions, state, and frame.
+  Future<void> exit() => _driveTransition(targetMini: false);
+
+  Future<void> _performExit() async {
+    if (_disposed || _desiredMini == true || _mode != MiniPlayerMode.mini) {
+      return;
+    }
 
     if (settingsStore.settings.miniPlayerPosition == 'remember') {
       final currentGeo = await windowService.getGeometry();
@@ -175,8 +240,18 @@ class MiniPlayerController extends ChangeNotifier {
       }
     }
 
+    await windowService.setFrameless(false);
+
     _mode = MiniPlayerMode.normal;
     notifyListeners();
+  }
+
+  /// Restores normal window frame if the app is closing or hiding while in mini mode.
+  Future<void> restoreFrameForClose() {
+    if (_mode == MiniPlayerMode.mini || _desiredMini == true) {
+      return exit();
+    }
+    return Future<void>.value();
   }
 
   /// Toggles always-on-top pinning state live.
@@ -189,16 +264,13 @@ class MiniPlayerController extends ChangeNotifier {
     }
   }
 
-  /// Toggles compact lyrics display in mini player mode and resizes live.
+  /// Toggles expanded lyrics display in mini player mode and resizes live.
   Future<void> toggleShowLyrics() async {
     final next = !settingsStore.settings.miniPlayerShowLyrics;
     _lastShowLyrics = next;
     settingsStore.update((s) => s.copyWith(miniPlayerShowLyrics: next));
     if (isMini) {
-      await _applyLayoutSize(
-        settingsStore.settings.miniPlayerShape,
-        showLyrics: next,
-      );
+      await _driveTransition(resize: true);
     }
     notifyListeners();
   }
@@ -208,10 +280,7 @@ class MiniPlayerController extends ChangeNotifier {
     _lastShape = shape;
     settingsStore.update((s) => s.copyWith(miniPlayerShape: shape));
     if (isMini) {
-      await _applyLayoutSize(
-        shape,
-        showLyrics: settingsStore.settings.miniPlayerShowLyrics,
-      );
+      await _driveTransition(resize: true);
     }
   }
 
@@ -260,13 +329,14 @@ class MiniPlayerController extends ChangeNotifier {
     if (newShape != _lastShape || newShowLyrics != _lastShowLyrics) {
       _lastShape = newShape;
       _lastShowLyrics = newShowLyrics;
-      _applyLayoutSize(newShape, showLyrics: newShowLyrics);
+      _driveTransition(resize: true);
       notifyListeners();
     }
   }
 
   @override
   void dispose() {
+    _disposed = true;
     settingsStore.removeListener(_onSettingsChanged);
     super.dispose();
   }

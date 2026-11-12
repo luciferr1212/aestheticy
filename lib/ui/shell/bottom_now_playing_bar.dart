@@ -527,6 +527,8 @@ class _EndControlsArea extends StatelessWidget {
                             child: Slider(
                               value: vol,
                               onChanged: (newVol) {
+                                final hudCtrl = VolumeHudScope.maybeOf(context);
+                                hudCtrl?.clearMuteBackup();
                                 controller.engine.setVolume(newVol);
                                 settingsStore?.update((s) => s.copyWith(volume: newVol));
                               },

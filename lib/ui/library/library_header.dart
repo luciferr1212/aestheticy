@@ -48,6 +48,12 @@ class LibraryHeader extends StatefulWidget {
   /// Optional callback when view mode changes.
   final ValueChanged<String>? onViewModeChanged;
 
+  /// Whether sorting is currently in reversed direction.
+  final bool isSortReversed;
+
+  /// Optional callback to toggle sort direction.
+  final VoidCallback? onSortDirectionToggle;
+
   /// Creates a [LibraryHeader].
   const LibraryHeader({
     super.key,
@@ -62,6 +68,8 @@ class LibraryHeader extends StatefulWidget {
     required this.onSortChanged,
     this.viewMode,
     this.onViewModeChanged,
+    this.isSortReversed = false,
+    this.onSortDirectionToggle,
   });
 
   @override
@@ -276,6 +284,27 @@ class _LibraryHeaderState extends State<LibraryHeader> {
                 );
               },
             ),
+            if (widget.onSortDirectionToggle != null) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                key: const Key('albums_sort_direction'),
+                icon: AnimatedRotation(
+                  turns: widget.isSortReversed ? 0.5 : 0.0,
+                  duration: widget.settingsStore.settings.reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 140),
+                  curve: Curves.easeInOut,
+                  child: const Icon(Icons.arrow_upward, size: 18),
+                ),
+                tooltip: widget.isSortReversed
+                    ? context.t('albums.sortDescending')
+                    : context.t('albums.sortAscending'),
+                onPressed: widget.onSortDirectionToggle,
+                splashRadius: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
             const SizedBox(width: 16),
 
             // Item count label

@@ -443,6 +443,7 @@ void main() {
                   theme: buildAppTheme(),
                   home: VolumeHudOverlay(
                     controller: hudCtrl,
+                    engine: engine,
                     child: AppShell(
                       engine: engine,
                       controller: controller,
@@ -532,6 +533,7 @@ void main() {
                   theme: buildAppTheme(),
                   home: VolumeHudOverlay(
                     controller: hudCtrl,
+                    engine: engine,
                     child: AppShell(
                       engine: engine,
                       controller: controller,
@@ -564,19 +566,34 @@ void main() {
         );
         expect(opacityBefore.opacity, equals(1.0));
         expect(opacityBefore.duration, equals(const Duration(milliseconds: 220)));
-        expect(
-          find.ancestor(
-            of: find.byKey(const Key('volume_hud')),
-            matching: find.byType(IgnorePointer),
-          ),
-          findsWidgets,
+        final ignoreVisible = tester.widget<IgnorePointer>(
+          find
+              .ancestor(
+                of: find.byKey(const Key('volume_hud')),
+                matching: find.byType(IgnorePointer),
+              )
+              .first,
         );
+        expect(ignoreVisible.ignoring, isFalse);
 
         await tester.pump(const Duration(milliseconds: 600));
         expect(hudCtrl.isVisible, isTrue);
 
         await tester.pump(const Duration(milliseconds: 500));
         expect(hudCtrl.isVisible, isFalse);
+        final ignoreHidden = tester.widget<IgnorePointer>(
+          find
+              .ancestor(
+                of: find.byKey(const Key('volume_hud')),
+                matching: find.byType(IgnorePointer),
+              )
+              .first,
+        );
+        expect(ignoreHidden.ignoring, isTrue);
+        expect(
+          find.byKey(const Key('volume_hud_bar')).hitTestable(),
+          findsNothing,
+        );
         final opacityAfter = tester.widget<AnimatedOpacity>(
           find.ancestor(
             of: find.byKey(const Key('volume_hud')),
@@ -631,6 +648,7 @@ void main() {
                   theme: buildAppTheme(),
                   home: VolumeHudOverlay(
                     controller: hudCtrl,
+                    engine: engine,
                     child: Scaffold(
                       body: SizedBox(
                         width: 1100,
@@ -761,6 +779,216 @@ void main() {
           find.byKey(const Key('shortcuts_cheat_sheet_dialog')),
           findsNothing,
         );
+      },
+    );
+
+    testWidgets(
+      'Interactive Volume HUD: no underline, hover pause, wheel clamp, LTR/RTL bar click & throttled drag, mute & external unmute',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        settingsStore.update((s) => s.copyWith(volume: 0.8));
+        final hudCtrl = VolumeHudController();
+        addTearDown(hudCtrl.dispose);
+
+        Future<void> mountHud({bool isRtl = false}) async {
+          settingsStore.update((s) => s.copyWith(language: isRtl ? 'ar' : 'en'));
+          await tester.pumpWidget(
+            GlassScope(
+              controller: glassController,
+              child: SettingsScope(
+                store: settingsStore,
+                child: VolumeHudScope(
+                  controller: hudCtrl,
+                  child: MaterialApp(
+                    locale: const Locale('en'),
+                    theme: buildAppTheme(),
+                    builder: (context, child) {
+                      return Directionality(
+                        textDirection:
+                            isRtl ? TextDirection.rtl : TextDirection.ltr,
+                        child: VolumeHudOverlay(
+                          controller: hudCtrl,
+                          engine: engine,
+                          settingsStore: settingsStore,
+                          child: child ?? const SizedBox.shrink(),
+                        ),
+                      );
+                    },
+                    home: const Scaffold(body: SizedBox.expand()),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pump();
+        }
+
+        await mountHud();
+
+        // Hidden HUD cannot be hit-tested
+        expect(hudCtrl.isVisible, isFalse);
+        expect(
+          find.byKey(const Key('volume_hud_bar')).hitTestable(),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('volume_hud_mute_button')).hitTestable(),
+          findsNothing,
+        );
+
+        // Show HUD via controller and verify DefaultTextStyle decoration is none (no yellow double-underline)
+        hudCtrl.show(0.8);
+        await tester.pump();
+        expect(hudCtrl.isVisible, isTrue);
+        final textElement = tester.element(find.text('80%'));
+        expect(
+          DefaultTextStyle.of(textElement).style.decoration,
+          equals(TextDecoration.none),
+        );
+        expect(
+          find.ancestor(
+            of: find.byKey(const Key('volume_hud')),
+            matching: find.byType(Material),
+          ),
+          findsWidgets,
+        );
+
+        // Hover keeps HUD visible past 1s and resumes 1s timer on exit
+        final hudCenter = tester.getCenter(find.byKey(const Key('volume_hud')));
+        final mouse = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(mouse.hover(hudCenter));
+        await tester.pump(const Duration(milliseconds: 1500));
+        expect(hudCtrl.isVisible, isTrue);
+
+        // Wheel up increases +5% and clamps at 1.0; wheel down steps -5%
+        await tester.sendEventToBinding(mouse.scroll(const Offset(0, -120)));
+        await tester.pump();
+        expect(settingsStore.settings.volume, closeTo(0.85, 0.001));
+        expect(engine.currentVolume, closeTo(0.85, 0.001));
+
+        for (var i = 0; i < 6; i++) {
+          await tester.sendEventToBinding(mouse.scroll(const Offset(0, -120)));
+          await tester.pump();
+        }
+        expect(settingsStore.settings.volume, closeTo(1.0, 0.001));
+        expect(engine.currentVolume, closeTo(1.0, 0.001));
+
+        await tester.sendEventToBinding(mouse.scroll(const Offset(0, 120)));
+        await tester.pump();
+        expect(settingsStore.settings.volume, closeTo(0.95, 0.001));
+
+        // Leave hover -> fades out after 1s
+        await tester.sendEventToBinding(mouse.hover(const Offset(10, 10)));
+        await tester.pump(const Duration(milliseconds: 1100));
+        expect(hudCtrl.isVisible, isFalse);
+
+        // Click & throttled drag in LTR
+        hudCtrl.show(0.95);
+        await tester.pump();
+        final barRectLtr = tester.getRect(find.byKey(const Key('volume_hud_bar')));
+        await tester.tapAt(
+          Offset(barRectLtr.left + barRectLtr.width * 0.25, barRectLtr.center.dy),
+        );
+        await tester.pump();
+        expect(settingsStore.settings.volume, closeTo(0.25, 0.02));
+        expect(engine.currentVolume, closeTo(0.25, 0.02));
+
+        // Leading drag event applies immediately; rapid updates within 60ms throttle to trailing timer
+        final drag = await tester.startGesture(
+          Offset(barRectLtr.left + barRectLtr.width * 0.25, barRectLtr.center.dy),
+        );
+        await drag.moveTo(
+          Offset(barRectLtr.left + barRectLtr.width * 0.50, barRectLtr.center.dy),
+        );
+        await tester.pump();
+        expect(engine.currentVolume, closeTo(0.50, 0.02));
+        await drag.moveTo(
+          Offset(barRectLtr.left + barRectLtr.width * 0.75, barRectLtr.center.dy),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+        expect(engine.currentVolume, closeTo(0.50, 0.02));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.currentVolume, closeTo(0.75, 0.02));
+        expect(settingsStore.settings.volume, closeTo(0.75, 0.02));
+        await drag.up();
+        await tester.pump();
+
+        // Mute button saves 0.75 -> sets 0.0 -> second click restores 0.75
+        await tester.tap(find.byKey(const Key('volume_hud_mute_button')));
+        await tester.pump();
+        expect(engine.currentVolume, closeTo(0.0, 0.001));
+        expect(settingsStore.settings.volume, closeTo(0.0, 0.001));
+        expect(hudCtrl.mutedRestoreVolume, closeTo(0.75, 0.02));
+
+        await tester.tap(find.byKey(const Key('volume_hud_mute_button')));
+        await tester.pump();
+        expect(engine.currentVolume, closeTo(0.75, 0.02));
+        expect(hudCtrl.mutedRestoreVolume, isNull);
+
+        // Mute when already at 0.0 and no backup restores 0.5
+        setVolumeDirect(
+          engine: engine,
+          volume: 0.0,
+          settingsStore: settingsStore,
+          hudController: hudCtrl,
+        );
+        await tester.pump();
+        expect(hudCtrl.mutedRestoreVolume, isNull);
+        await tester.tap(find.byKey(const Key('volume_hud_mute_button')));
+        await tester.pump();
+        expect(engine.currentVolume, closeTo(0.5, 0.001));
+
+        // Mute -> external step clears backup
+        await tester.tap(find.byKey(const Key('volume_hud_mute_button')));
+        await tester.pump();
+        expect(hudCtrl.mutedRestoreVolume, closeTo(0.5, 0.001));
+        adjustVolumeByStep(
+          engine: engine,
+          currentVolume: engine.currentVolume,
+          delta: 0.05,
+          settingsStore: settingsStore,
+          hudController: hudCtrl,
+        );
+        await tester.pump();
+        expect(engine.currentVolume, closeTo(0.05, 0.001));
+        expect(hudCtrl.mutedRestoreVolume, isNull);
+
+        // RTL bar click: tapping near right edge sets low volume (~0.2), left edge high (~0.8)
+        await mountHud(isRtl: true);
+        hudCtrl.show(0.4);
+        await tester.pump();
+        final barRectRtl = tester.getRect(find.byKey(const Key('volume_hud_bar')));
+        await tester.tapAt(
+          Offset(barRectRtl.right - barRectRtl.width * 0.2, barRectRtl.center.dy),
+        );
+        await tester.pump();
+        expect(settingsStore.settings.volume, closeTo(0.2, 0.03));
+        expect(engine.currentVolume, closeTo(0.2, 0.03));
+
+        await tester.tapAt(
+          Offset(barRectRtl.left + barRectRtl.width * 0.2, barRectRtl.center.dy),
+        );
+        await tester.pump();
+        expect(settingsStore.settings.volume, closeTo(0.8, 0.03));
+
+        // Clamp wheel down at 0.0
+        setVolumeDirect(
+          engine: engine,
+          volume: 0.02,
+          settingsStore: settingsStore,
+          hudController: hudCtrl,
+        );
+        await tester.pump();
+        final hudRtlCenter = tester.getCenter(find.byKey(const Key('volume_hud')));
+        await tester.sendEventToBinding(mouse.hover(hudRtlCenter));
+        await tester.sendEventToBinding(mouse.scroll(const Offset(0, 120)));
+        await tester.pump();
+        expect(engine.currentVolume, closeTo(0.0, 0.001));
+        await tester.sendEventToBinding(mouse.hover(const Offset(10, 10)));
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 2));
+        await tester.runAsync(() => settingsStore.flush());
       },
     );
   });

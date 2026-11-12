@@ -285,6 +285,21 @@ class FakeWindowService implements WindowService {
     return displaySizeProvider();
   }
 
+  bool isFramelessState = false;
+  int startDraggingCount = 0;
+
+  @override
+  Future<void> setFrameless(bool frameless) async {
+    isFramelessState = frameless;
+    calls.add('setFrameless($frameless)');
+  }
+
+  @override
+  Future<void> startDragging() async {
+    startDraggingCount++;
+    calls.add('startDragging');
+  }
+
   @override
   Future<void> dispose() async {
     calls.add('dispose');

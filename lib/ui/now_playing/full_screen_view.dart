@@ -505,7 +505,7 @@ class FullScreenViewState extends State<FullScreenView>
                 ),
               ),
 
-              // 6. Bottom Slender progress line (2dp high) spanning window width
+              // 6. Bottom seek bar spanning window width (fixed 36 dp box)
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -514,6 +514,7 @@ class FullScreenViewState extends State<FullScreenView>
                   child: _SlenderProgressLine(
                     engine: widget.engine,
                     controller: widget.controller,
+                    reduceMotion: widget.settingsStore.settings.reduceMotion,
                     onInteractionChanged: _onScrubberInteractionChanged,
                   ),
                 ),
@@ -632,11 +633,13 @@ class _BlobPainter extends CustomPainter {
 class _SlenderProgressLine extends StatefulWidget {
   final AudioEngine engine;
   final PlaybackController? controller;
+  final bool reduceMotion;
   final ValueChanged<bool>? onInteractionChanged;
 
   const _SlenderProgressLine({
     required this.engine,
     this.controller,
+    this.reduceMotion = false,
     this.onInteractionChanged,
   });
 
@@ -907,130 +910,145 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
                   final tooltipLeft =
                       (_pointerDx - 32.0).clamp(8.0, math.max(8.0, width - 72.0)).toDouble();
 
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (_isDragging && total > Duration.zero)
-                        SizedBox(
-                          height: 28,
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              Positioned(
-                                left: tooltipLeft,
-                                bottom: 2,
-                                child: Container(
-                                  key: const Key('fullscreen_seek_tooltip'),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.surface,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: AppColors.border),
-                                  ),
-                                  child: Text(
-                                    context.formatDurationLocalized(displayPos),
-                                    style: AppTypography.micro.copyWith(
-                                      color: AppColors.text,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (active)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: Row(
-                            key: const Key('fullscreen_seek_times'),
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                context.formatDurationLocalized(displayPos),
-                                style: AppTypography.micro
-                                    .copyWith(color: AppColors.textMuted),
-                              ),
-                              Text(
-                                context.formatDurationLocalized(total),
-                                style: AppTypography.micro
-                                    .copyWith(color: AppColors.textMuted),
-                              ),
-                            ],
-                          ),
-                        ),
-                      MouseRegion(
-                        cursor: total > Duration.zero
-                            ? SystemMouseCursors.click
-                            : MouseCursor.defer,
-                        onEnter: (_) => _setHover(true),
-                        onExit: (_) => _setHover(false),
-                        child: GestureDetector(
-                          key: const Key('fullscreen_seek_bar'),
-                          behavior: HitTestBehavior.opaque,
-                          onTapUp: (details) =>
-                              _handleTapUp(details, width, isRtl, total),
-                          onHorizontalDragStart: (details) =>
-                              _handleDragStart(details, width, isRtl, total),
-                          onHorizontalDragUpdate: (details) =>
-                              _handleDragUpdate(details, width, isRtl, total),
-                          onHorizontalDragEnd: (_) =>
-                              _finishDrag(total, commitSeek: true),
-                          onHorizontalDragCancel: () =>
-                              _finishDrag(total, commitSeek: false),
-                          child: SizedBox(
-                            height: 28.0,
-                            width: double.infinity,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  bottom: active ? 11.0 : 0.0,
-                                  child: Container(
-                                    key: const Key('fullscreen_seek_track'),
-                                    height: active ? 6.0 : 2.0,
-                                    color: AppColors.borderSubtle,
-                                    child: FractionallySizedBox(
-                                      alignment: isRtl
-                                          ? Alignment.centerRight
-                                          : Alignment.centerLeft,
-                                      widthFactor: displayFraction,
-                                      child: Container(
-                                        key: const Key('fullscreen_seek_fill'),
-                                        color: AppColors.accent,
+                  final animDuration = widget.reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 140);
+
+                  return SizedBox(
+                    height: 36.0,
+                    width: double.infinity,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned.fill(
+                          child: MouseRegion(
+                            cursor: total > Duration.zero
+                                ? SystemMouseCursors.click
+                                : MouseCursor.defer,
+                            onEnter: (_) => _setHover(true),
+                            onExit: (_) => _setHover(false),
+                            child: GestureDetector(
+                              key: const Key('fullscreen_seek_bar'),
+                              behavior: HitTestBehavior.opaque,
+                              onTapUp: (details) =>
+                                  _handleTapUp(details, width, isRtl, total),
+                              onHorizontalDragStart: (details) =>
+                                  _handleDragStart(details, width, isRtl, total),
+                              onHorizontalDragUpdate: (details) =>
+                                  _handleDragUpdate(details, width, isRtl, total),
+                              onHorizontalDragEnd: (_) =>
+                                  _finishDrag(total, commitSeek: true),
+                              onHorizontalDragCancel: () =>
+                                  _finishDrag(total, commitSeek: false),
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 16.0,
+                                    child: Container(
+                                      key: const Key('fullscreen_seek_track'),
+                                      height: 4.0,
+                                      color: AppColors.borderSubtle,
+                                      child: FractionallySizedBox(
+                                        alignment: isRtl
+                                            ? Alignment.centerRight
+                                            : Alignment.centerLeft,
+                                        widthFactor: displayFraction,
+                                        child: AnimatedContainer(
+                                          key: const Key('fullscreen_seek_fill'),
+                                          duration: animDuration,
+                                          curve: Curves.easeOutCubic,
+                                          color: active
+                                              ? AppColors.accent
+                                              : AppColors.accent
+                                                  .withValues(alpha: 0.72),
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                if (active)
                                   Positioned(
                                     left: thumbCenterX - 6.0,
-                                    bottom: 8.0,
-                                    child: Container(
-                                      key: const Key('fullscreen_seek_thumb'),
-                                      width: 12.0,
-                                      height: 12.0,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.accent,
-                                        shape: BoxShape.circle,
+                                    bottom: 12.0,
+                                    child: IgnorePointer(
+                                      child: AnimatedScale(
+                                        key: const Key(
+                                          'fullscreen_seek_thumb_scale',
+                                        ),
+                                        scale: active ? 1.0 : 0.0,
+                                        duration: animDuration,
+                                        curve: Curves.easeOutCubic,
+                                        child: Container(
+                                          key: const Key('fullscreen_seek_thumb'),
+                                          width: 12.0,
+                                          height: 12.0,
+                                          decoration: const BoxDecoration(
+                                            color: AppColors.accent,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                        if (active)
+                          Positioned(
+                            left: 16,
+                            right: 16,
+                            bottom: 38.0,
+                            child: IgnorePointer(
+                              child: Row(
+                                key: const Key('fullscreen_seek_times'),
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    context.formatDurationLocalized(displayPos),
+                                    style: AppTypography.micro
+                                        .copyWith(color: AppColors.textMuted),
+                                  ),
+                                  Text(
+                                    context.formatDurationLocalized(total),
+                                    style: AppTypography.micro
+                                        .copyWith(color: AppColors.textMuted),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        if (_isDragging && total > Duration.zero)
+                          Positioned(
+                            left: tooltipLeft,
+                            bottom: 62.0,
+                            child: IgnorePointer(
+                              child: Container(
+                                key: const Key('fullscreen_seek_tooltip'),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Text(
+                                  context.formatDurationLocalized(displayPos),
+                                  style: AppTypography.micro.copyWith(
+                                    color: AppColors.text,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   );
                 },
               ),

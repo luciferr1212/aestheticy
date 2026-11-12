@@ -8,7 +8,9 @@ import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/features/collections/user_collections.dart';
+import 'package:aestheticy/features/integration/app_shutdown.dart';
 import 'package:aestheticy/features/lyrics/lrc_parser.dart';
 import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
 import 'package:aestheticy/features/lyrics/lyrics_models.dart';
@@ -20,6 +22,7 @@ import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/glass/glass_button.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
+import 'package:aestheticy/ui/lyrics/lyrics_view.dart';
 import 'package:aestheticy/ui/mini_player/mini_player_controller.dart';
 import 'package:aestheticy/ui/mini_player/mini_player_view.dart';
 import 'package:aestheticy/ui/now_playing/now_playing_view.dart';
@@ -339,12 +342,17 @@ void main() {
     );
 
     testWidgets(
-      'mini lyrics toggle, wide 1-line & square 2-line layouts, placeholder, reduce motion, and no offset controls',
+      'mini lyrics toggle expands to 480x320 wide and 340x620 square with smooth LyricsView, plain scrolling, placeholder, reduce motion, and no offset controls',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         final fakeRepo = _FakeMiniLyricsRepo()
           ..resultToReturn = LyricsResultFound(
-            parseLrc('[00:01.00]First line\n[00:04.00]Second line\n[00:07.00]Third line'),
+            parseLrc(
+              List.generate(
+                14,
+                (i) => '[00:${(i * 3 + 1).toString().padLeft(2, '0')}.00]Line ${i + 1} verse text',
+              ).join('\n'),
+            ),
           );
         final lyricsCtrl = LyricsController(
           playbackController: playbackController,
@@ -353,18 +361,19 @@ void main() {
         );
         addTearDown(lyricsCtrl.dispose);
 
-        await playbackController.playQueue(const [
-          AudioSource(
-            'file:///t1.mp3',
-            extras: {'title': 'Song One', 'artist': 'Artist', 'path': 'C:/music/t1.mp3'},
-          ),
-        ]);
-        await tester.pump();
-        await lyricsCtrl.retry();
+        await tester.runAsync(() async {
+          await playbackController.playQueue(const [
+            AudioSource(
+              'file:///t1.mp3',
+              extras: {'title': 'Song One', 'artist': 'Artist', 'path': 'C:/music/t1.mp3'},
+            ),
+          ]);
+          await lyricsCtrl.retry();
+        });
         lyricsCtrl.updatePosition(const Duration(milliseconds: 1200));
         await tester.pump();
 
-        await miniController.enter();
+        await tester.runAsync(() => miniController.enter());
         await tester.pumpWidget(
           buildTestHarness(
             windowSize: const Size(480, 170),
@@ -373,45 +382,43 @@ void main() {
         );
         await tester.pump();
 
-        // Off by default
+        // Off by default: compact 480x170 with zero lyrics panel
         expect(settingsStore.settings.miniPlayerShowLyrics, isFalse);
         expect(find.byKey(const Key('mini_lyrics_toggle')), findsOneWidget);
-        expect(find.byKey(const Key('mini_lyrics_strip')), findsNothing);
+        expect(find.byKey(const Key('mini_player_lyrics_view')), findsNothing);
         expect(find.byKey(const Key('lyrics_sync_control')), findsNothing);
 
-        // Toggle ON -> resizes to 480x222 and renders 1 current line without next line
+        // Toggle ON -> resizes to 480x320 wide and mounts shared LyricsView in mini density
         await tester.tap(find.byKey(const Key('mini_lyrics_toggle')));
         await tester.pump();
         expect(settingsStore.settings.miniPlayerShowLyrics, isTrue);
-        expect(fakeWindow.currentGeometry.size, equals(const Size(480, 222)));
+        expect(fakeWindow.currentGeometry.size, equals(const Size(480, 320)));
 
         await tester.pumpWidget(
           buildTestHarness(
-            windowSize: const Size(480, 222),
+            windowSize: const Size(480, 320),
             lyricsController: lyricsCtrl,
           ),
         );
         await tester.pump();
-        expect(find.byKey(const Key('mini_lyrics_strip')), findsOneWidget);
-        expect(find.byKey(const Key('mini_lyrics_current')), findsOneWidget);
-        expect(find.byKey(const Key('mini_lyrics_next')), findsNothing);
-        expect(find.text('First line'), findsOneWidget);
-        expect(find.text('Second line'), findsNothing);
+        final miniLyricsWide = tester.widget<LyricsView>(
+          find.byKey(const Key('mini_player_lyrics_view')),
+        );
+        expect(miniLyricsWide.density, equals(LyricsViewDensity.mini));
+        expect(miniLyricsWide.isWideMini, isTrue);
+        expect(find.text('Line 1 verse text'), findsOneWidget);
+        expect(find.text('Line 2 verse text'), findsOneWidget);
         expect(find.byKey(const Key('lyrics_sync_control')), findsNothing);
 
-        // Crossfade AnimatedSwitcher duration 300ms -> 0ms with reduceMotion
-        AnimatedSwitcher switcher = tester.widget<AnimatedSwitcher>(
-          find.descendant(
-            of: find.byKey(const Key('mini_lyrics_strip')),
-            matching: find.byType(AnimatedSwitcher),
-          ),
-        );
-        expect(switcher.duration, equals(const Duration(milliseconds: 300)));
+        // Tapping a lyrics line seeks playback immediately
+        await tester.tap(find.text('Line 2 verse text'));
+        await tester.pump();
+        expect(playbackController.currentPosition.inMilliseconds, equals(4000));
 
-        // Square layout 340x512 shows current + dimmed next line, zero overflow in RTL & large text
+        // Square layout 340x620 renders multi-line lyrics without overflow in RTL & large text
         await tester.pumpWidget(
           buildTestHarness(
-            windowSize: const Size(340, 512),
+            windowSize: const Size(340, 620),
             textScale: 1.10,
             textDirection: TextDirection.rtl,
             lyricsController: lyricsCtrl,
@@ -419,42 +426,39 @@ void main() {
         );
         await tester.pump();
         expect(tester.takeException(), isNull);
-        expect(find.byKey(const Key('mini_lyrics_current')), findsOneWidget);
-        expect(find.byKey(const Key('mini_lyrics_next')), findsOneWidget);
-        expect(find.text('First line'), findsOneWidget);
-        expect(find.text('Second line'), findsOneWidget);
-
-        // Advance to line 1 and verify reduceMotion sets 0ms duration
-        settingsStore.update((s) => s.copyWith(reduceMotion: true));
-        lyricsCtrl.updatePosition(const Duration(milliseconds: 4200));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 1));
-        expect(find.text('Second line'), findsOneWidget);
-        expect(find.text('Third line'), findsOneWidget);
-        switcher = tester.widget<AnimatedSwitcher>(
-          find.descendant(
-            of: find.byKey(const Key('mini_lyrics_strip')),
-            matching: find.byType(AnimatedSwitcher),
-          ),
+        final miniLyricsSquare = tester.widget<LyricsView>(
+          find.byKey(const Key('mini_player_lyrics_view')),
         );
-        expect(switcher.duration, equals(Duration.zero));
+        expect(miniLyricsSquare.density, equals(LyricsViewDensity.mini));
+        expect(miniLyricsSquare.isWideMini, isFalse);
 
-        // Unavailable (plain lyrics) shows localized muted placeholder
+        // Plain lyrics render calmly and centered in mini density
         fakeRepo.resultToReturn = const LyricsResultFound(
           LyricsDocument(
             kind: LyricsKind.plain,
-            lines: [LyricsLine(startMs: 0, text: 'Plain')],
+            lines: [
+              LyricsLine(startMs: 0, text: 'Plain line one'),
+              LyricsLine(startMs: 0, text: 'Plain line two'),
+            ],
             source: LyricsSourceOrigin.local,
             hasWordTiming: false,
           ),
         );
-        await lyricsCtrl.retry();
-        await tester.pump();
-        expect(find.byKey(const Key('mini_lyrics_empty')), findsOneWidget);
+        await tester.runAsync(() => lyricsCtrl.retry());
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('Plain line one'), findsOneWidget);
+        expect(find.text('Plain line two'), findsOneWidget);
+
+        // Missing / off lyrics show calm centered placeholder
+        fakeRepo.resultToReturn = const LyricsResultNotFound();
+        await tester.runAsync(() => lyricsCtrl.retry());
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const Key('mini_player_no_lyrics')), findsOneWidget);
         expect(find.text('No synced lyrics'), findsOneWidget);
 
-        // Flush settingsStore debounce timer
-        await tester.pump(const Duration(milliseconds: 450));
+        // Flush settingsStore debounce timer and clear widget tree
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 2));
       },
     );
 
@@ -583,6 +587,160 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pump();
         expect(miniController.isMini, isFalse);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 2));
+      },
+    );
+
+    testWidgets(
+      'whole-background drag calls startDragging while seekbar drag and lyrics scroll do not',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final fakeRepo = _FakeMiniLyricsRepo()
+          ..resultToReturn = LyricsResultFound(
+            parseLrc(
+              List.generate(
+                30,
+                (i) => '[00:${(i + 1).toString().padLeft(2, '0')}.00]Draggable lyrics line ${i + 1}',
+              ).join('\n'),
+            ),
+          );
+        final lyricsCtrl = LyricsController(
+          playbackController: playbackController,
+          repository: fakeRepo,
+          settingsStore: settingsStore,
+        );
+        addTearDown(lyricsCtrl.dispose);
+
+        await tester.runAsync(() async {
+          await playbackController.playQueue(const [
+            AudioSource(
+              'file:///t1.mp3',
+              extras: {'title': 'Drag Track', 'artist': 'Artist', 'path': 'C:/music/t1.mp3'},
+            ),
+          ]);
+          await lyricsCtrl.retry();
+        });
+        settingsStore.update((s) => s.copyWith(miniPlayerShowLyrics: true));
+        await tester.pumpWidget(
+          buildTestHarness(
+            windowSize: const Size(340, 620),
+            lyricsController: lyricsCtrl,
+          ),
+        );
+        await tester.pump();
+
+        // Dragging on background cover starts native window dragging
+        await tester.drag(
+          find.byIcon(Icons.music_note).first,
+          const Offset(40, 20),
+        );
+        await tester.pump();
+        expect(fakeWindow.startDraggingCount, greaterThan(0));
+
+        // Dragging the seek bar does NOT trigger window dragging
+        final beforeSeek = fakeWindow.startDraggingCount;
+        await tester.drag(
+          find.byKey(const Key('mini_player_seek_bar')),
+          const Offset(40, 0),
+        );
+        await tester.pump();
+        expect(fakeWindow.startDraggingCount, equals(beforeSeek));
+
+        // Vertical drag on LyricsView scrolls lyrics instead of dragging window
+        await tester.drag(
+          find.byKey(const Key('mini_player_lyrics_view')),
+          const Offset(0, -140),
+        );
+        await tester.pump();
+        expect(fakeWindow.startDraggingCount, equals(beforeSeek));
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 2));
+      },
+    );
+
+    testWidgets(
+      'mini player close button restores window frame and handles tray vs quit closeBehavior',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        // 1. tray mode: exits mini (restoring frame) and hides without destroying
+        settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+        final shutdownTray = AppShutdownCoordinator(
+          settingsStore: settingsStore,
+          windowService: fakeWindow,
+          logger: AppLogger(customSink: StringBuffer()),
+        );
+        await tester.pumpWidget(
+          AestheticyApp(
+            engine: engine,
+            controller: playbackController,
+            settingsStore: settingsStore,
+            windowService: fakeWindow,
+            miniPlayerController: miniController,
+            shutdownCoordinator: shutdownTray,
+          ),
+        );
+        await tester.pump();
+
+        await tester.runAsync(() => miniController.enter());
+        await tester.pump();
+        expect(fakeWindow.isFramelessState, isTrue);
+
+        await tester.tap(find.byKey(const Key('mini_player_close')));
+        await tester.runAsync(() async {
+          for (var i = 0; i < 50 && fakeWindow.isVisible; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+        });
+        await tester.pumpAndSettle();
+
+        expect(miniController.isMini, isFalse);
+        expect(fakeWindow.isFramelessState, isFalse);
+        expect(fakeWindow.isVisible, isFalse);
+        expect(fakeWindow.isDestroyed, isFalse);
+        expect(shutdownTray.hasShutdown, isFalse);
+
+        // 2. quit mode: exits mini (restoring frame), shuts down, and destroys window
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        fakeWindow.isVisible = true;
+        settingsStore.update((s) => s.copyWith(closeBehavior: 'quit'));
+        final shutdownQuit = AppShutdownCoordinator(
+          settingsStore: SettingsStore(),
+          windowService: fakeWindow,
+          logger: AppLogger(customSink: StringBuffer()),
+        );
+        await tester.pumpWidget(
+          AestheticyApp(
+            engine: engine,
+            controller: playbackController,
+            settingsStore: settingsStore,
+            windowService: fakeWindow,
+            miniPlayerController: miniController,
+            shutdownCoordinator: shutdownQuit,
+          ),
+        );
+        await tester.pump();
+
+        await tester.runAsync(() => miniController.enter());
+        await tester.pump();
+        expect(fakeWindow.isFramelessState, isTrue);
+
+        await tester.tap(find.byKey(const Key('mini_player_close')));
+        await tester.runAsync(() async {
+          for (var i = 0; i < 50 && !shutdownQuit.hasShutdown; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+        });
+        await tester.pumpAndSettle();
+
+        expect(miniController.isMini, isFalse);
+        expect(fakeWindow.isFramelessState, isFalse);
+        expect(fakeWindow.calls, contains('destroy'));
+        expect(shutdownQuit.hasShutdown, isTrue);
+        expect(fakeWindow.isDestroyed, isTrue);
 
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(seconds: 2));

@@ -23,6 +23,9 @@ class AppSettings {
   /// Album tab sort key (e.g. 'recentlyAdded', 'title', 'artist').
   final String albumSort;
 
+  /// Whether album list sorting is in reverse direction (e.g. descending).
+  final bool albumsSortReversed;
+
   /// Track tab sort key (e.g. 'title', 'artist', 'recentlyAdded').
   final String trackSort;
 
@@ -110,6 +113,7 @@ class AppSettings {
     this.sidebarCompact = false,
     this.libraryViewMode = 'square',
     this.albumSort = 'recentlyAdded',
+    this.albumsSortReversed = false,
     this.trackSort = 'title',
     this.fullScreenGlassShapes = true,
     this.arabicNumerals = false,
@@ -179,6 +183,7 @@ class AppSettings {
     bool? sidebarCompact,
     String? libraryViewMode,
     String? albumSort,
+    bool? albumsSortReversed,
     String? trackSort,
     bool? fullScreenGlassShapes,
     bool? arabicNumerals,
@@ -214,6 +219,7 @@ class AppSettings {
       sidebarCompact: sidebarCompact ?? this.sidebarCompact,
       libraryViewMode: libraryViewMode ?? this.libraryViewMode,
       albumSort: albumSort ?? this.albumSort,
+      albumsSortReversed: albumsSortReversed ?? this.albumsSortReversed,
       trackSort: trackSort ?? this.trackSort,
       fullScreenGlassShapes:
           fullScreenGlassShapes ?? this.fullScreenGlassShapes,
@@ -259,6 +265,7 @@ class AppSettings {
       'sidebarCompact': sidebarCompact,
       'libraryViewMode': libraryViewMode,
       'albumSort': albumSort,
+      'albumsSortReversed': albumsSortReversed,
       'trackSort': trackSort,
       'fullScreenGlassShapes': fullScreenGlassShapes,
       'arabicNumerals': arabicNumerals,
@@ -329,6 +336,10 @@ class AppSettings {
                 rawAlbumSort == 'year'))
         ? rawAlbumSort
         : 'recentlyAdded';
+
+    final rawAlbumsReversed = json['albumsSortReversed'];
+    final albumsSortReversed =
+        rawAlbumsReversed is bool ? rawAlbumsReversed : false;
 
     final rawTrackSort = json['trackSort'];
     final trackSort = (rawTrackSort is String &&
@@ -467,6 +478,7 @@ class AppSettings {
       sidebarCompact: sidebarCompact,
       libraryViewMode: libraryViewMode,
       albumSort: albumSort,
+      albumsSortReversed: albumsSortReversed,
       trackSort: trackSort,
       fullScreenGlassShapes: fullScreenGlassShapes,
       arabicNumerals: arabicNumerals,
@@ -508,6 +520,7 @@ class AppSettings {
           sidebarCompact == other.sidebarCompact &&
           libraryViewMode == other.libraryViewMode &&
           albumSort == other.albumSort &&
+          albumsSortReversed == other.albumsSortReversed &&
           trackSort == other.trackSort &&
           fullScreenGlassShapes == other.fullScreenGlassShapes &&
           arabicNumerals == other.arabicNumerals &&
@@ -544,6 +557,7 @@ class AppSettings {
         sidebarCompact,
         libraryViewMode,
         albumSort,
+        albumsSortReversed,
         trackSort,
         fullScreenGlassShapes,
         arabicNumerals,

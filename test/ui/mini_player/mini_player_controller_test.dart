@@ -67,6 +67,7 @@ void main() {
         'getGeometry',
         'setResizable(false)',
         'getDisplaySize',
+        'setFrameless(true)',
         'applyGeometry(pos: Offset(1424.0, 846.0), size: Size(480.0, 170.0))',
         'setAlwaysOnTop(true)',
       ]);
@@ -80,6 +81,7 @@ void main() {
         'setAlwaysOnTop(false)',
         'setResizable(true)',
         'applyGeometry(pos: Offset(100.0, 80.0), size: Size(1280.0, 800.0))',
+        'setFrameless(false)',
       ]);
       expect(fakeWindow.currentGeometry.position, equals(const Offset(100, 80)));
       expect(fakeWindow.currentGeometry.size, equals(const Size(1280, 800)));
@@ -217,7 +219,7 @@ void main() {
       );
       expect(
         MiniPlayerController.sizeForShape('wide', showLyrics: true),
-        equals(const Size(480, 222)),
+        equals(const Size(480, 320)),
       );
       expect(
         MiniPlayerController.sizeForShape('square', showLyrics: false),
@@ -225,7 +227,7 @@ void main() {
       );
       expect(
         MiniPlayerController.sizeForShape('square', showLyrics: true),
-        equals(const Size(340, 512)),
+        equals(const Size(340, 620)),
       );
 
       settingsStore.update((s) => s.copyWith(
@@ -236,34 +238,75 @@ void main() {
       await controller.enter();
       fakeWindow.calls.clear();
 
-      // Toggle lyrics ON in wide: preserves (200, 150) top-left -> 480x222
+      // Toggle lyrics ON in wide: preserves (200, 150) top-left -> 480x320
       await controller.toggleShowLyrics();
       expect(settingsStore.settings.miniPlayerShowLyrics, isTrue);
       expect(
         fakeWindow.calls,
-        contains('applyGeometry(pos: Offset(200.0, 150.0), size: Size(480.0, 222.0))'),
+        contains('applyGeometry(pos: Offset(200.0, 150.0), size: Size(480.0, 320.0))'),
       );
 
-      // Toggle shape to square while lyrics ON -> 340x512 preserving top-left
+      // Toggle shape to square while lyrics ON -> 340x620 preserving top-left
       fakeWindow.calls.clear();
       await controller.toggleShape();
       expect(
         fakeWindow.calls,
-        contains('applyGeometry(pos: Offset(200.0, 150.0), size: Size(340.0, 512.0))'),
+        contains('applyGeometry(pos: Offset(200.0, 150.0), size: Size(340.0, 620.0))'),
       );
 
-      // Move near bottom edge (y = 700), toggle lyrics OFF then ON -> clamped to 1080 - 512 = 568
+      // Move near bottom edge (y = 620), toggle lyrics OFF then ON -> clamped to 1080 - 620 = 460
       await controller.toggleShowLyrics(); // OFF -> 340x440
       fakeWindow.currentGeometry = fakeWindow.currentGeometry.copyWith(
         position: const Offset(200, 620),
       );
       fakeWindow.calls.clear();
       settingsStore.update((s) => s.copyWith(miniPlayerShowLyrics: true));
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
       expect(
         fakeWindow.calls,
-        contains('applyGeometry(pos: Offset(200.0, 568.0), size: Size(340.0, 512.0))'),
+        contains('applyGeometry(pos: Offset(200.0, 460.0), size: Size(340.0, 620.0))'),
       );
+    });
+
+    test('frameless enter/exit ordering and serialized rapid transitions', () async {
+      await controller.enter();
+      expect(controller.isMini, isTrue);
+      expect(fakeWindow.isFramelessState, isTrue);
+      final framelessTrueIdx = fakeWindow.calls.indexOf('setFrameless(true)');
+      final applyMiniIdx = fakeWindow.calls.indexWhere(
+        (c) => c.startsWith('applyGeometry('),
+      );
+      expect(framelessTrueIdx, greaterThanOrEqualTo(0));
+      expect(applyMiniIdx, greaterThan(framelessTrueIdx));
+
+      fakeWindow.calls.clear();
+      await controller.exit();
+      expect(controller.isMini, isFalse);
+      expect(fakeWindow.isFramelessState, isFalse);
+      final restoreIdx = fakeWindow.calls.indexWhere(
+        (c) => c.startsWith('applyGeometry('),
+      );
+      final framelessFalseIdx = fakeWindow.calls.indexOf('setFrameless(false)');
+      expect(restoreIdx, greaterThanOrEqualTo(0));
+      expect(framelessFalseIdx, greaterThan(restoreIdx));
+
+      // Rapid enter -> exit -> enter converges cleanly to frameless mini
+      fakeWindow.calls.clear();
+      final f1 = controller.enter();
+      final f2 = controller.exit();
+      final f3 = controller.enter();
+      await Future.wait([f1, f2, f3]);
+      expect(controller.isMini, isTrue);
+      expect(fakeWindow.isFramelessState, isTrue);
+
+      // Rapid exit -> enter -> exit converges cleanly to normal framed
+      final e1 = controller.exit();
+      final e2 = controller.enter();
+      final e3 = controller.exit();
+      await Future.wait([e1, e2, e3]);
+      expect(controller.isMini, isFalse);
+      expect(fakeWindow.isFramelessState, isFalse);
+      expect(fakeWindow.isAlwaysOnTopState, isFalse);
     });
   });
 }

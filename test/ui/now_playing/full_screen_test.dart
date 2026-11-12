@@ -482,7 +482,7 @@ void main() {
     }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets(
-      'Seek bar hover expands to 6dp with thumb and times and pauses top-bar auto-hide',
+      'Seek bar keeps fixed 36dp box and identical track rect across idle, hover, and drag while showing overlay thumb, times, and tooltip',
       (tester) async {
         setupDesktopViewport(tester);
         await controller.playQueue(createSampleTracks(), startIndex: 0);
@@ -491,32 +491,62 @@ void main() {
 
         final barFinder = find.byKey(const Key('fullscreen_seek_bar'));
         final trackFinder = find.byKey(const Key('fullscreen_seek_track'));
+        final thumbScaleFinder =
+            find.byKey(const Key('fullscreen_seek_thumb_scale'));
         expect(barFinder, findsOneWidget);
-        expect(tester.getSize(barFinder).height, equals(28.0));
-        expect(tester.getSize(trackFinder).height, equals(2.0));
-        expect(find.byKey(const Key('fullscreen_seek_thumb')), findsNothing);
+        expect(trackFinder, findsOneWidget);
+
+        final idleBarRect = tester.getRect(barFinder);
+        final idleTrackRect = tester.getRect(trackFinder);
+        expect(idleBarRect.height, equals(36.0));
+        expect(idleTrackRect.height, equals(4.0));
+        expect(tester.widget<AnimatedScale>(thumbScaleFinder).scale, equals(0.0));
         expect(find.byKey(const Key('fullscreen_seek_times')), findsNothing);
+        expect(find.byKey(const Key('fullscreen_seek_tooltip')), findsNothing);
 
         final gesture =
             await tester.createGesture(kind: PointerDeviceKind.mouse);
         await gesture.addPointer(location: Offset.zero);
         addTearDown(() => gesture.removePointer());
         await gesture.moveTo(tester.getCenter(barFinder));
-        await tester.pump(const Duration(milliseconds: 50));
+        await tester.pump(const Duration(milliseconds: 160));
 
-        expect(tester.getSize(trackFinder).height, equals(6.0));
+        final hoverBarRect = tester.getRect(barFinder);
+        final hoverTrackRect = tester.getRect(trackFinder);
+        expect(hoverBarRect, equals(idleBarRect));
+        expect(hoverTrackRect, equals(idleTrackRect));
         expect(find.byKey(const Key('fullscreen_seek_thumb')), findsOneWidget);
+        expect(tester.widget<AnimatedScale>(thumbScaleFinder).scale, equals(1.0));
         expect(find.byKey(const Key('fullscreen_seek_times')), findsOneWidget);
+        expect(
+          tester.getRect(find.byKey(const Key('fullscreen_seek_times'))).bottom,
+          lessThanOrEqualTo(idleBarRect.top),
+        );
 
         // Top-bar controls stay visible while hovering the scrubber beyond 3s.
         await tester.pump(const Duration(milliseconds: 3500));
         var topOpacity = tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity));
         expect(topOpacity.opacity, equals(1.0));
 
-        // Moving away collapses the track and resumes the 3s auto-hide timer.
+        // Dragging shows tooltip overlay without moving bar or track.
+        final dragGesture = await tester.startGesture(
+          Offset(idleBarRect.width * 0.25, idleBarRect.center.dy),
+        );
+        await dragGesture
+            .moveTo(Offset(idleBarRect.width * 0.45, idleBarRect.center.dy));
+        await tester.pump(const Duration(milliseconds: 30));
+        expect(find.byKey(const Key('fullscreen_seek_tooltip')), findsOneWidget);
+        expect(tester.getRect(barFinder), equals(idleBarRect));
+        expect(tester.getRect(trackFinder), equals(idleTrackRect));
+        await dragGesture.up();
+        await tester.pump(const Duration(milliseconds: 20));
+
+        // Moving away hides overlay times and resumes the 3s auto-hide timer.
         await gesture.moveTo(const Offset(100, 100));
-        await tester.pump(const Duration(milliseconds: 50));
-        expect(tester.getSize(trackFinder).height, equals(2.0));
+        await tester.pump(const Duration(milliseconds: 160));
+        expect(tester.widget<AnimatedScale>(thumbScaleFinder).scale, equals(0.0));
+        expect(find.byKey(const Key('fullscreen_seek_times')), findsNothing);
+        expect(tester.getRect(trackFinder), equals(idleTrackRect));
 
         await tester.pump(const Duration(milliseconds: 3500));
         topOpacity = tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity));

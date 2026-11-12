@@ -635,6 +635,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   MediaSessionController? _mediaSessionController;
   SleepController? _sleepController;
   TrayWindowController? _trayWindowController;
+  StreamSubscription<void>? _windowCloseSub;
   PlayRecorder? _playRecorder;
   SessionSaver? _sessionSaver;
   AppLifecycleListener? _lifecycleListener;
@@ -722,17 +723,27 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _mediaSessionController = widget.mediaSessionController;
     _sleepController = widget.sleepController;
     _trayWindowController = widget.trayWindowController;
+    _windowCloseSub = _miniPlayerController.windowService.closeRequested.listen(
+      (_) {
+        if (_miniPlayerController.isMini) {
+          unawaited(_miniPlayerController.restoreFrameForClose());
+        }
+      },
+    );
 
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
         try {
+          await _miniPlayerController.restoreFrameForClose();
+        } catch (_) {}
+        try {
           await _playbackController.pause();
         } catch (_) {}
         try {
-          await widget.windowService?.hide();
+          await _miniPlayerController.windowService.hide();
         } catch (_) {}
-        await _shutdownCoordinator.shutdown();
-        await widget.windowService?.destroy();
+        await _effectiveShutdownCoordinator.shutdown();
+        await _miniPlayerController.windowService.destroy();
         return AppExitResponse.exit;
       },
       onDetach: () {
@@ -769,6 +780,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
       _miniPlayerController.dispose();
     }
     _trayWindowController?.dispose();
+    unawaited(_windowCloseSub?.cancel());
     _sleepController?.dispose();
     _mediaSessionController?.dispose();
     _lifecycleListener?.dispose();
@@ -777,6 +789,28 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _sessionStore.dispose();
     _volumeHudController.dispose();
     super.dispose();
+  }
+
+  AppShutdownCoordinator get _effectiveShutdownCoordinator =>
+      widget.shutdownCoordinator ?? _shutdownCoordinator;
+
+  Future<void> _handleMiniCloseRequested() async {
+    final win = _miniPlayerController.windowService;
+    await _miniPlayerController.restoreFrameForClose();
+    if (!mounted) return;
+    if (_settingsStore.settings.closeBehavior == 'tray') {
+      _sessionSaver?.saveSnapshotSync();
+      await win.hide();
+      return;
+    }
+    try {
+      await _playbackController.pause();
+    } catch (_) {}
+    try {
+      await win.hide();
+    } catch (_) {}
+    await _effectiveShutdownCoordinator.shutdown();
+    await win.destroy();
   }
 
   void _openDesignGallery() {
@@ -872,6 +906,8 @@ class _AestheticyAppState extends State<AestheticyApp> {
                               collections: _userCollections,
                               child: VolumeHudOverlay(
                                 controller: _volumeHudController,
+                                engine: effectiveEngine,
+                                settingsStore: _settingsStore,
                                 child: child!,
                               ),
                             ),
@@ -886,6 +922,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         controller: _miniPlayerController,
                         playbackController: effectiveController,
                         lyricsController: _lyricsController,
+                        onCloseRequested: _handleMiniCloseRequested,
                       )
                     : AppShell(
                         engine: effectiveEngine,

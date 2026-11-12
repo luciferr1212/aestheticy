@@ -68,6 +68,37 @@ void main() {
       );
     });
 
+    test('reversed: true orders known years oldest first, keeps null/<=0 last, ties artist -> title', () {
+      const albums = [
+        AlbumSummary(album: 'No Year A', albumArtist: 'Beta', year: null, trackCount: 4),
+        AlbumSummary(album: 'Zero Year', albumArtist: 'Alpha', year: 0, trackCount: 2),
+        AlbumSummary(album: 'Negative Year', albumArtist: 'Alpha', year: -5, trackCount: 1),
+        AlbumSummary(album: 'Zebra', albumArtist: 'Artist B', year: 2022, trackCount: 8),
+        AlbumSummary(album: 'Beta Title', albumArtist: 'Artist A', year: 2022, trackCount: 5),
+        AlbumSummary(album: 'Alpha Title', albumArtist: 'Artist A', year: 2022, trackCount: 6),
+        AlbumSummary(album: 'Newest', albumArtist: 'Artist C', year: 2024, trackCount: 10),
+        AlbumSummary(album: 'Oldest', albumArtist: 'Artist D', year: 1999, trackCount: 7),
+      ];
+
+      final groups = groupAlbumsByYear(albums, reversed: true);
+      expect(groups.map((g) => g.year).toList(), equals([1999, 2022, 2024, null]));
+
+      expect(groups[0].albums.map((a) => a.album).toList(), equals(['Oldest']));
+      expect(
+        groups[1].albums.map((a) => '${a.albumArtist}:${a.album}').toList(),
+        equals([
+          'Artist A:Alpha Title',
+          'Artist A:Beta Title',
+          'Artist B:Zebra',
+        ]),
+      );
+      expect(groups[2].albums.map((a) => a.album).toList(), equals(['Newest']));
+      expect(
+        groups[3].albums.map((a) => a.album).toList(),
+        equals(['Negative Year', 'Zero Year', 'No Year A']),
+      );
+    });
+
     test('returns empty list for empty input', () {
       expect(groupAlbumsByYear(const []), isEmpty);
     });
@@ -324,6 +355,145 @@ void main() {
         );
         await tester.pump();
         expect(tester.takeException(), isNull);
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'albums_sort_direction toggles albumsSortReversed, rotates arrow 140ms, and respects reduceMotion',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        final sortDirectionBtn = find.byKey(const Key('albums_sort_direction'));
+        expect(sortDirectionBtn, findsOneWidget);
+
+        // Initial state: ascending (turns: 0.0, tooltip: Ascending)
+        expect(settingsStore.settings.albumsSortReversed, isFalse);
+        var rot = tester.widget<AnimatedRotation>(
+          find.descendant(of: sortDirectionBtn, matching: find.byType(AnimatedRotation)),
+        );
+        expect(rot.turns, equals(0.0));
+        expect(rot.duration, equals(const Duration(milliseconds: 140)));
+        var iconBtn = tester.widget<IconButton>(sortDirectionBtn);
+        expect(iconBtn.tooltip, equals('Ascending'));
+
+        // Tap toggle -> descending (turns: 0.5, tooltip: Descending)
+        await tester.tap(sortDirectionBtn);
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumsSortReversed, isTrue);
+        rot = tester.widget<AnimatedRotation>(
+          find.descendant(of: sortDirectionBtn, matching: find.byType(AnimatedRotation)),
+        );
+        expect(rot.turns, equals(0.5));
+        iconBtn = tester.widget<IconButton>(sortDirectionBtn);
+        expect(iconBtn.tooltip, equals('Descending'));
+
+        // Reduce motion sets duration to Duration.zero
+        settingsStore.update((s) => s.copyWith(reduceMotion: true));
+        await tester.pumpAndSettle();
+        rot = tester.widget<AnimatedRotation>(
+          find.descendant(of: sortDirectionBtn, matching: find.byType(AnimatedRotation)),
+        );
+        expect(rot.duration, equals(Duration.zero));
+
+        // Tap toggle again -> back to ascending
+        await tester.tap(sortDirectionBtn);
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumsSortReversed, isFalse);
+        rot = tester.widget<AnimatedRotation>(
+          find.descendant(of: sortDirectionBtn, matching: find.byType(AnimatedRotation)),
+        );
+        expect(rot.turns, equals(0.0));
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'year sort reversal orders year headers oldest first while keeping Unknown year last',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        settingsStore.update((s) => s.copyWith(albumSort: 'year', albumsSortReversed: false));
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        final h2024 = find.byKey(const ValueKey<String>('album_year_header_2024'));
+        final h2020 = find.byKey(const ValueKey<String>('album_year_header_2020'));
+        final hUnknown = find.byKey(const ValueKey<String>('album_year_header_unknown'));
+
+        // Normal year sort: 2024 -> 2020 -> unknown
+        expect(tester.getTopLeft(h2024).dy, lessThan(tester.getTopLeft(h2020).dy));
+        expect(tester.getTopLeft(h2020).dy, lessThan(tester.getTopLeft(hUnknown).dy));
+
+        // Toggle reversed sort
+        await tester.tap(find.byKey(const Key('albums_sort_direction')));
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumsSortReversed, isTrue);
+
+        // Reversed year sort: 2020 -> 2024 -> unknown (unknown stays trailing!)
+        expect(tester.getTopLeft(h2020).dy, lessThan(tester.getTopLeft(h2024).dy));
+        expect(tester.getTopLeft(h2024).dy, lessThan(tester.getTopLeft(hUnknown).dy));
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'flat title sort reversal reverses items and changing sort key resets albumsSortReversed to false',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        settingsStore.update((s) => s.copyWith(
+          albumSort: 'title',
+          albumsSortReversed: false,
+          libraryViewMode: 'list',
+        ));
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        // In title ascending order: Aurora (1st) and Zero Vault (5th)
+        final auroraFinder = find.text('Aurora');
+        final zeroVaultFinder = find.text('Zero Vault');
+        expect(tester.getTopLeft(auroraFinder).dy, lessThan(tester.getTopLeft(zeroVaultFinder).dy));
+
+        // Toggle sort direction: title descending
+        await tester.tap(find.byKey(const Key('albums_sort_direction')));
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumsSortReversed, isTrue);
+
+        // In title descending order: Zero Vault is above Aurora
+        expect(tester.getTopLeft(zeroVaultFinder).dy, lessThan(tester.getTopLeft(auroraFinder).dy));
+
+        // Changing sort key via sort menu resets albumsSortReversed to false
+        await tester.tap(find.byKey(const Key('sort_button')));
+        await tester.pumpAndSettle();
+
+        // Select 'Artist' from popup menu
+        await tester.tap(find.text('Artist').last);
+        await tester.pumpAndSettle();
+
+        expect(settingsStore.settings.albumSort, equals('artist'));
+        expect(settingsStore.settings.albumsSortReversed, isFalse);
         await tester.pump(const Duration(milliseconds: 500));
       },
     );

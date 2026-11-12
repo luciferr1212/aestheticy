@@ -103,6 +103,12 @@ abstract interface class WindowService {
   /// Reads the primary display size in logical pixels for window placement.
   Future<Size> getDisplaySize();
 
+  /// Toggles frameless window mode (hiding the native title bar and caption buttons).
+  Future<void> setFrameless(bool frameless);
+
+  /// Initiates an interactive OS window drag (for frameless window areas).
+  Future<void> startDragging();
+
   /// Disposes of window service listeners and controllers.
   Future<void> dispose();
 }

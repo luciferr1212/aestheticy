@@ -30,12 +30,15 @@ class AlbumYearGroup {
   });
 }
 
-/// Groups [albums] by release year (newest first, unknown years last).
+/// Groups [albums] by release year (newest first by default, oldest first when [reversed] is true, unknown years last).
 ///
 /// Within each year group, albums are sorted alphabetically by artist then
 /// title. Null or non-positive (`<= 0`) years are placed together in a single
 /// trailing group with `year == null`.
-List<AlbumYearGroup> groupAlbumsByYear(List<AlbumSummary> albums) {
+List<AlbumYearGroup> groupAlbumsByYear(
+  List<AlbumSummary> albums, {
+  bool reversed = false,
+}) {
   final byYear = <int, List<AlbumSummary>>{};
   final unknown = <AlbumSummary>[];
 
@@ -56,9 +59,10 @@ List<AlbumYearGroup> groupAlbumsByYear(List<AlbumSummary> albums) {
     return a.album.toLowerCase().compareTo(b.album.toLowerCase());
   }
 
-  final yearsDesc = byYear.keys.toList()..sort((a, b) => b.compareTo(a));
+  final years = byYear.keys.toList()
+    ..sort((a, b) => reversed ? a.compareTo(b) : b.compareTo(a));
   final groups = <AlbumYearGroup>[];
-  for (final year in yearsDesc) {
+  for (final year in years) {
     final items = byYear[year]!..sort(compareWithinGroup);
     groups.add(AlbumYearGroup(year: year, albums: items));
   }
@@ -141,6 +145,7 @@ class _AlbumsViewState extends State<AlbumsView> {
       _searchQuery.isNotEmpty ? _searchResults : _albums,
     );
     final sortKey = widget.settingsStore.settings.albumSort;
+    final isReversed = widget.settingsStore.settings.albumsSortReversed;
 
     switch (sortKey) {
       case 'title':
@@ -156,11 +161,24 @@ class _AlbumsViewState extends State<AlbumsView> {
         break;
     }
 
+    if (isReversed && sortKey != 'year') {
+      return list.reversed.toList();
+    }
+
     return list;
   }
 
   void _onSortChanged(String newSort) {
-    widget.settingsStore.update((s) => s.copyWith(albumSort: newSort));
+    widget.settingsStore.update((s) => s.copyWith(
+      albumSort: newSort,
+      albumsSortReversed: false,
+    ));
+    setState(() {});
+  }
+
+  void _onSortDirectionToggle() {
+    final current = widget.settingsStore.settings.albumsSortReversed;
+    widget.settingsStore.update((s) => s.copyWith(albumsSortReversed: !current));
     setState(() {});
   }
 
@@ -196,6 +214,8 @@ class _AlbumsViewState extends State<AlbumsView> {
             onSortChanged: _onSortChanged,
             viewMode: viewMode,
             onViewModeChanged: _onViewModeChanged,
+            isSortReversed: widget.settingsStore.settings.albumsSortReversed,
+            onSortDirectionToggle: _onSortDirectionToggle,
           ),
           const SizedBox(height: 20),
           Expanded(
@@ -284,7 +304,10 @@ class _AlbumsViewState extends State<AlbumsView> {
     }
 
     if (currentSort == 'year') {
-      final groups = groupAlbumsByYear(albums);
+      final groups = groupAlbumsByYear(
+        albums,
+        reversed: widget.settingsStore.settings.albumsSortReversed,
+      );
       return CustomScrollView(
         key: const Key('albums_year_grouped_scroll'),
         slivers: [

@@ -269,6 +269,39 @@ class WindowsWindowService with wm.WindowListener implements WindowService {
   }
 
   @override
+  Future<void> setFrameless(bool frameless) async {
+    if (!Platform.isWindows) return;
+    try {
+      await wm.windowManager.setTitleBarStyle(
+        frameless ? wm.TitleBarStyle.hidden : wm.TitleBarStyle.normal,
+        windowButtonVisibility: !frameless,
+      );
+    } catch (e, st) {
+      AppLogger.instance.warning(
+        'Window',
+        'Failed to setFrameless($frameless): ${e.runtimeType}',
+        e,
+        st,
+      );
+    }
+  }
+
+  @override
+  Future<void> startDragging() async {
+    if (!Platform.isWindows) return;
+    try {
+      await wm.windowManager.startDragging();
+    } catch (e, st) {
+      AppLogger.instance.warning(
+        'Window',
+        'Failed to startDragging: ${e.runtimeType}',
+        e,
+        st,
+      );
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     if (_initialized) {
       try {
