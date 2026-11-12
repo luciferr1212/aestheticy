@@ -11,6 +11,7 @@ import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/features/lyrics/lrc_parser.dart';
 import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
 import 'package:aestheticy/features/lyrics/lyrics_models.dart';
+import 'package:aestheticy/features/lyrics/lyrics_offset_store.dart';
 import 'package:aestheticy/features/lyrics/lyrics_repository.dart';
 import 'package:aestheticy/ui/l10n/app_strings.dart';
 import 'package:aestheticy/ui/lyrics/lyrics_view.dart';
@@ -19,6 +20,7 @@ import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/bottom_now_playing_bar.dart';
+import 'package:aestheticy/ui/theme/app_colors.dart';
 import 'package:aestheticy/ui/theme/app_theme.dart';
 
 class _FakeLyricsRepo extends LyricsRepository {
@@ -346,13 +348,13 @@ void main() {
     });
 
     testWidgets(
-      'current line receives larger typography and scale 1.0 in normal and full screen modes',
+      'constant layout 32/42 w700 height 1.3 and identical measured size across current, non-current, and word highlight',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         const synced = '''
 [00:01.00]Line 0
-[00:03.00]Line 1
-[00:05.00]Line 2
+[00:03.00]<00:03.00>Alpha <00:03.50>Beta
+[00:06.00]Line 2
 ''';
         fakeRepo.resultToReturn = LyricsResultFound(parseLrc(synced));
         queue.replaceAll([
@@ -360,33 +362,52 @@ void main() {
         ]);
         await lyricsController.retry();
 
-        // 1. Normal mode (fontSize 32 / 24, scale 1.0 / 0.92)
+        // 1. Normal mode: Alpha Beta initially non-current
+        settingsStore.update((s) => s.copyWith(lyricsHighlight: 'line'));
         await tester.pumpWidget(buildTestApp());
-        lyricsController.updatePosition(const Duration(milliseconds: 3500));
+        lyricsController.updatePosition(const Duration(milliseconds: 1200));
         await tester.pump();
 
-        final scaleCurrent = tester.widget<AnimatedScale>(
-          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedScale)).first,
+        expect(
+          find.descendant(
+            of: find.byType(ListView),
+            matching: find.byType(AnimatedDefaultTextStyle),
+          ),
+          findsNothing,
         );
-        expect(scaleCurrent.scale, equals(1.0));
 
-        final scaleOther = tester.widget<AnimatedScale>(
+        final nonCurrentSize = tester.getSize(find.text('Alpha Beta'));
+        final nonCurrentText = tester.widget<Text>(find.text('Alpha Beta'));
+        expect(nonCurrentText.style?.fontSize, equals(32.0));
+        expect(nonCurrentText.style?.fontWeight, equals(FontWeight.w700));
+        expect(nonCurrentText.style?.height, equals(1.3));
+
+        final scaleCurrentNormal = tester.widget<AnimatedScale>(
           find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedScale)).first,
         );
-        expect(scaleOther.scale, equals(0.92));
+        expect(scaleCurrentNormal.scale, equals(1.0));
+        expect(scaleCurrentNormal.duration, equals(const Duration(milliseconds: 400)));
 
-        final styleCurrent = tester.widget<AnimatedDefaultTextStyle>(
-          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedDefaultTextStyle)).first,
+        final scaleOtherNormal = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('Alpha Beta'), matching: find.byType(AnimatedScale)).first,
         );
-        expect(styleCurrent.style.fontSize, equals(32.0));
+        expect(scaleOtherNormal.scale, equals(0.92));
 
-        final styleOther = tester.widget<AnimatedDefaultTextStyle>(
-          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedDefaultTextStyle)).first,
-        );
-        expect(styleOther.style.fontSize, equals(24.0));
+        // Activate Alpha Beta as current line (line highlight)
+        lyricsController.updatePosition(const Duration(milliseconds: 3250));
+        await tester.pump();
+        final currentLineSize = tester.getSize(find.text('Alpha Beta'));
+        expect(currentLineSize, equals(nonCurrentSize));
 
-        // 2. Full screen mode (fontSize 40 / 28)
+        // Switch to word highlight while Alpha Beta is current
+        settingsStore.update((s) => s.copyWith(lyricsHighlight: 'word'));
+        await tester.pump();
+        final wordHighlightSize = tester.getSize(find.text('Alpha Beta'));
+        expect(wordHighlightSize, equals(nonCurrentSize));
+
+        // 2. Full screen mode: constant 42.0 fontSize, max width 760, and identical sizes
         await tester.pumpWidget(buildTestApp(
+          size: const Size(1400, 900),
           child: LyricsView(
             controller: lyricsController,
             playbackController: playbackController,
@@ -396,17 +417,21 @@ void main() {
             showHeader: false,
           ),
         ));
+        lyricsController.updatePosition(const Duration(milliseconds: 1200));
         await tester.pump();
 
-        final fsStyleCurrent = tester.widget<AnimatedDefaultTextStyle>(
-          find.ancestor(of: find.text('Line 1'), matching: find.byType(AnimatedDefaultTextStyle)).first,
-        );
-        expect(fsStyleCurrent.style.fontSize, equals(40.0));
+        final fsNonCurrentSize = tester.getSize(find.text('Alpha Beta'));
+        expect(fsNonCurrentSize.width, lessThanOrEqualTo(760.0));
+        final fsOtherText = tester.widget<Text>(find.text('Alpha Beta'));
+        expect(fsOtherText.style?.fontSize, equals(42.0));
+        expect(fsOtherText.style?.fontWeight, equals(FontWeight.w700));
 
-        final fsStyleOther = tester.widget<AnimatedDefaultTextStyle>(
-          find.ancestor(of: find.text('Line 0'), matching: find.byType(AnimatedDefaultTextStyle)).first,
-        );
-        expect(fsStyleOther.style.fontSize, equals(28.0));
+        lyricsController.updatePosition(const Duration(milliseconds: 3250));
+        await tester.pump();
+        final fsWordSize = tester.getSize(find.text('Alpha Beta'));
+        expect(fsWordSize, equals(fsNonCurrentSize));
+
+        await tester.pump(const Duration(milliseconds: 500));
       },
     );
 
@@ -451,7 +476,7 @@ void main() {
     );
 
     testWidgets(
-      'word sweep progress follows real word timing and settles previous word over 120ms',
+      'word sweep uses single Text.rich following real timing and falls back when unmappable',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         const enhanced = '''
@@ -468,30 +493,173 @@ void main() {
         lyricsController.updatePosition(const Duration(milliseconds: 2250));
         await tester.pump();
 
-        // Alpha is current word (at 50% progress in 2000..2500ms)
-        expect(find.text('Alpha'), findsOneWidget);
-        expect(find.text('Beta'), findsOneWidget);
-        expect(find.text('Gamma'), findsOneWidget);
-
-        // Alpha should have a ShaderMask sweep widget
-        final alphaMask = find.ancestor(
-          of: find.text('Alpha'),
-          matching: find.byType(ShaderMask),
+        // Rendered as one Text.rich / RichText with no Wrap inside the lyrics list
+        expect(
+          find.descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Wrap),
+          ),
+          findsNothing,
         );
-        expect(alphaMask, findsWidgets);
+        final richFinder = find.text('Alpha Beta Gamma');
+        expect(richFinder, findsOneWidget);
 
-        // Advance to 2600ms (Beta is now active, Alpha is previous word)
+        // Alpha is at 50% progress -> gradient foreground paint, Gamma is dimmed
+        final rich1 = tester.widget<Text>(richFinder);
+        final children1 = (rich1.textSpan! as TextSpan).children!.cast<TextSpan>();
+        final alphaSpan1 = children1.firstWhere((s) => s.text == 'Alpha');
+        final gammaSpan1 = children1.firstWhere((s) => s.text == 'Gamma');
+        expect(alphaSpan1.style?.foreground?.shader, isNotNull);
+        expect(gammaSpan1.style?.color, isNot(equals(AppColors.text)));
+
+        // Advance to 2600ms: Alpha solid AppColors.text, Beta has sweep shader
         lyricsController.updatePosition(const Duration(milliseconds: 2600));
         await tester.pump();
+        final rich2 = tester.widget<Text>(richFinder);
+        final children2 = (rich2.textSpan! as TextSpan).children!.cast<TextSpan>();
+        final alphaSpan2 = children2.firstWhere((s) => s.text == 'Alpha');
+        final betaSpan2 = children2.firstWhere((s) => s.text == 'Beta');
+        expect(alphaSpan2.style?.color, equals(AppColors.text));
+        expect(betaSpan2.style?.foreground?.shader, isNotNull);
 
-        // Previous word Alpha settles with AnimatedDefaultTextStyle over 120ms
-        final alphaSettle = find.ancestor(
-          of: find.text('Alpha'),
-          matching: find.byType(AnimatedDefaultTextStyle),
+        // Fallback test: unmappable word falls back cleanly to plain line Text
+        expect(
+          mapWordsToLineRanges(
+            'Mismatched line',
+            const [LyricsWord(startMs: 2000, endMs: 2500, text: 'MissingWord')],
+          ),
+          isNull,
         );
-        expect(alphaSettle, findsWidgets);
-        final settleWidget = tester.widget<AnimatedDefaultTextStyle>(alphaSettle.first);
-        expect(settleWidget.duration, equals(const Duration(milliseconds: 120)));
+        fakeRepo.resultToReturn = const LyricsResultFound(
+          LyricsDocument(
+            kind: LyricsKind.synced,
+            source: LyricsSourceOrigin.local,
+            hasWordTiming: true,
+            lines: [
+              LyricsLine(
+                startMs: 2000,
+                text: 'Fallback display text',
+                words: [LyricsWord(startMs: 2000, endMs: 2500, text: 'NotInLine')],
+              ),
+            ],
+          ),
+        );
+        await lyricsController.retry();
+        lyricsController.updatePosition(const Duration(milliseconds: 2100));
+        await tester.pump();
+        final fallbackFinder = find.text('Fallback display text');
+        expect(fallbackFinder, findsOneWidget);
+        expect(tester.widget<Text>(fallbackFinder).textSpan, isNull);
+      },
+    );
+
+    testWidgets(
+      'only affected lines rebuild on a line change and lines farther than 4 never rebuild',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final lrcLines = [
+          for (var i = 0; i < 12; i++) '[00:${(i * 2 + 1).toString().padLeft(2, '0')}.00]Track line $i',
+        ].join('\n');
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(lrcLines));
+        queue.replaceAll([
+          const AudioSource('file:///music/song.mp3', extras: {'title': 'Song'}),
+        ]);
+        await lyricsController.retry();
+
+        final builds = <int, int>{};
+        await tester.pumpWidget(
+          buildTestApp(
+            size: const Size(1280, 1400),
+            child: LyricsView(
+              controller: lyricsController,
+              playbackController: playbackController,
+              settingsStore: settingsStore,
+              navigator: navigator,
+              onLineBuild: (idx) => builds[idx] = (builds[idx] ?? 0) + 1,
+            ),
+          ),
+        );
+        lyricsController.updatePosition(const Duration(milliseconds: 1500));
+        await tester.pump();
+
+        builds.clear();
+
+        // Advance active line from 0 -> 1 (around 3000ms)
+        lyricsController.updatePosition(const Duration(milliseconds: 3500));
+        await tester.pump();
+
+        // Lines within <=4 distance updated; lines farther than 4 (e.g. 6..11) had zero rebuilds
+        expect(builds[0], greaterThanOrEqualTo(1));
+        expect(builds[1], greaterThanOrEqualTo(1));
+        for (var i = 6; i < 12; i++) {
+          expect(builds[i] ?? 0, equals(0), reason: 'Line $i is >4 away and must not rebuild');
+        }
+      },
+    );
+
+    testWidgets(
+      'synced lines are start-aligned in LTR and RTL while plain lyrics stay centered',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        const synced = '''
+[00:01.00]Hello world LTR
+[00:03.00]أهلا بكم بالعربية
+''';
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(synced));
+        queue.replaceAll([
+          const AudioSource('file:///music/mixed.mp3', extras: {'title': 'Mixed'}),
+        ]);
+        await lyricsController.retry();
+
+        await tester.pumpWidget(buildTestApp());
+        await tester.pump();
+
+        final ltrText = tester.widget<Text>(find.text('Hello world LTR'));
+        expect(ltrText.textAlign, equals(TextAlign.start));
+        expect(ltrText.textDirection, equals(TextDirection.ltr));
+        final ltrScale = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('Hello world LTR'), matching: find.byType(AnimatedScale)).first,
+        );
+        expect(ltrScale.alignment, equals(Alignment.centerLeft));
+
+        final rtlText = tester.widget<Text>(find.text('أهلا بكم بالعربية'));
+        expect(rtlText.textAlign, equals(TextAlign.start));
+        expect(rtlText.textDirection, equals(TextDirection.rtl));
+        final rtlScale = tester.widget<AnimatedScale>(
+          find.ancestor(of: find.text('أهلا بكم بالعربية'), matching: find.byType(AnimatedScale)).first,
+        );
+        expect(rtlScale.alignment, equals(Alignment.centerRight));
+
+        // Plain lyrics stay centered
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc('Plain verse one\nPlain verse two'));
+        await lyricsController.retry();
+        await tester.pump();
+        final plainText = tester.widget<Text>(find.text('Plain verse one'));
+        expect(plainText.textAlign, equals(TextAlign.center));
+      },
+    );
+
+    testWidgets(
+      'first paint starts at active line without animating from the top',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final lrcLines = [
+          for (var i = 0; i < 30; i++)
+            '[${(i ~/ 30).toString().padLeft(2, '0')}:${((i * 2) % 60).toString().padLeft(2, '0')}.00]Line $i',
+        ].join('\n');
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(lrcLines));
+        queue.replaceAll([
+          const AudioSource('file:///music/long.mp3', extras: {'title': 'Long'}),
+        ]);
+        await engine.seek(const Duration(seconds: 40));
+        await lyricsController.retry();
+
+        await tester.pumpWidget(buildTestApp(size: const Size(1280, 600)));
+        await tester.pump();
+        await tester.pump();
+
+        expect(lyricsController.currentLineIndex, equals(20));
+        expect(find.text('Line 20'), findsOneWidget);
       },
     );
 
@@ -529,6 +697,165 @@ void main() {
 
         // Verify clean dispose without pending timers or exceptions
         expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'sync offset control taps, hold repeat, reset state, tooltips, and RTL large text',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final offsetStore = LyricsOffsetStore(directory: tempDir);
+        await offsetStore.init();
+        final offsetController = LyricsController(
+          playbackController: playbackController,
+          repository: fakeRepo,
+          settingsStore: settingsStore,
+          offsetStore: offsetStore,
+        );
+        addTearDown(() {
+          offsetStore.dispose();
+          offsetController.dispose();
+        });
+
+        const synced = '[00:01.00]Line 0\n[00:03.00]Line 1\n[00:05.00]Line 2';
+        fakeRepo.resultToReturn = LyricsResultFound(parseLrc(synced));
+        queue.replaceAll([
+          const AudioSource('file:///music/sync.mp3', extras: {'title': 'Sync Track'}),
+        ]);
+        await playbackController.play();
+        await offsetController.retry();
+
+        Widget buildWithOffsetCtrl({
+          bool showHeader = true,
+          TextDirection textDirection = TextDirection.ltr,
+          double textScale = 1.0,
+        }) {
+          return buildTestApp(
+            textDirection: textDirection,
+            textScale: textScale,
+            child: LyricsView(
+              controller: offsetController,
+              playbackController: playbackController,
+              settingsStore: settingsStore,
+              navigator: navigator,
+              showHeader: showHeader,
+            ),
+          );
+        }
+
+        await tester.pumpWidget(buildWithOffsetCtrl());
+        await tester.pump();
+
+        expect(find.byKey(const Key('lyrics_sync_control')), findsOneWidget);
+        expect(find.text('Sync'), findsOneWidget);
+        expect(find.text('0 s'), findsOneWidget);
+
+        // Tooltips on minus and plus
+        final minusTooltip = tester.widget<Tooltip>(
+          find.descendant(
+            of: find.byKey(const Key('lyrics_sync_minus')),
+            matching: find.byType(Tooltip),
+          ),
+        );
+        final plusTooltip = tester.widget<Tooltip>(
+          find.descendant(
+            of: find.byKey(const Key('lyrics_sync_plus')),
+            matching: find.byType(Tooltip),
+          ),
+        );
+        expect(minusTooltip.message, equals('Show lyrics earlier'));
+        expect(plusTooltip.message, equals('Show lyrics later'));
+
+        // Reset button disabled at 0 s
+        TextButton resetButton() => tester.widget<TextButton>(
+              find.byKey(const Key('lyrics_sync_reset')),
+            );
+        expect(resetButton().onPressed, isNull);
+
+        // Tap + advances by 100ms (+0.1 s) and enables Reset
+        await tester.tap(find.byKey(const Key('lyrics_sync_plus')));
+        await tester.pump();
+        expect(offsetController.offsetMs, equals(100));
+        expect(find.text('+0.1 s'), findsOneWidget);
+        expect(resetButton().onPressed, isNotNull);
+
+        // Hold + repeats after kPressTimeout (100ms) + initial delay (350ms) + ticks (80ms)
+        final plusGesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const Key('lyrics_sync_plus'))),
+        );
+        await tester.pump(const Duration(milliseconds: 650));
+        await plusGesture.up();
+        await tester.pump();
+        expect(offsetController.offsetMs, greaterThanOrEqualTo(300));
+
+        // Reset returns to 0 s and disables button
+        await tester.tap(find.byKey(const Key('lyrics_sync_reset')));
+        await tester.pump();
+        expect(offsetController.offsetMs, equals(0));
+        expect(find.text('0 s'), findsOneWidget);
+        expect(resetButton().onPressed, isNull);
+
+        // Tap - steps negative (-0.1 s) and hold - repeats further negative
+        await tester.tap(find.byKey(const Key('lyrics_sync_minus')));
+        await tester.pump();
+        expect(offsetController.offsetMs, equals(-100));
+        expect(find.text('-0.1 s'), findsOneWidget);
+
+        final minusGesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const Key('lyrics_sync_minus'))),
+        );
+        await tester.pump(const Duration(milliseconds: 650));
+        await minusGesture.up();
+        await tester.pump();
+        expect(offsetController.offsetMs, lessThanOrEqualTo(-300));
+
+        // Arabic RTL + large text scale renders without overflow
+        await tester.pumpWidget(const SizedBox.shrink());
+        settingsStore.update((s) => s.copyWith(language: 'ar'));
+        await tester.pumpWidget(
+          buildWithOffsetCtrl(textDirection: TextDirection.rtl, textScale: 1.5),
+        );
+        await tester.pump();
+        expect(find.byKey(const Key('lyrics_sync_control')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        settingsStore.update((s) => s.copyWith(language: 'en'));
+
+        // Hidden when showHeader == false (FullScreen / NowPlaying style)
+        await tester.pumpWidget(buildWithOffsetCtrl(showHeader: false));
+        await tester.pump();
+        expect(find.byKey(const Key('lyrics_sync_control')), findsNothing);
+
+        // Flush debounce timers cleanly before test exits
+        await tester.pump(const Duration(milliseconds: 450));
+      },
+    );
+
+    testWidgets(
+      'sync offset control is hidden for plain and instrumental lyrics',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        // Plain lyrics
+        fakeRepo.resultToReturn = const LyricsResultFound(
+          LyricsDocument(
+            kind: LyricsKind.plain,
+            lines: [LyricsLine(startMs: 0, text: 'Plain verse')],
+            source: LyricsSourceOrigin.local,
+            hasWordTiming: false,
+          ),
+        );
+        queue.replaceAll([
+          const AudioSource('file:///music/plain.mp3', extras: {'title': 'Plain'}),
+        ]);
+        await lyricsController.retry();
+        await tester.pumpWidget(buildTestApp());
+        await tester.pump();
+        expect(find.byKey(const Key('lyrics_sync_control')), findsNothing);
+
+        // Instrumental lyrics
+        fakeRepo.resultToReturn = LyricsResultFound(LyricsDocument.instrumental());
+        await lyricsController.retry();
+        await tester.pump();
+        expect(find.byKey(const Key('lyrics_sync_control')), findsNothing);
       },
     );
   });

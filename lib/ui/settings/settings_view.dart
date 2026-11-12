@@ -25,6 +25,7 @@ import 'app_settings.dart';
 import 'app_shortcuts.dart';
 import 'audio_settings_applier.dart';
 import 'settings_store.dart';
+import 'shortcuts_cheat_sheet_dialog.dart';
 
 /// Full Settings screen organizing application preferences into 8 structured sections.
 class SettingsView extends StatefulWidget {
@@ -813,6 +814,20 @@ class _SettingsViewState extends State<SettingsView> {
         ),
         const Divider(color: AppColors.borderSubtle, height: 24),
         _SettingsRow(
+          title: context.t('settings.smoothTransitions'),
+          description: context.t('settings.smoothTransitionsHint'),
+          control: Switch(
+            key: const Key('settings_smooth_transitions_switch'),
+            value: settings.smoothTransitions,
+            activeThumbColor: AppColors.accent,
+            onChanged: (val) {
+              widget.settingsStore
+                  .update((s) => s.copyWith(smoothTransitions: val));
+            },
+          ),
+        ),
+        const Divider(color: AppColors.borderSubtle, height: 24),
+        _SettingsRow(
           title: context.t('settings.seekStep'),
           description: context.t('settings.seekStepHint'),
           control: _SegmentedControl<int>(
@@ -1201,6 +1216,17 @@ class _SettingsViewState extends State<SettingsView> {
     return _SettingsCard(
       title: context.t('settings.sectionShortcuts'),
       children: [
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: GlassPillButton(
+            key: const Key('settings_open_shortcuts_cheat_sheet'),
+            label: context.t('settings.openShortcutsCheatSheet'),
+            leadingIcon: Icons.keyboard_outlined,
+            size: GlassButtonSize.small,
+            onPressed: () => showShortcutsCheatSheetDialog(context),
+          ),
+        ),
+        const SizedBox(height: 12),
         for (final shortcut in kAppShortcuts) ...[
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1221,9 +1247,7 @@ class _SettingsViewState extends State<SettingsView> {
                     border: Border.all(color: AppColors.borderSubtle),
                   ),
                   child: Text(
-                    context.t(shortcut.scope == AppShortcutScope.global
-                        ? 'shortcuts.scopeGlobal'
-                        : 'shortcuts.scopeNowPlaying'),
+                    context.t(shortcutScopeLabelKey(shortcut.scope)),
                     style: AppTypography.caption.copyWith(
                       color: AppColors.textMuted,
                       fontSize: 11,

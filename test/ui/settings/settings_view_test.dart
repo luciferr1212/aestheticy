@@ -6,8 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
+import 'package:aestheticy/audio/playback_controller.dart';
+import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/main.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
@@ -17,6 +20,7 @@ import 'package:aestheticy/ui/settings/audio_settings_applier.dart';
 import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/settings/settings_view.dart';
+import 'package:aestheticy/ui/settings/shortcuts_cheat_sheet_dialog.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 
 class _FakeLibraryRepository extends Fake implements LibraryRepository {
@@ -416,7 +420,11 @@ void main() {
     for (final sc in kAppShortcuts) {
       await tester.scrollUntilVisible(find.text(sc.keyCombination), 50.0, scrollable: scrollFinder);
       expect(find.text(sc.keyCombination), findsOneWidget);
-      final expectedScope = sc.scope == AppShortcutScope.global ? 'Global' : 'Now playing';
+      final expectedScope = switch (sc.scope) {
+        AppShortcutScope.global => 'Global',
+        AppShortcutScope.nowPlaying => 'Now playing',
+        AppShortcutScope.fullScreenAndMini => 'Full screen & Mini',
+      };
       expect(find.text(expectedScope), findsWidgets);
     }
   });
@@ -699,7 +707,19 @@ void main() {
 
     final scrollFinder = find.byType(Scrollable).first;
 
-    // 1. Seek step selector
+    // 1. Smooth transitions switch and Seek step selector
+    final smoothSwitch =
+        find.byKey(const Key('settings_smooth_transitions_switch'));
+    await tester.scrollUntilVisible(smoothSwitch, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(smoothSwitch);
+    await tester.pumpAndSettle();
+
+    expect(settingsStore.settings.smoothTransitions, isTrue);
+    expect(find.text('Smooth audio transitions'), findsOneWidget);
+    await tester.tap(smoothSwitch);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.smoothTransitions, isFalse);
+
     final seek5s = find.text('5 seconds');
     await tester.scrollUntilVisible(seek5s, 100.0, scrollable: scrollFinder);
     await tester.ensureVisible(seek5s);
@@ -807,4 +827,188 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 500));
   }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets(
+    'Keyboard shortcuts button opens cheat sheet grouped by scope, supports Esc, RTL and small viewport',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        _buildTestSettingsApp(
+          engine: engine,
+          repository: repository,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          audioSettingsApplier: audioSettingsApplier,
+          artistNameStore: artistNameStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scrollFinder = find.byType(Scrollable).first;
+      final btnFinder =
+          find.byKey(const Key('settings_open_shortcuts_cheat_sheet'));
+      await tester.scrollUntilVisible(
+        btnFinder,
+        100.0,
+        scrollable: scrollFinder,
+      );
+      await tester.ensureVisible(btnFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(btnFinder);
+      await tester.pumpAndSettle();
+
+      final dialogFinder =
+          find.byKey(const Key('shortcuts_cheat_sheet_dialog'));
+      expect(dialogFinder, findsOneWidget);
+
+      // Grouped by scope headings
+      expect(
+        find.descendant(of: dialogFinder, matching: find.text('Global')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialogFinder, matching: find.text('Now playing')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: dialogFinder,
+          matching: find.text('Full screen & Mini'),
+        ),
+        findsOneWidget,
+      );
+
+      // Every shortcut from kAppShortcuts and formatted key chips appear
+      for (final sc in kAppShortcuts) {
+        for (final token in formatShortcutKeyChips(sc.keyCombination)) {
+          expect(token.contains('ctrl'), isFalse);
+          expect(
+            find.descendant(of: dialogFinder, matching: find.text(token)),
+            findsWidgets,
+          );
+        }
+      }
+
+      // Esc closes the cheat sheet dialog
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(dialogFinder, findsNothing);
+
+      // Re-open in Arabic RTL + Large text + compact small viewport (380x320)
+      // Testing ShortcutsCheatSheetDialog directly verifies narrow small-window adaptability.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      tester.view.physicalSize = const Size(380, 320);
+      settingsStore.update(
+        (s) => s.copyWith(language: 'ar', textScale: 'large'),
+      );
+      await tester.pumpWidget(
+        SettingsScope(
+          store: settingsStore,
+          child: MaterialApp(
+            locale: const Locale('ar'),
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: MediaQuery(
+                data: const MediaQueryData(
+                  size: Size(380, 320),
+                  textScaler: TextScaler.linear(1.10),
+                ),
+                child: Builder(
+                  builder: (ctx) => Scaffold(
+                    body: Center(
+                      child: ElevatedButton(
+                        onPressed: () => showShortcutsCheatSheetDialog(ctx),
+                        child: const Text('open'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(dialogFinder, findsOneWidget);
+      expect(
+        find.descendant(
+          of: dialogFinder,
+          matching: find.text('اختصارات لوحة المفاتيح'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialogFinder, matching: find.text('Ctrl')),
+        findsWidgets,
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(dialogFinder, findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 500));
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  testWidgets(
+    'smoothTransitions syncs from SettingsStore to PlaybackController even when reduceMotion is true',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final store = SettingsStore(
+        directory: tempDir,
+        initialSettings: const AppSettings(
+          userName: 'mido',
+          reduceMotion: true,
+          smoothTransitions: true,
+        ),
+      );
+      addTearDown(store.dispose);
+
+      final ctrl = PlaybackController(
+        engine: engine,
+        queue: PlaybackQueue(),
+      );
+      await ctrl.init();
+      addTearDown(ctrl.dispose);
+
+      await tester.pumpWidget(
+        AestheticyApp(
+          engine: engine,
+          controller: ctrl,
+          settingsStore: store,
+          artistNameStore: artistNameStore,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // Smooth audio transitions remain active even when reduceMotion is true.
+      expect(ctrl.smoothTransitions, isTrue);
+
+      // Toggling setting updates PlaybackController live in both directions.
+      store.update((s) => s.copyWith(smoothTransitions: false));
+      await tester.pump();
+      expect(ctrl.smoothTransitions, isFalse);
+
+      store.update((s) => s.copyWith(smoothTransitions: true));
+      await tester.pump();
+      expect(ctrl.smoothTransitions, isTrue);
+
+      await tester.pump(const Duration(milliseconds: 500));
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
 }

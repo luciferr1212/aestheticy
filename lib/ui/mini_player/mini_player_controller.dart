@@ -26,12 +26,19 @@ class MiniPlayerController extends ChangeNotifier {
   WindowGeometry? _rememberedGeometry;
   String _lastShape = 'wide';
   bool _lastAlwaysOnTop = true;
+  bool _lastShowLyrics = false;
 
   /// Target window size in logical pixels for wide mini layout.
   static const Size wideSize = Size(480, 170);
 
+  /// Target window size in logical pixels for wide mini layout with lyrics strip.
+  static const Size wideLyricsSize = Size(480, 222);
+
   /// Target window size in logical pixels for square mini layout.
   static const Size squareSize = Size(340, 440);
+
+  /// Target window size in logical pixels for square mini layout with lyrics strip.
+  static const Size squareLyricsSize = Size(340, 512);
 
   /// Outer side margin in logical pixels.
   static const double sideMargin = 16.0;
@@ -49,6 +56,7 @@ class MiniPlayerController extends ChangeNotifier {
   }) {
     _lastShape = settingsStore.settings.miniPlayerShape;
     _lastAlwaysOnTop = settingsStore.settings.miniPlayerAlwaysOnTop;
+    _lastShowLyrics = settingsStore.settings.miniPlayerShowLyrics;
     settingsStore.addListener(_onSettingsChanged);
   }
 
@@ -61,9 +69,12 @@ class MiniPlayerController extends ChangeNotifier {
   /// Remembered geometry of the normal window before entering mini mode.
   WindowGeometry? get rememberedGeometry => _rememberedGeometry;
 
-  /// Returns the target window size for a given [shape].
-  static Size sizeForShape(String shape) {
-    return shape == 'square' ? squareSize : wideSize;
+  /// Returns the target window size for a given [shape] and [showLyrics] state.
+  static Size sizeForShape(String shape, {bool showLyrics = false}) {
+    if (shape == 'square') {
+      return showLyrics ? squareLyricsSize : squareSize;
+    }
+    return showLyrics ? wideLyricsSize : wideSize;
   }
 
   /// Calculates top-left placement coordinates for target window size and preset.
@@ -119,7 +130,8 @@ class MiniPlayerController extends ChangeNotifier {
     await windowService.setResizable(false);
 
     final shape = settingsStore.settings.miniPlayerShape;
-    final targetSize = sizeForShape(shape);
+    final showLyrics = settingsStore.settings.miniPlayerShowLyrics;
+    final targetSize = sizeForShape(shape, showLyrics: showLyrics);
     final displaySize = await windowService.getDisplaySize();
     final positionPreset = settingsStore.settings.miniPlayerPosition;
 
@@ -177,12 +189,29 @@ class MiniPlayerController extends ChangeNotifier {
     }
   }
 
+  /// Toggles compact lyrics display in mini player mode and resizes live.
+  Future<void> toggleShowLyrics() async {
+    final next = !settingsStore.settings.miniPlayerShowLyrics;
+    _lastShowLyrics = next;
+    settingsStore.update((s) => s.copyWith(miniPlayerShowLyrics: next));
+    if (isMini) {
+      await _applyLayoutSize(
+        settingsStore.settings.miniPlayerShape,
+        showLyrics: next,
+      );
+    }
+    notifyListeners();
+  }
+
   /// Sets window shape and updates geometry live if in mini mode.
   Future<void> setShape(String shape) async {
     _lastShape = shape;
     settingsStore.update((s) => s.copyWith(miniPlayerShape: shape));
     if (isMini) {
-      await _applyShape(shape);
+      await _applyLayoutSize(
+        shape,
+        showLyrics: settingsStore.settings.miniPlayerShowLyrics,
+      );
     }
   }
 
@@ -194,9 +223,12 @@ class MiniPlayerController extends ChangeNotifier {
     await setShape(next);
   }
 
-  Future<void> _applyShape(String shape) async {
+  Future<void> _applyLayoutSize(
+    String shape, {
+    required bool showLyrics,
+  }) async {
     final currentGeo = await windowService.getGeometry();
-    final targetSize = sizeForShape(shape);
+    final targetSize = sizeForShape(shape, showLyrics: showLyrics);
     final displaySize = await windowService.getDisplaySize();
 
     final maxX =
@@ -213,6 +245,7 @@ class MiniPlayerController extends ChangeNotifier {
     if (!isMini) {
       _lastShape = settingsStore.settings.miniPlayerShape;
       _lastAlwaysOnTop = settingsStore.settings.miniPlayerAlwaysOnTop;
+      _lastShowLyrics = settingsStore.settings.miniPlayerShowLyrics;
       return;
     }
 
@@ -223,9 +256,12 @@ class MiniPlayerController extends ChangeNotifier {
     }
 
     final newShape = settingsStore.settings.miniPlayerShape;
-    if (newShape != _lastShape) {
+    final newShowLyrics = settingsStore.settings.miniPlayerShowLyrics;
+    if (newShape != _lastShape || newShowLyrics != _lastShowLyrics) {
       _lastShape = newShape;
-      _applyShape(newShape);
+      _lastShowLyrics = newShowLyrics;
+      _applyLayoutSize(newShape, showLyrics: newShowLyrics);
+      notifyListeners();
     }
   }
 

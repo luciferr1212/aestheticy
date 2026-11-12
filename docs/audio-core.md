@@ -148,3 +148,29 @@ All queue indices across `PlaybackQueue` and `PlaybackController` operate strict
 5. **Repeat one, last track, Next.** Pressing Next on the last track while repeat one is active stops playback.
 6. **Shuffle reshuffles on add.** Adding a track while shuffle is on re-randomizes the upcoming order.
 7. **Preload mirror.** `MpvAudioEngine` keeps its own record of mpv's playlist position and preloaded entry. If `player.open()` ever stops replacing the whole playlist, this mirror must be revisited.
+
+---
+
+## Smooth Audio Transitions, Paused-Jump Fix & Transport Serialization (Phase 4, Prompt 4)
+
+### Architecture & Fade Gain
+- **`AudioEngine` contract (`lib/audio/audio_engine.dart`):** Adds `double get currentFadeGain` (default `1.0`) and `Future<void> setFadeGain(double gain)`. Transient fade gain (`0.0..1.0`) is kept strictly separate from user volume so UI sliders and persisted settings (`currentVolume` / `volumeStream`) never fluctuate during fades.
+- **`MpvAudioEngine` (`lib/audio/mpv_audio_engine.dart`):** Applies `effectiveVolume = (_volume * _fadeGain * 100.0)` to libmpv and guards against mpv volume stream feedback loops during fade ramps via `_ignoreMpvVolumeUpdates`.
+- **Pause-safe `open()` (`MpvAudioEngine`):** Upstream `mpv_audio_kit`'s `Player.open(media, play: true)` sets `pause = no` *before* `loadfile`, briefly unpausing an already-paused outgoing track. When `autoPlay && !player.state.playing`, `MpvAudioEngine.open` now opens with `play: false` first and calls `player.play()` afterward only if `_currentUri == source.uri`.
+
+### `PlaybackController` Serialization & Envelopes
+- **Single-flight serialization & latest-wins cancellation:** Transport actions (`play`, `playTrack`, `playQueue`, `pause`, `stop`, `skipNext`, `skipPrevious`, `removeFromQueue`, `_autoAdvance`) coordinate via monotonic `_transitionGen`, `_activeTransition` single-flight chaining, and `_abortPendingWaiters()`, cancelling outdated ramps/delays cleanly when rapid user commands arrive.
+- **Cosine S-curve envelopes (~16 ms `Timer.periodic` + stopwatch hybrid):**
+  - Stopped / new track -> play: `250 ms` fade-in (`kStartFadeInDuration`).
+  - Paused -> resume (same track): `120 ms` fade-in (`kResumeFadeInDuration`).
+  - Manual jump while playing: `120 ms` fade-out + `60 ms` silent gap (`kSwitchGapDuration`) + `250 ms` fade-in.
+  - Playing -> pause: `100 ms` fade-out (`kPauseFadeOutDuration`) -> `engine.pause()` -> restore gain to `1.0`.
+  - Playing -> stop / shutdown: `100 ms` fade-out hard-capped at `<= 145 ms` (`kStopMaxFadeOutDuration`).
+  - Fades are intentionally skipped (gain stays `1.0`) on manual jump while paused, intra-track `seek()`, gapless auto-advance, or when `smoothTransitions == false`. Smooth audio transitions are independent of UI `reduceMotion`.
+
+### Decisions
+- **Standalone default vs app binding:** `PlaybackController({ bool smoothTransitions = false })` defaults to `false` so standalone callers and existing zero-delay unit/widget tests remain deterministic without timers, while `AppSettings.smoothTransitions` defaults to `true` and `_AestheticyAppState` (`lib/main.dart`) keeps the controller synchronized with `SettingsStore` even when `reduceMotion` is enabled.
+- **Idle-immediate transition start (`_activeTransition`):** Instead of chaining every call onto an eager `Future<void>.value()` initialized at construction time (which in `setUp` belongs to a different Dart Zone than `testWidgets`'s `FakeAsync`), `_enqueueTransition` starts the task synchronously when `_activeTransition == null` and only chains onto `prev` while an active transition is in flight.
+
+### Known Limitations
+- Software fade ramps, pause-safe libmpv loading, and clean shutdown pauses require end-to-end audio verification on a Windows GitHub Actions build artifact (native C++/Windows runtime is not built locally).

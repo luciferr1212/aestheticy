@@ -18,6 +18,8 @@ import 'package:aestheticy/features/integration/media_session_controller.dart';
 import 'package:aestheticy/features/integration/sleep_controller.dart';
 import 'package:aestheticy/features/integration/tray_window_controller.dart';
 import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
+import 'package:aestheticy/features/lyrics/lyrics_offset_store.dart';
+import 'package:aestheticy/features/lyrics/lyrics_repository.dart';
 import 'package:aestheticy/features/session/session_restorer.dart';
 import 'package:aestheticy/features/session/session_saver.dart';
 import 'package:aestheticy/features/session/session_store.dart';
@@ -52,6 +54,7 @@ import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
+import 'package:aestheticy/ui/shell/volume_hud.dart';
 import 'package:aestheticy/ui/theme/app_theme.dart';
 
 void main() {
@@ -608,6 +611,16 @@ class AestheticyApp extends StatefulWidget {
 }
 
 class _AestheticyAppState extends State<AestheticyApp> {
+  late final AudioEngine _engine;
+  bool _createdEngineLocally = false;
+  late final PlaybackController _playbackController;
+  bool _createdMiniPlayerControllerLocally = false;
+  bool _createdPlaybackControllerLocally = false;
+  late final LyricsController _lyricsController;
+  bool _createdLyricsControllerLocally = false;
+  LyricsOffsetStore? _lyricsOffsetStore;
+  late final LibraryRepository _repository;
+  late final ScanService _scanService;
   late final SettingsStore _settingsStore;
   late final GlassController _glassController;
   late final LocaleController _localeController;
@@ -625,36 +638,68 @@ class _AestheticyAppState extends State<AestheticyApp> {
   PlayRecorder? _playRecorder;
   SessionSaver? _sessionSaver;
   AppLifecycleListener? _lifecycleListener;
+  late final VolumeHudController _volumeHudController;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
+    _volumeHudController = VolumeHudController();
+    _engine = widget.engine ?? FakeAudioEngine();
+    _createdEngineLocally = widget.engine == null;
+    if (widget.controller != null) {
+      _playbackController = widget.controller!;
+    } else {
+      _playbackController = PlaybackController(
+        engine: _engine,
+        queue: PlaybackQueue(),
+      );
+      _createdPlaybackControllerLocally = true;
+    }
+    _repository = widget.repository ?? SqliteLibraryRepository.inMemory();
+    _scanService = widget.scanService ?? ScanService(repository: _repository);
     _settingsStore = widget.settingsStore ?? SettingsStore();
     _glassController = widget.glassController ?? GlassController();
     _settingsStore.bindGlassController(_glassController);
+    _syncPlaybackTransitionSetting();
+    _settingsStore.addListener(_syncPlaybackTransitionSetting);
     _localeController = widget.localeController ??
         LocaleController(settingsStore: _settingsStore);
     _artistNameStore = widget.artistNameStore ?? ArtistNameStore();
     _eqController = widget.eqController ??
         EqController(
-          engine: widget.engine ?? FakeAudioEngine(),
+          engine: _engine,
           store: EqStore(),
         );
     _userCollections = widget.userCollections ??
         UserCollections(
-          repository: widget.repository ?? SqliteLibraryRepository.inMemory(),
+          repository: _repository,
         );
     _audioSettingsApplier = widget.audioSettingsApplier ??
         AudioSettingsApplier(
-          engine: widget.engine ?? FakeAudioEngine(),
+          engine: _engine,
           settingsStore: _settingsStore,
         );
+    if (widget.lyricsController != null) {
+      _lyricsController = widget.lyricsController!;
+    } else {
+      final offsetStore = LyricsOffsetStore();
+      _lyricsOffsetStore = offsetStore;
+      unawaited(offsetStore.init());
+      _lyricsController = LyricsController(
+        playbackController: _playbackController,
+        repository: LyricsRepository(),
+        settingsStore: _settingsStore,
+        offsetStore: offsetStore,
+      );
+      _createdLyricsControllerLocally = true;
+    }
     _navigator = AppNavigator();
     _sessionStore = widget.sessionStore ?? SessionStore();
     _sessionSaver = widget.sessionSaver;
     _playRecorder = widget.playRecorder;
 
+    _createdMiniPlayerControllerLocally = widget.miniPlayerController == null;
     _miniPlayerController = widget.miniPlayerController ??
         MiniPlayerController(
           windowService: widget.windowService ??
@@ -681,7 +726,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
         try {
-          await widget.controller?.pause();
+          await _playbackController.pause();
         } catch (_) {}
         try {
           await widget.windowService?.hide();
@@ -702,9 +747,27 @@ class _AestheticyAppState extends State<AestheticyApp> {
     );
   }
 
+  void _syncPlaybackTransitionSetting() {
+    _playbackController.smoothTransitions =
+        _settingsStore.settings.smoothTransitions;
+  }
+
   @override
   void dispose() {
-    _miniPlayerController.dispose();
+    _settingsStore.removeListener(_syncPlaybackTransitionSetting);
+    if (_createdLyricsControllerLocally) {
+      _lyricsController.dispose();
+    }
+    _lyricsOffsetStore?.dispose();
+    if (_createdPlaybackControllerLocally) {
+      unawaited(_playbackController.dispose());
+    }
+    if (_createdEngineLocally) {
+      unawaited(_engine.dispose());
+    }
+    if (_createdMiniPlayerControllerLocally) {
+      _miniPlayerController.dispose();
+    }
     _trayWindowController?.dispose();
     _sleepController?.dispose();
     _mediaSessionController?.dispose();
@@ -712,6 +775,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _playRecorder?.dispose();
     _sessionSaver?.dispose();
     _sessionStore.dispose();
+    _volumeHudController.dispose();
     super.dispose();
   }
 
@@ -735,12 +799,8 @@ class _AestheticyAppState extends State<AestheticyApp> {
     if (ctx != null) {
       toggleQuickSearch(
         context: ctx,
-        repository: widget.repository ?? SqliteLibraryRepository.inMemory(),
-        controller: widget.controller ??
-            PlaybackController(
-              engine: widget.engine ?? FakeAudioEngine(),
-              queue: PlaybackQueue(),
-            ),
+        repository: _repository,
+        controller: _playbackController,
         navigator: _navigator,
         settingsStore: _settingsStore,
         artistNameStore: _artistNameStore,
@@ -750,16 +810,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveEngine = widget.engine ?? FakeAudioEngine();
-    final effectiveController = widget.controller ??
-        PlaybackController(
-          engine: effectiveEngine,
-          queue: PlaybackQueue(),
-        );
-    final effectiveRepo =
-        widget.repository ?? SqliteLibraryRepository.inMemory();
-    final effectiveScanService =
-        widget.scanService ?? ScanService(repository: effectiveRepo);
+    final effectiveEngine = _engine;
+    final effectiveController = _playbackController;
+    final effectiveRepo = _repository;
+    final effectiveScanService = _scanService;
 
     return ListenableBuilder(
       listenable: Listenable.merge([
@@ -808,13 +862,19 @@ class _AestheticyAppState extends State<AestheticyApp> {
                     textDirection: _localeController.textDirection,
                     child: SettingsScope(
                       store: _settingsStore,
-                      child: ArtistNameScope(
-                        store: _artistNameStore,
-                        child: EqScope(
-                          controller: _eqController,
-                          child: UserCollectionsScope(
-                            collections: _userCollections,
-                            child: child!,
+                      child: VolumeHudScope(
+                        controller: _volumeHudController,
+                        child: ArtistNameScope(
+                          store: _artistNameStore,
+                          child: EqScope(
+                            controller: _eqController,
+                            child: UserCollectionsScope(
+                              collections: _userCollections,
+                              child: VolumeHudOverlay(
+                                controller: _volumeHudController,
+                                child: child!,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -825,6 +885,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                     ? MiniPlayerView(
                         controller: _miniPlayerController,
                         playbackController: effectiveController,
+                        lyricsController: _lyricsController,
                       )
                     : AppShell(
                         engine: effectiveEngine,
@@ -838,7 +899,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         artistNameStore: _artistNameStore,
                         eqController: _eqController,
                         userCollections: _userCollections,
-                        lyricsController: widget.lyricsController,
+                        lyricsController: _lyricsController,
                         windowService: widget.windowService,
                         miniPlayerController: _miniPlayerController,
                       ),

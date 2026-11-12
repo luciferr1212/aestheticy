@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +27,7 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 import 'cover_palette.dart';
+import 'seek_bar_helper.dart';
 
 /// Immersive full-screen playback view featuring drifting ambient color blobs,
 /// optional floating glass shapes, responsive typography, and slender timeline.
@@ -51,6 +53,10 @@ class FullScreenView extends StatefulWidget {
   /// Optional callback invoked on ticker frame (for test verification).
   final VoidCallback? onTickerFrame;
 
+  /// Optional subtree probe builder used in tests to measure rebuild counts.
+  @visibleForTesting
+  final WidgetBuilder? debugProbeBuilder;
+
   /// Creates a [FullScreenView].
   const FullScreenView({
     super.key,
@@ -61,6 +67,7 @@ class FullScreenView extends StatefulWidget {
     this.lyricsController,
     this.miniPlayerController,
     this.onTickerFrame,
+    this.debugProbeBuilder,
   });
 
   @override
@@ -78,10 +85,11 @@ class FullScreenViewState extends State<FullScreenView>
   Timer? _controlsTimer;
 
   CoverPalette _palette = CoverPalette.fallback;
-  double _animationPhase = 0.0;
+  final ValueNotifier<double> _phaseNotifier = ValueNotifier<double>(0.0);
   Duration _lastTickElapsed = Duration.zero;
   bool _showControls = true;
-  bool _isHoveringProgress = false;
+  bool _isScrubberActive = false;
+  bool _isAppResumed = true;
 
   /// Exposes whether the animation ticker is active.
   bool get isTickerActive => _ticker.isActive;
@@ -90,6 +98,7 @@ class FullScreenViewState extends State<FullScreenView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.settingsStore.addListener(_onSettingsChanged);
     if (widget.lyricsController != null) {
       _lyricsController = widget.lyricsController!;
     } else {
@@ -121,6 +130,37 @@ class FullScreenViewState extends State<FullScreenView>
     _resetControlsTimer();
   }
 
+  @override
+  void didUpdateWidget(FullScreenView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.settingsStore != widget.settingsStore) {
+      oldWidget.settingsStore.removeListener(_onSettingsChanged);
+      widget.settingsStore.addListener(_onSettingsChanged);
+      _syncTickerWithSettings();
+    }
+  }
+
+  void _onSettingsChanged() {
+    _syncTickerWithSettings();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _syncTickerWithSettings() {
+    final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    if (reduceMotion) {
+      if (_ticker.isActive) {
+        _ticker.stop();
+      }
+      if (_phaseNotifier.value != 0.0) {
+        _phaseNotifier.value = 0.0;
+      }
+    } else if (_isAppResumed && !_ticker.isActive) {
+      _ticker.start();
+    }
+  }
+
   Future<void> _updatePalette(String? coverKey) async {
     final palette = await paletteForCover(coverKey);
     if (!mounted) return;
@@ -132,24 +172,23 @@ class FullScreenViewState extends State<FullScreenView>
   void _onTick(Duration elapsed) {
     widget.onTickerFrame?.call();
 
-    // 30 fps cap: only update state if >= 33ms have passed
+    // 30 fps cap: only advance paint phase if >= 33ms have passed.
     if (elapsed - _lastTickElapsed < const Duration(milliseconds: 33)) {
       return;
     }
     _lastTickElapsed = elapsed;
 
-    if (!mounted) return;
-    setState(() {
-      _animationPhase = elapsed.inMilliseconds / 1000.0;
-    });
+    if (!mounted || widget.settingsStore.settings.reduceMotion) return;
+    _phaseNotifier.value = elapsed.inMilliseconds / 1000.0;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _isAppResumed = state == AppLifecycleState.resumed;
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
     if (reduceMotion) return;
 
-    if (state == AppLifecycleState.resumed) {
+    if (_isAppResumed) {
       if (!_ticker.isActive) {
         _ticker.start();
       }
@@ -165,21 +204,39 @@ class FullScreenViewState extends State<FullScreenView>
     if (!_showControls) {
       setState(() => _showControls = true);
     }
+    if (_isScrubberActive) {
+      return;
+    }
     _controlsTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) {
+      if (mounted && !_isScrubberActive) {
         setState(() => _showControls = false);
       }
     });
   }
 
+  void _onScrubberInteractionChanged(bool active) {
+    _isScrubberActive = active;
+    if (active) {
+      _controlsTimer?.cancel();
+      if (!_showControls && mounted) {
+        setState(() => _showControls = true);
+      }
+    } else {
+      _resetControlsTimer();
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.settingsStore.removeListener(_onSettingsChanged);
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
     }
     _controlsTimer?.cancel();
+    _ticker.stop();
     _ticker.dispose();
+    _phaseNotifier.dispose();
     _currentSub?.cancel();
     _focusNode.dispose();
     super.dispose();
@@ -234,13 +291,13 @@ class FullScreenViewState extends State<FullScreenView>
           backgroundColor: AppColors.base,
           body: Stack(
             children: [
-              // 1. Drifting color blobs (painted via RepaintBoundary)
+              // 1. Drifting color blobs (painted via RepaintBoundary without page setState)
               Positioned.fill(
                 child: RepaintBoundary(
                   child: CustomPaint(
                     painter: _BlobPainter(
                       palette: _palette,
-                      phase: settings.reduceMotion ? 0.0 : _animationPhase,
+                      phaseListenable: _phaseNotifier,
                     ),
                   ),
                 ),
@@ -253,28 +310,32 @@ class FullScreenViewState extends State<FullScreenView>
                 ),
               ),
 
-              // 3. Optional decorative floating glass shapes (consume 2 blur slots)
-              if (showGlassShapes) ...[
+              // 3. Optional decorative static glass shapes (consume 2 blur slots)
+              if (showGlassShapes) ...const [
                 Positioned(
-                  left: 80.0 + (settings.reduceMotion ? 0.0 : math.sin(_animationPhase * 0.25) * 24.0),
-                  top: 140.0 + (settings.reduceMotion ? 0.0 : math.cos(_animationPhase * 0.2) * 18.0),
-                  child: const GlassSurface(
-                    density: GlassDensity.clear,
-                    borderRadius: 28,
-                    width: 320,
-                    height: 200,
-                    child: SizedBox.shrink(),
+                  left: 80.0,
+                  top: 140.0,
+                  child: RepaintBoundary(
+                    child: GlassSurface(
+                      density: GlassDensity.clear,
+                      borderRadius: 28,
+                      width: 320,
+                      height: 200,
+                      child: SizedBox.shrink(),
+                    ),
                   ),
                 ),
                 Positioned(
-                  right: 90.0 + (settings.reduceMotion ? 0.0 : math.cos(_animationPhase * 0.22) * 20.0),
-                  bottom: 120.0 + (settings.reduceMotion ? 0.0 : math.sin(_animationPhase * 0.28) * 16.0),
-                  child: const GlassSurface(
-                    density: GlassDensity.clear,
-                    borderRadius: 28,
-                    width: 300,
-                    height: 180,
-                    child: SizedBox.shrink(),
+                  right: 90.0,
+                  bottom: 120.0,
+                  child: RepaintBoundary(
+                    child: GlassSurface(
+                      density: GlassDensity.clear,
+                      borderRadius: 28,
+                      width: 300,
+                      height: 180,
+                      child: SizedBox.shrink(),
+                    ),
                   ),
                 ),
               ],
@@ -449,16 +510,20 @@ class FullScreenViewState extends State<FullScreenView>
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: MouseRegion(
-                  onEnter: (_) => setState(() => _isHoveringProgress = true),
-                  onExit: (_) => setState(() => _isHoveringProgress = false),
+                child: RepaintBoundary(
                   child: _SlenderProgressLine(
                     engine: widget.engine,
                     controller: widget.controller,
-                    isHovered: _isHoveringProgress,
+                    onInteractionChanged: _onScrubberInteractionChanged,
                   ),
                 ),
               ),
+              if (widget.debugProbeBuilder != null)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  child: widget.debugProbeBuilder!(context),
+                ),
             ],
           ),
         ),
@@ -510,15 +575,20 @@ class FullScreenViewState extends State<FullScreenView>
 /// Single CustomPainter rendering 3 large drifting color blobs.
 class _BlobPainter extends CustomPainter {
   final CoverPalette palette;
-  final double phase;
+  final ValueListenable<double> phaseListenable;
 
-  _BlobPainter({required this.palette, required this.phase});
+  _BlobPainter({
+    required this.palette,
+    required this.phaseListenable,
+  }) : super(repaint: phaseListenable);
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
     if (w <= 0 || h <= 0) return;
+
+    final phase = phaseListenable.value;
 
     // Blob 1: primary color
     final p1 = Offset(
@@ -553,79 +623,417 @@ class _BlobPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_BlobPainter oldDelegate) {
-    return oldDelegate.phase != phase || oldDelegate.palette != palette;
+    return oldDelegate.palette != palette ||
+        oldDelegate.phaseListenable != phaseListenable;
   }
 }
 
-/// Slender 2dp progress line spanning the bottom edge of the screen.
-class _SlenderProgressLine extends StatelessWidget {
+/// Interactive progress line spanning the bottom edge of the screen.
+class _SlenderProgressLine extends StatefulWidget {
   final AudioEngine engine;
   final PlaybackController? controller;
-  final bool isHovered;
+  final ValueChanged<bool>? onInteractionChanged;
 
   const _SlenderProgressLine({
     required this.engine,
     this.controller,
-    required this.isHovered,
+    this.onInteractionChanged,
   });
 
   @override
+  State<_SlenderProgressLine> createState() => _SlenderProgressLineState();
+}
+
+class _SlenderProgressLineState extends State<_SlenderProgressLine> {
+  static const Duration _kDragSeekThrottle = Duration(milliseconds: 120);
+  static const Duration _kSemanticsSeekStep = Duration(seconds: 5);
+
+  bool _isHovered = false;
+  bool _isDragging = false;
+  double? _dragFraction;
+  double _pointerDx = 0.0;
+  Timer? _seekThrottleTimer;
+  Duration? _pendingSeekTarget;
+  Duration _activeTotalDuration = Duration.zero;
+  StreamSubscription<Duration>? _seekSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeSeekStream();
+  }
+
+  @override
+  void didUpdateWidget(_SlenderProgressLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _seekSub?.cancel();
+      _subscribeSeekStream();
+    }
+  }
+
+  void _subscribeSeekStream() {
+    _seekSub = widget.controller?.seekStream.listen((_) {
+      if (mounted && widget.controller?.currentState == PlaybackState.idle) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _seekThrottleTimer?.cancel();
+    _seekSub?.cancel();
+    super.dispose();
+  }
+
+  void _setHover(bool hovered) {
+    if (_isHovered == hovered) return;
+    final wasActive = _isHovered || _isDragging;
+    setState(() => _isHovered = hovered);
+    final isActive = _isHovered || _isDragging;
+    if (wasActive != isActive) {
+      widget.onInteractionChanged?.call(isActive);
+    }
+  }
+
+  void _dispatchSeekImmediate(Duration target, Duration total) {
+    if (total <= Duration.zero) return;
+    dispatchSeekBarSeek(
+      engine: widget.engine,
+      controller: widget.controller,
+      target: target,
+      totalDuration: total,
+    );
+    if (widget.controller?.currentState == PlaybackState.idle && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _scheduleThrottledSeek(Duration target, Duration total) {
+    _activeTotalDuration = total;
+    if (total <= Duration.zero) return;
+    if (_seekThrottleTimer == null) {
+      _dispatchSeekImmediate(target, total);
+      _seekThrottleTimer = Timer(_kDragSeekThrottle, _onThrottleElapsed);
+    } else {
+      _pendingSeekTarget = target;
+    }
+  }
+
+  void _onThrottleElapsed() {
+    _seekThrottleTimer = null;
+    if (!_isDragging) {
+      _pendingSeekTarget = null;
+      return;
+    }
+    final pending = _pendingSeekTarget;
+    _pendingSeekTarget = null;
+    if (pending != null && _activeTotalDuration > Duration.zero) {
+      _dispatchSeekImmediate(pending, _activeTotalDuration);
+      _seekThrottleTimer = Timer(_kDragSeekThrottle, _onThrottleElapsed);
+    }
+  }
+
+  void _handleTapUp(
+    TapUpDetails details,
+    double width,
+    bool isRtl,
+    Duration total,
+  ) {
+    if (total <= Duration.zero) return;
+    final frac = seekBarFractionForDx(
+      dx: details.localPosition.dx,
+      width: width,
+      isRtl: isRtl,
+    );
+    final target = seekBarDurationForFraction(
+      fraction: frac,
+      totalDuration: total,
+    );
+    _dispatchSeekImmediate(target, total);
+  }
+
+  void _handleDragStart(
+    DragStartDetails details,
+    double width,
+    bool isRtl,
+    Duration total,
+  ) {
+    final wasActive = _isHovered || _isDragging;
+    final frac = seekBarFractionForDx(
+      dx: details.localPosition.dx,
+      width: width,
+      isRtl: isRtl,
+    );
+    setState(() {
+      _isDragging = true;
+      _pointerDx = details.localPosition.dx.clamp(0.0, width);
+      _dragFraction = total > Duration.zero ? frac : null;
+    });
+    if (!wasActive) {
+      widget.onInteractionChanged?.call(true);
+    }
+    if (total > Duration.zero) {
+      final target = seekBarDurationForFraction(
+        fraction: frac,
+        totalDuration: total,
+      );
+      _scheduleThrottledSeek(target, total);
+    }
+  }
+
+  void _handleDragUpdate(
+    DragUpdateDetails details,
+    double width,
+    bool isRtl,
+    Duration total,
+  ) {
+    final frac = seekBarFractionForDx(
+      dx: details.localPosition.dx,
+      width: width,
+      isRtl: isRtl,
+    );
+    setState(() {
+      _pointerDx = details.localPosition.dx.clamp(0.0, width);
+      _dragFraction = total > Duration.zero ? frac : null;
+    });
+    if (total > Duration.zero) {
+      final target = seekBarDurationForFraction(
+        fraction: frac,
+        totalDuration: total,
+      );
+      _scheduleThrottledSeek(target, total);
+    }
+  }
+
+  void _finishDrag(Duration total, {required bool commitSeek}) {
+    _seekThrottleTimer?.cancel();
+    _seekThrottleTimer = null;
+    final pending = _pendingSeekTarget;
+    _pendingSeekTarget = null;
+    final frac = _dragFraction;
+    if (commitSeek && total > Duration.zero) {
+      final target = pending ??
+          (frac != null
+              ? seekBarDurationForFraction(fraction: frac, totalDuration: total)
+              : null);
+      if (target != null) {
+        _dispatchSeekImmediate(target, total);
+      }
+    }
+    final wasActive = _isHovered || _isDragging;
+    setState(() {
+      _isDragging = false;
+      _dragFraction = null;
+    });
+    final isActive = _isHovered || _isDragging;
+    if (wasActive != isActive) {
+      widget.onInteractionChanged?.call(isActive);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+
     return StreamBuilder<Duration>(
-      stream: engine.durationStream,
-      initialData: controller?.currentDuration ?? engine.currentDuration,
+      stream: widget.engine.durationStream,
+      initialData:
+          widget.controller?.currentDuration ?? widget.engine.currentDuration,
       builder: (context, durSnapshot) {
-        final total = (controller != null && controller!.currentState == PlaybackState.idle)
-            ? controller!.currentDuration
-            : (durSnapshot.data != null && durSnapshot.data! > Duration.zero
-                ? durSnapshot.data!
-                : (controller?.currentDuration ?? Duration.zero));
+        final total = resolveSeekBarDuration(
+          engine: widget.engine,
+          controller: widget.controller,
+          streamDuration: durSnapshot.data,
+        );
 
         return StreamBuilder<Duration>(
-          stream: engine.positionStream,
-          initialData: controller?.currentPosition ?? engine.currentPosition,
+          stream: widget.engine.positionStream,
+          initialData: widget.controller?.currentPosition ??
+              widget.engine.currentPosition,
           builder: (context, posSnapshot) {
-            final pos = (controller != null && controller!.currentState == PlaybackState.idle)
-                ? controller!.currentPosition
-                : (posSnapshot.data ?? controller?.currentPosition ?? Duration.zero);
-            final progress = total.inMilliseconds > 0
-                ? (pos.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
-                : 0.0;
+            final pos = resolveSeekBarPosition(
+              engine: widget.engine,
+              controller: widget.controller,
+              streamPosition: posSnapshot.data,
+            );
+            final displayFraction = _dragFraction ??
+                (total.inMilliseconds > 0
+                    ? (pos.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
+                    : 0.0);
+            final displayPos = _dragFraction != null
+                ? seekBarDurationForFraction(
+                    fraction: displayFraction,
+                    totalDuration: total,
+                  )
+                : pos;
+            final active = _isHovered || _isDragging;
 
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isHovered)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          context.formatDurationLocalized(pos),
-                          style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+            return Semantics(
+              slider: true,
+              label: context.t('fullScreen.seekBarLabel'),
+              value: context.formatDurationLocalized(displayPos),
+              increasedValue: total > Duration.zero
+                  ? context.formatDurationLocalized(
+                      clampSeekTarget(displayPos + _kSemanticsSeekStep, total),
+                    )
+                  : null,
+              decreasedValue: total > Duration.zero
+                  ? context.formatDurationLocalized(
+                      clampSeekTarget(displayPos - _kSemanticsSeekStep, total),
+                    )
+                  : null,
+              onIncrease: total > Duration.zero
+                  ? () => _dispatchSeekImmediate(
+                        displayPos + _kSemanticsSeekStep,
+                        total,
+                      )
+                  : null,
+              onDecrease: total > Duration.zero
+                  ? () => _dispatchSeekImmediate(
+                        displayPos - _kSemanticsSeekStep,
+                        total,
+                      )
+                  : null,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final thumbCenterX = ((isRtl
+                              ? (1.0 - displayFraction)
+                              : displayFraction) *
+                          width)
+                      .clamp(6.0, math.max(6.0, width - 6.0));
+                  final tooltipLeft =
+                      (_pointerDx - 32.0).clamp(8.0, math.max(8.0, width - 72.0)).toDouble();
+
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_isDragging && total > Duration.zero)
+                        SizedBox(
+                          height: 28,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Positioned(
+                                left: tooltipLeft,
+                                bottom: 2,
+                                child: Container(
+                                  key: const Key('fullscreen_seek_tooltip'),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: Text(
+                                    context.formatDurationLocalized(displayPos),
+                                    style: AppTypography.micro.copyWith(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        Text(
-                          context.formatDurationLocalized(total),
-                          style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                      if (active)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            key: const Key('fullscreen_seek_times'),
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                context.formatDurationLocalized(displayPos),
+                                style: AppTypography.micro
+                                    .copyWith(color: AppColors.textMuted),
+                              ),
+                              Text(
+                                context.formatDurationLocalized(total),
+                                style: AppTypography.micro
+                                    .copyWith(color: AppColors.textMuted),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
-                  ),
-                // 2dp slender progress bar
-                Container(
-                  height: 2.0,
-                  width: double.infinity,
-                  color: AppColors.borderSubtle,
-                  child: FractionallySizedBox(
-                    alignment: AlignmentDirectional.centerStart,
-                    widthFactor: progress,
-                    child: Container(
-                      color: AppColors.accent,
-                    ),
-                  ),
-                ),
-              ],
+                      MouseRegion(
+                        cursor: total > Duration.zero
+                            ? SystemMouseCursors.click
+                            : MouseCursor.defer,
+                        onEnter: (_) => _setHover(true),
+                        onExit: (_) => _setHover(false),
+                        child: GestureDetector(
+                          key: const Key('fullscreen_seek_bar'),
+                          behavior: HitTestBehavior.opaque,
+                          onTapUp: (details) =>
+                              _handleTapUp(details, width, isRtl, total),
+                          onHorizontalDragStart: (details) =>
+                              _handleDragStart(details, width, isRtl, total),
+                          onHorizontalDragUpdate: (details) =>
+                              _handleDragUpdate(details, width, isRtl, total),
+                          onHorizontalDragEnd: (_) =>
+                              _finishDrag(total, commitSeek: true),
+                          onHorizontalDragCancel: () =>
+                              _finishDrag(total, commitSeek: false),
+                          child: SizedBox(
+                            height: 28.0,
+                            width: double.infinity,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: active ? 11.0 : 0.0,
+                                  child: Container(
+                                    key: const Key('fullscreen_seek_track'),
+                                    height: active ? 6.0 : 2.0,
+                                    color: AppColors.borderSubtle,
+                                    child: FractionallySizedBox(
+                                      alignment: isRtl
+                                          ? Alignment.centerRight
+                                          : Alignment.centerLeft,
+                                      widthFactor: displayFraction,
+                                      child: Container(
+                                        key: const Key('fullscreen_seek_fill'),
+                                        color: AppColors.accent,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (active)
+                                  Positioned(
+                                    left: thumbCenterX - 6.0,
+                                    bottom: 8.0,
+                                    child: Container(
+                                      key: const Key('fullscreen_seek_thumb'),
+                                      width: 12.0,
+                                      height: 12.0,
+                                      decoration: const BoxDecoration(
+                                        color: AppColors.accent,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
             );
           },
         );

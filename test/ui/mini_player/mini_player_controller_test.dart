@@ -209,5 +209,61 @@ void main() {
       expect(fakeWindow.calls, contains('setAlwaysOnTop(false)'));
       expect(settingsStore.settings.miniPlayerAlwaysOnTop, isFalse);
     });
+
+    test('miniPlayerShowLyrics resizes live preserving top-left and clamps to display', () async {
+      expect(
+        MiniPlayerController.sizeForShape('wide', showLyrics: false),
+        equals(const Size(480, 170)),
+      );
+      expect(
+        MiniPlayerController.sizeForShape('wide', showLyrics: true),
+        equals(const Size(480, 222)),
+      );
+      expect(
+        MiniPlayerController.sizeForShape('square', showLyrics: false),
+        equals(const Size(340, 440)),
+      );
+      expect(
+        MiniPlayerController.sizeForShape('square', showLyrics: true),
+        equals(const Size(340, 512)),
+      );
+
+      settingsStore.update((s) => s.copyWith(
+            miniPlayerPosition: 'remember',
+            miniPlayerLastX: 200.0,
+            miniPlayerLastY: 150.0,
+          ));
+      await controller.enter();
+      fakeWindow.calls.clear();
+
+      // Toggle lyrics ON in wide: preserves (200, 150) top-left -> 480x222
+      await controller.toggleShowLyrics();
+      expect(settingsStore.settings.miniPlayerShowLyrics, isTrue);
+      expect(
+        fakeWindow.calls,
+        contains('applyGeometry(pos: Offset(200.0, 150.0), size: Size(480.0, 222.0))'),
+      );
+
+      // Toggle shape to square while lyrics ON -> 340x512 preserving top-left
+      fakeWindow.calls.clear();
+      await controller.toggleShape();
+      expect(
+        fakeWindow.calls,
+        contains('applyGeometry(pos: Offset(200.0, 150.0), size: Size(340.0, 512.0))'),
+      );
+
+      // Move near bottom edge (y = 700), toggle lyrics OFF then ON -> clamped to 1080 - 512 = 568
+      await controller.toggleShowLyrics(); // OFF -> 340x440
+      fakeWindow.currentGeometry = fakeWindow.currentGeometry.copyWith(
+        position: const Offset(200, 620),
+      );
+      fakeWindow.calls.clear();
+      settingsStore.update((s) => s.copyWith(miniPlayerShowLyrics: true));
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        fakeWindow.calls,
+        contains('applyGeometry(pos: Offset(200.0, 568.0), size: Size(340.0, 512.0))'),
+      );
+    });
   });
 }

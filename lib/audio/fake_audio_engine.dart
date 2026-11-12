@@ -24,6 +24,7 @@ class FakeAudioEngine extends AudioEngine {
   Duration _position = Duration.zero;
   Duration _duration = const Duration(minutes: 3); // default fake track length
   double _volume = 1.0;
+  double _fadeGain = 1.0;
   bool _muted = false;
   double _speed = 1.0;
   AudioDevice _currentDevice = AudioDevice.auto;
@@ -79,6 +80,15 @@ class FakeAudioEngine extends AudioEngine {
 
   /// The current playback speed multiplier.
   double get speed => _speed;
+
+  /// Current transient fade gain multiplier (0.0–1.0), for tests.
+  double get fadeGain => _fadeGain;
+
+  /// Effective volume after applying [fadeGain], for tests.
+  double get effectiveVolume => (_volume * _fadeGain).clamp(0.0, 1.0);
+
+  /// Sequence of fade gains passed to [setFadeGain], for tests.
+  final List<double> fadeGainHistory = [];
 
   /// Set the fake duration before or after [open].
   set fakeDuration(Duration d) {
@@ -266,6 +276,16 @@ class FakeAudioEngine extends AudioEngine {
 
   @override
   double get currentVolume => _volume;
+
+  @override
+  double get currentFadeGain => _fadeGain;
+
+  @override
+  Future<void> setFadeGain(double gain) async {
+    final clamped = gain.clamp(0.0, 1.0);
+    _fadeGain = clamped;
+    fadeGainHistory.add(clamped);
+  }
 
   @override
   Stream<AudioError> get errorStream => _errorCtrl.stream;

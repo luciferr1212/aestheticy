@@ -8,6 +8,9 @@ enum AppShortcutScope {
 
   /// Active when Now Playing or Full Screen views are focused.
   nowPlaying,
+
+  /// Active only in Full Screen or Mini Player views.
+  fullScreenAndMini,
 }
 
 /// Identifiers for all supported shortcuts in Aestheticy.
@@ -51,10 +54,22 @@ enum AppShortcutId {
   /// Global shortcut: decrease volume by 5% (Ctrl + Down).
   volumeDown,
 
-  /// Space chord: skip to next track (Space + →).
+  /// Overlay shortcut: increase volume by 5% with Up arrow in Full Screen or Mini Player.
+  overlayVolumeUp,
+
+  /// Overlay shortcut: decrease volume by 5% with Down arrow in Full Screen or Mini Player.
+  overlayVolumeDown,
+
+  /// Global shortcut: open the keyboard shortcuts cheat sheet (? / Shift + /).
+  shortcutsHelp,
+
+  /// Global shortcut: open the keyboard shortcuts cheat sheet (Ctrl + /).
+  shortcutsHelpCtrl,
+
+  /// Space chord: skip to next track (Space + ->).
   chordNext,
 
-  /// Space chord: skip to previous track (Space + ←).
+  /// Space chord: skip to previous track (Space + <-).
   chordPrevious,
 
   /// Global shortcut: enter mini player mode (Ctrl + M).
@@ -78,8 +93,14 @@ class AppShortcutItem {
   /// Activator used for runtime bindings where applicable.
   final ShortcutActivator activator;
 
+  /// Optional extra activators mapped to the same shortcut item.
+  final List<ShortcutActivator> extraActivators;
+
   /// Scope in which this shortcut is active.
   final AppShortcutScope scope;
+
+  /// Whether holding down the key repeats this shortcut cleanly.
+  final bool allowRepeat;
 
   /// Creates an [AppShortcutItem].
   const AppShortcutItem({
@@ -87,7 +108,9 @@ class AppShortcutItem {
     required this.keyCombination,
     required this.descriptionKey,
     required this.activator,
+    this.extraActivators = const [],
     required this.scope,
+    this.allowRepeat = false,
   });
 }
 
@@ -116,6 +139,7 @@ const List<AppShortcutItem> kAppShortcuts = [
     descriptionKey: 'shortcuts.seekBackward',
     activator: SingleActivator(LogicalKeyboardKey.arrowLeft),
     scope: AppShortcutScope.global,
+    allowRepeat: true,
   ),
   AppShortcutItem(
     id: AppShortcutId.seekForward,
@@ -123,6 +147,7 @@ const List<AppShortcutItem> kAppShortcuts = [
     descriptionKey: 'shortcuts.seekForward',
     activator: SingleActivator(LogicalKeyboardKey.arrowRight),
     scope: AppShortcutScope.global,
+    allowRepeat: true,
   ),
   AppShortcutItem(
     id: AppShortcutId.chordNext,
@@ -200,6 +225,7 @@ const List<AppShortcutItem> kAppShortcuts = [
     descriptionKey: 'shortcuts.volumeUp',
     activator: SingleActivator(LogicalKeyboardKey.arrowUp, control: true),
     scope: AppShortcutScope.global,
+    allowRepeat: true,
   ),
   AppShortcutItem(
     id: AppShortcutId.volumeDown,
@@ -207,6 +233,23 @@ const List<AppShortcutItem> kAppShortcuts = [
     descriptionKey: 'shortcuts.volumeDown',
     activator: SingleActivator(LogicalKeyboardKey.arrowDown, control: true),
     scope: AppShortcutScope.global,
+    allowRepeat: true,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.overlayVolumeUp,
+    keyCombination: '↑',
+    descriptionKey: 'shortcuts.volumeUp',
+    activator: SingleActivator(LogicalKeyboardKey.arrowUp),
+    scope: AppShortcutScope.fullScreenAndMini,
+    allowRepeat: true,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.overlayVolumeDown,
+    keyCombination: '↓',
+    descriptionKey: 'shortcuts.volumeDown',
+    activator: SingleActivator(LogicalKeyboardKey.arrowDown),
+    scope: AppShortcutScope.fullScreenAndMini,
+    allowRepeat: true,
   ),
   AppShortcutItem(
     id: AppShortcutId.miniPlayer,
@@ -222,6 +265,24 @@ const List<AppShortcutItem> kAppShortcuts = [
     activator: SingleActivator(LogicalKeyboardKey.f11),
     scope: AppShortcutScope.global,
   ),
+  AppShortcutItem(
+    id: AppShortcutId.shortcutsHelp,
+    keyCombination: '?',
+    descriptionKey: 'shortcuts.help',
+    activator: SingleActivator(LogicalKeyboardKey.slash, shift: true),
+    extraActivators: [
+      SingleActivator(LogicalKeyboardKey.question),
+      SingleActivator(LogicalKeyboardKey.question, shift: true),
+    ],
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.shortcutsHelpCtrl,
+    keyCombination: 'Ctrl + /',
+    descriptionKey: 'shortcuts.help',
+    activator: SingleActivator(LogicalKeyboardKey.slash, control: true),
+    scope: AppShortcutScope.global,
+  ),
 ];
 
 /// Looks up an [AppShortcutItem] by its [id].
@@ -229,13 +290,59 @@ AppShortcutItem shortcutById(AppShortcutId id) {
   return kAppShortcuts.firstWhere((s) => s.id == id);
 }
 
+/// Returns the localization key for a shortcut [scope].
+String shortcutScopeLabelKey(AppShortcutScope scope) {
+  return switch (scope) {
+    AppShortcutScope.global => 'shortcuts.scopeGlobal',
+    AppShortcutScope.nowPlaying => 'shortcuts.scopeNowPlaying',
+    AppShortcutScope.fullScreenAndMini => 'shortcuts.scopeFullScreenAndMini',
+  };
+}
+
+/// Splits [keyCombination] into normalized key-chip tokens with Western digits
+/// and standard `'Ctrl'` casing.
+List<String> formatShortcutKeyChips(String keyCombination) {
+  final parts = keyCombination.split(' + ');
+  final out = <String>[];
+  for (final raw in parts) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) continue;
+    final western = _toWesternDigits(trimmed);
+    out.add(western.toLowerCase() == 'ctrl' ? 'Ctrl' : western);
+  }
+  return out;
+}
+
+String _toWesternDigits(String input) {
+  final buffer = StringBuffer();
+  for (var i = 0; i < input.length; i++) {
+    final code = input.codeUnitAt(i);
+    if (code >= 0x0660 && code <= 0x0669) {
+      buffer.writeCharCode(0x30 + (code - 0x0660));
+    } else if (code >= 0x06F0 && code <= 0x06F9) {
+      buffer.writeCharCode(0x30 + (code - 0x06F0));
+    } else {
+      buffer.writeCharCode(code);
+    }
+  }
+  return buffer.toString();
+}
+
 /// Checks whether a [KeyEvent] matches the shortcut identified by [id].
 bool matchesShortcut(KeyEvent event, AppShortcutId id) {
-  if (event is! KeyDownEvent) return false;
   for (final item in kAppShortcuts) {
-    if (item.id == id) {
-      return item.activator.accepts(event, HardwareKeyboard.instance);
+    if (item.id != id) continue;
+    if (event is KeyRepeatEvent && !item.allowRepeat) return false;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (item.activator.accepts(event, HardwareKeyboard.instance)) {
+      return true;
     }
+    for (final extra in item.extraActivators) {
+      if (extra.accepts(event, HardwareKeyboard.instance)) {
+        return true;
+      }
+    }
+    return false;
   }
   return false;
 }

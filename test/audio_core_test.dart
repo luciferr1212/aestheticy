@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -1448,10 +1449,429 @@ void main() {
         settingsStore.dispose();
       });
     });
+
+    group('S6c Paused jump & serialization', () {
+      test('rapid paused jump to B then C leaves C opened, not superseded B or resumed A', () async {
+        final slowEngine = _DelayedJumpFakeEngine(
+          openDelays: const {
+            'file:///b.flac': Duration(milliseconds: 60),
+            'file:///c.flac': Duration(milliseconds: 5),
+          },
+          playDelay: const Duration(milliseconds: 40),
+        );
+        await slowEngine.init();
+        final q = PlaybackQueue()..add(_src('a'))..add(_src('b'))..add(_src('c'));
+        final ctrl = PlaybackController(engine: slowEngine, queue: q);
+        await ctrl.init();
+
+        await ctrl.playTrack(0);
+        await ctrl.pause();
+        await Future<void>.delayed(Duration.zero);
+        expect(slowEngine.state, PlaybackState.paused);
+
+        slowEngine.events.clear();
+        unawaited(ctrl.play());
+        unawaited(ctrl.playTrack(1));
+        await ctrl.playTrack(2);
+        await Future<void>.delayed(const Duration(milliseconds: 90));
+
+        expect(ctrl.queue.current?.uri, 'file:///c.flac');
+        expect(slowEngine.openedSource?.uri, 'file:///c.flac');
+        expect(
+          slowEngine.events.where((e) => e == 'play:file:///a.flac'),
+          isEmpty,
+        );
+
+        await ctrl.dispose();
+        await slowEngine.dispose();
+      });
+    });
+
+    group('S6c Smooth transitions & fadeGain', () {
+      test('fadeGain multiplies userVolume without mutating currentVolume or volumeStream, and mid-fade setVolume applies cleanly', () async {
+        final spy = _TimingSpyFakeEngine();
+        await spy.init();
+        await spy.setVolume(0.8);
+
+        final volumeEmissions = <double>[];
+        final vSub = spy.volumeStream.listen(volumeEmissions.add);
+
+        final q = PlaybackQueue()..add(_src('a'));
+        final ctrl = PlaybackController(
+          engine: spy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        await ctrl.play();
+        expect(spy.currentVolume, closeTo(0.8, 1e-6));
+        expect(spy.fadeGain, closeTo(0.0, 1e-6));
+        expect(spy.effectiveVolume, closeTo(0.0, 1e-6));
+
+        // Change user volume halfway through the 250ms fade-in.
+        await Future<void>.delayed(const Duration(milliseconds: 90));
+        final midGain = spy.fadeGain;
+        expect(midGain, greaterThan(0.0));
+        expect(midGain, lessThan(1.0));
+
+        await spy.setVolume(0.5);
+        expect(spy.effectiveVolume, closeTo(0.5 * midGain, 1e-6));
+
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+        expect(spy.currentVolume, closeTo(0.5, 1e-6));
+        expect(spy.effectiveVolume, closeTo(0.5, 1e-6));
+        expect(volumeEmissions, [0.5]);
+
+        await vSub.cancel();
+        await ctrl.dispose();
+        await spy.dispose();
+      });
+
+      test('stopped -> play ramps fadeGain from 0 to 1 over ~250ms, and paused -> resume over ~120ms', () async {
+        final spy = _TimingSpyFakeEngine();
+        await spy.init();
+        final q = PlaybackQueue()..add(_src('a'));
+        final ctrl = PlaybackController(
+          engine: spy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        // 1. Stopped -> play (~250ms fade-in)
+        await ctrl.play();
+        expect(spy.fadeGain, closeTo(0.0, 1e-6));
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        expect(spy.fadeGain, greaterThan(0.05));
+        expect(spy.fadeGain, lessThan(0.95));
+
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+        // Should be monotonically non-decreasing.
+        for (var i = 1; i < spy.fadeGainHistory.length; i++) {
+          expect(
+            spy.fadeGainHistory[i],
+            greaterThanOrEqualTo(spy.fadeGainHistory[i - 1] - 1e-9),
+          );
+        }
+
+        // 2. Pause while playing: 100ms fade-out -> pause -> restore 1.0
+        spy.events.clear();
+        spy.fadeGainHistory.clear();
+        final swPause = Stopwatch()..start();
+        await ctrl.pause();
+        swPause.stop();
+
+        expect(swPause.elapsedMilliseconds, greaterThanOrEqualTo(75));
+        expect(spy.state, PlaybackState.paused);
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+        // Second-to-last fadeGain before restoring 1.0 must have reached 0.0 before pause.
+        final pauseIdx = spy.events.indexWhere((e) => e.startsWith('pause:'));
+        final zeroBeforePause = spy.events.sublist(0, pauseIdx).where((e) => e == 'gain:0.000');
+        expect(zeroBeforePause, isNotEmpty);
+
+        // 3. Paused -> resume (~120ms fade-in, no re-open)
+        final openBefore = spy.openCallCount;
+        spy.fadeGainHistory.clear();
+        await ctrl.play();
+        expect(spy.openCallCount, openBefore);
+        expect(spy.fadeGain, closeTo(0.0, 1e-6));
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+
+        await ctrl.dispose();
+        await spy.dispose();
+      });
+
+      test('manual jump while playing does 120ms fade-out + 60ms silent gap + 250ms fade-in', () async {
+        final spy = _TimingSpyFakeEngine();
+        await spy.init();
+        final q = PlaybackQueue()..add(_src('a'))..add(_src('b'));
+        final ctrl = PlaybackController(
+          engine: spy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        await ctrl.playTrack(0);
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+
+        spy.events.clear();
+        spy.stopwatch.reset();
+        spy.stopwatch.start();
+        spy.zeroGainTimestampMs = null;
+        spy.lastOpenTimestampMs = null;
+
+        await ctrl.skipNext();
+        expect(spy.openedSource?.uri, 'file:///b.flac');
+        // Open of B must wait for ~120ms fade-out + ~60ms gap (~180ms total),
+        // with at least ~50ms spent silent at 0.0 before B opens.
+        expect(spy.zeroGainTimestampMs, isNotNull);
+        expect(spy.lastOpenTimestampMs, isNotNull);
+        expect(spy.zeroGainTimestampMs!, greaterThanOrEqualTo(90));
+        expect(
+          spy.lastOpenTimestampMs! - spy.zeroGainTimestampMs!,
+          greaterThanOrEqualTo(45),
+        );
+        expect(spy.fadeGain, closeTo(0.0, 1e-6));
+
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+
+        await ctrl.dispose();
+        await spy.dispose();
+      });
+
+      test('manual jump while paused does not fade out paused track or unpause it', () async {
+        final spy = _TimingSpyFakeEngine();
+        await spy.init();
+        final q = PlaybackQueue()..add(_src('a'))..add(_src('b'));
+        final ctrl = PlaybackController(
+          engine: spy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        await ctrl.playTrack(0);
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        await ctrl.pause();
+        await Future<void>.delayed(Duration.zero);
+
+        spy.events.clear();
+        final sw = Stopwatch()..start();
+        await ctrl.playTrack(1);
+        sw.stop();
+
+        // Paused jump should open B promptly (< 100ms, no 120ms+60ms fade-out/gap)
+        // and never call engine.play() on paused A.
+        expect(sw.elapsedMilliseconds, lessThan(100));
+        expect(spy.openedSource?.uri, 'file:///b.flac');
+        expect(spy.events.where((e) => e.startsWith('play:')), isEmpty);
+        expect(spy.fadeGain, closeTo(0.0, 1e-6));
+
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+
+        await ctrl.dispose();
+        await spy.dispose();
+      });
+
+      test('stop/shutdown fade-out completes within <= 150ms and restores fadeGain to 1.0', () async {
+        final spy = _TimingSpyFakeEngine();
+        await spy.init();
+        final q = PlaybackQueue()..add(_src('a'));
+        final ctrl = PlaybackController(
+          engine: spy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        await ctrl.play();
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+
+        final sw = Stopwatch()..start();
+        await ctrl.stop();
+        sw.stop();
+
+        expect(sw.elapsedMilliseconds, lessThanOrEqualTo(150));
+        expect(spy.state, PlaybackState.idle);
+        expect(spy.fadeGain, closeTo(1.0, 1e-6));
+
+        await ctrl.dispose();
+        await spy.dispose();
+      });
+
+      test('seek, gapless next, and smoothTransitions=false skip fades', () async {
+        final gaplessSpy = _GaplessTimingSpyFakeEngine();
+        await gaplessSpy.init();
+        final q = PlaybackQueue()..add(_src('a'))..add(_src('b'))..add(_src('c'));
+        final ctrl = PlaybackController(
+          engine: gaplessSpy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        await ctrl.play();
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        expect(gaplessSpy.fadeGain, closeTo(1.0, 1e-6));
+
+        // 1. Seek does not drop fadeGain
+        gaplessSpy.fadeGainHistory.clear();
+        await ctrl.seek(const Duration(seconds: 40));
+        expect(gaplessSpy.fadeGainHistory, isEmpty);
+        expect(gaplessSpy.fadeGain, closeTo(1.0, 1e-6));
+
+        // 2. Gapless completion skips fade and stays at 1.0
+        gaplessSpy.fadeGainHistory.clear();
+        gaplessSpy.simulateCompletion();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(q.current?.uri, 'file:///b.flac');
+        expect(gaplessSpy.fadeGainHistory, isEmpty);
+        expect(gaplessSpy.fadeGain, closeTo(1.0, 1e-6));
+
+        // 3. smoothTransitions = false skips fade on manual jump and restores mid-fade
+        ctrl.smoothTransitions = false;
+        final sw = Stopwatch()..start();
+        await ctrl.skipNext();
+        sw.stop();
+        expect(sw.elapsedMilliseconds, lessThan(50));
+        expect(gaplessSpy.openedSource?.uri, 'file:///c.flac');
+        expect(gaplessSpy.fadeGain, closeTo(1.0, 1e-6));
+
+        // 4. Toggling smoothTransitions off mid-fade cancels fade-in and restores 1.0
+        ctrl.smoothTransitions = true;
+        await ctrl.playTrack(0);
+        expect(gaplessSpy.fadeGain, closeTo(0.0, 1e-6));
+        ctrl.smoothTransitions = false;
+        await Future<void>.delayed(Duration.zero);
+        expect(gaplessSpy.fadeGain, closeTo(1.0, 1e-6));
+
+        await ctrl.dispose();
+        await gaplessSpy.dispose();
+      });
+
+      test('rapid interruption mid-fade switches cleanly without snapping up and dispose cancels timers', () async {
+        final spy = _TimingSpyFakeEngine();
+        await spy.init();
+        final q = PlaybackQueue()..add(_src('a'))..add(_src('b'))..add(_src('c'));
+        final ctrl = PlaybackController(
+          engine: spy,
+          queue: q,
+          smoothTransitions: true,
+        );
+        await ctrl.init();
+
+        await ctrl.playTrack(0);
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+
+        // Start skipNext (enters 120ms fade-out), interrupt mid-way with skipNext to C.
+        final first = ctrl.skipNext();
+        await Future<void>.delayed(const Duration(milliseconds: 45));
+        final gainBeforeInterrupt = spy.fadeGain;
+        expect(gainBeforeInterrupt, lessThan(1.0));
+        spy.fadeGainHistory.clear();
+        await ctrl.skipNext();
+        await first;
+
+        // First fadeGain step after interrupt must not jump up toward 1.0.
+        for (final g in spy.fadeGainHistory) {
+          expect(g, lessThanOrEqualTo(gainBeforeInterrupt + 1e-6));
+        }
+        expect(spy.openedSource?.uri, 'file:///c.flac');
+
+        // Dispose immediately mid-fade-in and ensure no timer errors occur.
+        await ctrl.dispose();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await spy.dispose();
+      });
+    });
   });
 }
 
 // ── Test doubles ────────────────────────────────────────────────────────
+
+/// A fake engine with configurable async delays on [open] and [play] to expose
+/// out-of-order transition races.
+class _DelayedJumpFakeEngine extends FakeAudioEngine {
+  final Map<String, Duration> openDelays;
+  final Duration? playDelay;
+  final List<String> events = [];
+
+  _DelayedJumpFakeEngine({
+    this.openDelays = const {},
+    this.playDelay,
+  });
+
+  @override
+  Future<void> open(
+    AudioSource source, {
+    bool autoPlay = false,
+    bool continuingGapless = false,
+  }) async {
+    final delay = openDelays[source.uri];
+    if (delay != null) {
+      await Future<void>.delayed(delay);
+    }
+    events.add('open:${source.uri}:$autoPlay');
+    await super.open(
+      source,
+      autoPlay: autoPlay,
+      continuingGapless: continuingGapless,
+    );
+  }
+
+  @override
+  Future<void> play() async {
+    final uri = openedSource?.uri;
+    if (playDelay != null) {
+      await Future<void>.delayed(playDelay!);
+    }
+    events.add('play:$uri');
+    await super.play();
+  }
+}
+
+/// Records [setFadeGain], [open], [play], and [pause] sequencing with elapsed timing.
+class _TimingSpyFakeEngine extends FakeAudioEngine {
+  final Stopwatch stopwatch = Stopwatch()..start();
+  final List<String> events = [];
+  int? zeroGainTimestampMs;
+  int? lastOpenTimestampMs;
+
+  @override
+  Future<void> setFadeGain(double gain) async {
+    await super.setFadeGain(gain);
+    events.add('gain:${gain.toStringAsFixed(3)}');
+    if (gain <= 1e-6 && zeroGainTimestampMs == null) {
+      zeroGainTimestampMs = stopwatch.elapsedMilliseconds;
+    }
+  }
+
+  @override
+  Future<void> open(
+    AudioSource source, {
+    bool autoPlay = false,
+    bool continuingGapless = false,
+  }) async {
+    lastOpenTimestampMs = stopwatch.elapsedMilliseconds;
+    events.add('open:${source.uri}:$autoPlay');
+    await super.open(
+      source,
+      autoPlay: autoPlay,
+      continuingGapless: continuingGapless,
+    );
+  }
+
+  @override
+  Future<void> play() async {
+    events.add('play:${openedSource?.uri}');
+    await super.play();
+  }
+
+  @override
+  Future<void> pause() async {
+    events.add('pause:${openedSource?.uri}');
+    await super.pause();
+  }
+}
+
+/// Gapless-capable variant of [_TimingSpyFakeEngine].
+class _GaplessTimingSpyFakeEngine extends _TimingSpyFakeEngine {
+  @override
+  EngineCapabilities get capabilities => const EngineCapabilities(
+        exclusiveMode: false,
+        gapless: true,
+        equalizer: true,
+        replayGain: true,
+      );
+}
 
 /// A fake engine that advertises gapless support so [PlaybackController]
 /// calls [preloadNext].

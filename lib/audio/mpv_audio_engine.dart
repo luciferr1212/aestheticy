@@ -120,6 +120,8 @@ class MpvAudioEngine extends AudioEngine {
   List<AudioDevice> _cachedDevices = const [AudioDevice.auto];
   AudioStreamInfo? _currentStreamInfo;
   double _volume = 1.0;
+  double _fadeGain = 1.0;
+  bool _ignoreMpvVolumeUpdates = false;
   Duration _currentPosition = Duration.zero;
   Duration _currentDuration = Duration.zero;
   String? _currentUri;
@@ -219,7 +221,10 @@ class MpvAudioEngine extends AudioEngine {
 
     // volume  →  mpv property `volume` (0–100 → 0.0–1.0)
     _subs.add(p.stream.volume.listen((v) {
-      _volume = v / 100.0;
+      if (_ignoreMpvVolumeUpdates || (_fadeGain - 1.0).abs() > 1e-6) {
+        return;
+      }
+      _volume = (v / 100.0).clamp(0.0, 1.0);
       _volumeCtrl.add(_volume);
     }));
 
@@ -404,11 +409,25 @@ class MpvAudioEngine extends AudioEngine {
     // A normal open replaces mpv's playlist with this single entry.
     _lastMpvPlaylistIndex = 0;
     _preloadedUri = null;
-    // player.open()  →  mpv command `loadfile`
-    await _player!.open(
-      mpv.Media(source.uri, extras: source.extras),
-      play: autoPlay,
-    );
+    final player = _player!;
+    final shouldLoadPausedFirst = autoPlay && !player.state.playing;
+    if (shouldLoadPausedFirst) {
+      // Open paused first so mpv_audio_kit never sends pause=no before
+      // loadfile replace completes while an outgoing track was paused.
+      await player.open(
+        mpv.Media(source.uri, extras: source.extras),
+        play: false,
+      );
+      if (_currentUri == source.uri) {
+        await player.play();
+      }
+    } else {
+      // player.open()  →  mpv command `loadfile`
+      await player.open(
+        mpv.Media(source.uri, extras: source.extras),
+        play: autoPlay,
+      );
+    }
   }
 
   @override
@@ -444,10 +463,26 @@ class MpvAudioEngine extends AudioEngine {
   }
 
   @override
+  double get currentFadeGain => _fadeGain;
+
+  @override
   Future<void> setVolume(double volume) async {
     final clamped = volume.clamp(0.0, 1.0);
+    _volume = clamped;
+    _ignoreMpvVolumeUpdates = true;
+    _volumeCtrl.add(_volume);
     // player.setVolume()  →  mpv property `volume` (0–100 scale)
-    await _player!.setVolume(clamped * 100.0);
+    await _player!.setVolume((_volume * _fadeGain).clamp(0.0, 1.0) * 100.0);
+  }
+
+  @override
+  Future<void> setFadeGain(double gain) async {
+    final clamped = gain.clamp(0.0, 1.0);
+    _fadeGain = clamped;
+    _ignoreMpvVolumeUpdates = true;
+    final p = _player;
+    if (p == null) return;
+    await p.setVolume((_volume * _fadeGain).clamp(0.0, 1.0) * 100.0);
   }
 
   @override

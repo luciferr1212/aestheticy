@@ -65,6 +65,14 @@ abstract class AudioEngine {
   /// Sets the software volume. [volume] is clamped to 0.0–1.0.
   Future<void> setVolume(double volume);
 
+  /// Current transient fade gain multiplier (0.0–1.0) applied on top of user volume.
+  double get currentFadeGain => 1.0;
+
+  /// Sets the transient fade gain multiplier (0.0–1.0) applied on top of user volume.
+  ///
+  /// Must not alter [currentVolume] or emit on [volumeStream].
+  Future<void> setFadeGain(double gain) async {}
+
   /// Mutes or unmutes the output.
   Future<void> setMuted(bool muted);
 

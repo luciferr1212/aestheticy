@@ -1,6 +1,7 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/playback_controller.dart';
@@ -36,11 +37,14 @@ import '../settings/app_shortcuts.dart';
 import '../settings/audio_settings_applier.dart';
 import '../settings/settings_store.dart';
 import '../settings/settings_view.dart';
+import '../settings/shortcuts_cheat_sheet_dialog.dart';
 import 'ambient_background.dart';
 import 'app_navigator.dart';
 import 'bottom_now_playing_bar.dart';
+import 'global_playback_keys.dart';
 import 'scanning_panel.dart';
 import 'sidebar.dart';
+import 'volume_hud.dart';
 
 /// Flagship application shell hosting the ambient background, navigation sidebar,
 /// dynamic content area, top scanning progress bar, and floating bottom player bar.
@@ -117,17 +121,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   List<LibraryFolder> _folders = [];
   bool _isLoadingFolders = true;
 
-  bool _isSpaceDown = false;
-  bool _spaceChordUsed = false;
-  int _arrowHeldDirection = 0;
-  DateTime? _lastSeekTimestamp;
+  late final GlobalPlaybackKeysHandler _playbackKeysHandler;
+  bool _shortcutsDialogOpen = false;
   bool _wasFullScreen = false;
   bool _wasMaximizedBeforeFullScreen = false;
+  bool _needsMaximizeRestore = false;
+  bool _isSyncingFullScreen = false;
+  bool _fullScreenSyncRequested = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _playbackKeysHandler = _createPlaybackKeysHandler();
     if (widget.lyricsController != null) {
       _lyricsController = widget.lyricsController!;
     } else {
@@ -149,13 +155,49 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.settingsStore.addListener(_onSettingsChange);
   }
 
+  GlobalPlaybackKeysHandler _createPlaybackKeysHandler() {
+    return GlobalPlaybackKeysHandler(
+      controller: widget.controller,
+      engine: widget.engine,
+      settingsStore: widget.settingsStore,
+      volumeHudProvider: () => VolumeHudScope.maybeOf(context),
+      isInFullScreenOrMini: () =>
+          widget.navigator.current == AppDestination.fullScreen,
+      onEscape: () {
+        if (_shortcutsDialogOpen) return false;
+        final current = widget.navigator.current;
+        if (current == AppDestination.fullScreen ||
+            current == AppDestination.nowPlaying ||
+            current == AppDestination.lyrics ||
+            current == AppDestination.queue) {
+          widget.navigator.goBack();
+          return true;
+        }
+        return false;
+      },
+      onToggleFullScreen: widget.navigator.toggleFullScreen,
+      onEnterMiniPlayer: widget.miniPlayerController?.enter,
+      onShowShortcutsCheatSheet: _openShortcutsCheatSheet,
+      isShortcutsCheatSheetOpen: () => _shortcutsDialogOpen,
+    );
+  }
+
+  void _openShortcutsCheatSheet() {
+    if (_shortcutsDialogOpen || !mounted) return;
+    _shortcutsDialogOpen = true;
+    showShortcutsCheatSheetDialog(context).whenComplete(() {
+      _shortcutsDialogOpen = false;
+    });
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _playbackKeysHandler.dispose();
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
     }
-    if (_wasFullScreen) {
+    if (_wasFullScreen && !_isSyncingFullScreen) {
       _wasFullScreen = false;
       widget.windowService?.setFullScreen(false);
     }
@@ -168,40 +210,77 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      _resetKeyboardState();
+      _playbackKeysHandler.reset();
     }
-  }
-
-  void _resetKeyboardState() {
-    _isSpaceDown = false;
-    _spaceChordUsed = false;
-    _arrowHeldDirection = 0;
-    _lastSeekTimestamp = null;
   }
 
   void _onSettingsChange() {
     if (mounted) setState(() {});
   }
 
-  void _onNavigatorChange() async {
-    final isFullScreen = widget.navigator.current == AppDestination.fullScreen;
-    if (isFullScreen && !_wasFullScreen) {
-      _wasFullScreen = true;
-      if (widget.windowService != null) {
-        final geo = await widget.windowService!.getGeometry();
-        _wasMaximizedBeforeFullScreen = geo.isMaximized;
-        await widget.windowService!.setFullScreen(true);
-      }
-    } else if (!isFullScreen && _wasFullScreen) {
-      _wasFullScreen = false;
-      if (widget.windowService != null) {
-        await widget.windowService!.setFullScreen(false);
-        if (_wasMaximizedBeforeFullScreen) {
-          await widget.windowService!.maximize();
+  void _onNavigatorChange() {
+    if (mounted) setState(() {});
+    _scheduleFullScreenSync();
+  }
+
+  void _scheduleFullScreenSync() {
+    _fullScreenSyncRequested = true;
+    if (_isSyncingFullScreen || widget.windowService == null) {
+      return;
+    }
+    unawaited(_drainFullScreenTransitions());
+  }
+
+  Future<void> _drainFullScreenTransitions() async {
+    if (_isSyncingFullScreen) return;
+    _isSyncingFullScreen = true;
+    try {
+      final windowService = widget.windowService;
+      if (windowService == null) return;
+
+      while (mounted &&
+          (_fullScreenSyncRequested ||
+              (widget.navigator.current == AppDestination.fullScreen) !=
+                  _wasFullScreen)) {
+        _fullScreenSyncRequested = false;
+        final wantFullScreen =
+            widget.navigator.current == AppDestination.fullScreen;
+        if (wantFullScreen == _wasFullScreen) {
+          continue;
+        }
+
+        if (wantFullScreen) {
+          final geo = await windowService.getGeometry();
+          if (!mounted) break;
+          if (widget.navigator.current != AppDestination.fullScreen) {
+            continue;
+          }
+          if (!_needsMaximizeRestore) {
+            _wasMaximizedBeforeFullScreen = geo.isMaximized;
+          }
+          _wasFullScreen = true;
+          _needsMaximizeRestore = false;
+          await windowService.setFullScreen(true);
+        } else {
+          _wasFullScreen = false;
+          _needsMaximizeRestore = _wasMaximizedBeforeFullScreen;
+          await windowService.setFullScreen(false);
+          if (!mounted) break;
+          if (widget.navigator.current == AppDestination.fullScreen) {
+            continue;
+          }
+          if (_needsMaximizeRestore) {
+            _needsMaximizeRestore = false;
+            _wasMaximizedBeforeFullScreen = false;
+            await windowService.maximize();
+          } else {
+            _wasMaximizedBeforeFullScreen = false;
+          }
         }
       }
+    } finally {
+      _isSyncingFullScreen = false;
     }
-    if (mounted) setState(() {});
   }
 
   void _onScanChange() {
@@ -399,200 +478,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  bool _isDeepWidgetConsumed({required bool isArrow}) {
-    final focusNode = FocusManager.instance.primaryFocus;
-    final focusContext = focusNode?.context;
-    if (focusContext == null) return false;
-
-    // Editable text (search, text inputs)
-    if (focusContext.widget is EditableText ||
-        focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
-      return true;
-    }
-
-    // Modal routes, popups, dialogs
-    final route = ModalRoute.of(focusContext);
-    if (route is PopupRoute ||
-        focusContext.findAncestorWidgetOfExactType<Dialog>() != null) {
-      return true;
-    }
-
-    // Sliders handle arrow keys directly
-    if (isArrow && focusContext.findAncestorWidgetOfExactType<Slider>() != null) {
-      return true;
-    }
-
-    // Buttons consume Space
-    if (!isArrow &&
-        (focusContext.findAncestorWidgetOfExactType<ButtonStyleButton>() != null ||
-            focusContext.findAncestorWidgetOfExactType<IconButton>() != null)) {
-      return true;
-    }
-
-    return false;
-  }
-
-  void _performSeek(Duration delta) {
-    final currentPos = widget.controller.currentPosition;
-    final totalDuration = widget.controller.currentDuration;
-
-    var target = currentPos + delta;
-    if (target < Duration.zero) {
-      target = Duration.zero;
-    } else if (totalDuration > Duration.zero && target > totalDuration) {
-      target = totalDuration;
-    }
-
-    widget.controller.seek(target);
-  }
-
-  KeyEventResult _handleRootKeyEvent(FocusNode node, KeyEvent event) {
-    // 1. Esc key (Back)
-    if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.back)) {
-      if (widget.navigator.current == AppDestination.fullScreen) {
-        widget.navigator.goBack();
-        return KeyEventResult.handled;
-      }
-      if (widget.navigator.current == AppDestination.nowPlaying ||
-          widget.navigator.current == AppDestination.lyrics ||
-          widget.navigator.current == AppDestination.queue) {
-        widget.navigator.goBack();
-        return KeyEventResult.handled;
-      }
-    }
-
-    // Full screen toggle (F11)
-    if (event is KeyDownEvent &&
-        matchesShortcut(event, AppShortcutId.toggleFullScreen)) {
-      widget.navigator.toggleFullScreen();
-      return KeyEventResult.handled;
-    }
-
-    // Mini player enter (Ctrl + M)
-    if (event is KeyDownEvent &&
-        matchesShortcut(event, AppShortcutId.miniPlayer)) {
-      widget.miniPlayerController?.enter();
-      return KeyEventResult.handled;
-    }
-
-    // 2. Volume controls (Ctrl + Up / Down)
-    if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.volumeUp)) {
-      final currentVol = widget.settingsStore.settings.volume;
-      final newVol = (currentVol + 0.05).clamp(0.0, 1.0);
-      final rounded = (newVol * 100).round() / 100.0;
-      widget.engine.setVolume(rounded);
-      widget.settingsStore.update((s) => s.copyWith(volume: rounded));
-      return KeyEventResult.handled;
-    }
-
-    if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.volumeDown)) {
-      final currentVol = widget.settingsStore.settings.volume;
-      final newVol = (currentVol - 0.05).clamp(0.0, 1.0);
-      final rounded = (newVol * 100).round() / 100.0;
-      widget.engine.setVolume(rounded);
-      widget.settingsStore.update((s) => s.copyWith(volume: rounded));
-      return KeyEventResult.handled;
-    }
-
-    // 3. Media keys & Ctrl + Left / Right
-    if (event is KeyDownEvent) {
-      if (matchesShortcut(event, AppShortcutId.mediaPlayPause)) {
-        widget.controller.togglePlayPause();
-        return KeyEventResult.handled;
-      }
-      if (matchesShortcut(event, AppShortcutId.nextTrack) ||
-          matchesShortcut(event, AppShortcutId.mediaNext)) {
-        widget.controller.skipNext();
-        return KeyEventResult.handled;
-      }
-      if (matchesShortcut(event, AppShortcutId.previousTrack) ||
-          matchesShortcut(event, AppShortcutId.mediaPrevious)) {
-        widget.controller.skipPrevious();
-        return KeyEventResult.handled;
-      }
-    }
-
-    // 4. Space key tracking
-    if (isSpaceKey(event)) {
-      if (_isDeepWidgetConsumed(isArrow: false)) {
-        _resetKeyboardState();
-        return KeyEventResult.ignored;
-      }
-
-      if (event is KeyDownEvent) {
-        _isSpaceDown = true;
-        _spaceChordUsed = false;
-        return KeyEventResult.handled;
-      } else if (event is KeyRepeatEvent) {
-        return KeyEventResult.handled;
-      } else if (event is KeyUpEvent) {
-        final wasDown = _isSpaceDown;
-        final chordUsed = _spaceChordUsed;
-        _isSpaceDown = false;
-        _spaceChordUsed = false;
-        if (wasDown && !chordUsed) {
-          widget.controller.togglePlayPause();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.handled;
-      }
-    }
-
-    // 5. Left and Right arrows (seek or space chord)
-    if (isArrowLeftKey(event) || isArrowRightKey(event)) {
-      final isRight = isArrowRightKey(event);
-
-      // 5A. Space chord: Space + Right / Left
-      if (_isSpaceDown) {
-        if (event is KeyDownEvent) {
-          if (isRight) {
-            widget.controller.skipNext();
-          } else {
-            widget.controller.skipPrevious();
-          }
-          _spaceChordUsed = true;
-          return KeyEventResult.handled;
-        } else if (event is KeyRepeatEvent || event is KeyUpEvent) {
-          return KeyEventResult.handled;
-        }
-      }
-
-      // 5B. Normal Seek arrows: Left / Right
-      if (_isDeepWidgetConsumed(isArrow: true)) {
-        _arrowHeldDirection = 0;
-        _lastSeekTimestamp = null;
-        return KeyEventResult.ignored;
-      }
-
-      final direction = isRight ? 1 : -1;
-      final stepSeconds = widget.settingsStore.settings.seekStepSeconds;
-      final delta = Duration(seconds: direction * stepSeconds);
-
-      if (event is KeyDownEvent) {
-        _arrowHeldDirection = direction;
-        _lastSeekTimestamp = DateTime.now();
-        _performSeek(delta);
-        return KeyEventResult.handled;
-      } else if (event is KeyRepeatEvent) {
-        final now = DateTime.now();
-        if (_lastSeekTimestamp == null ||
-            now.difference(_lastSeekTimestamp!).inMilliseconds >= 120) {
-          _lastSeekTimestamp = now;
-          _performSeek(delta);
-        }
-        return KeyEventResult.handled;
-      } else if (event is KeyUpEvent) {
-        if (_arrowHeldDirection != 0) {
-          _arrowHeldDirection = 0;
-          _lastSeekTimestamp = null;
-          return KeyEventResult.handled;
-        }
-      }
-    }
-
-    return KeyEventResult.ignored;
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoadingFolders) {
@@ -733,9 +618,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       },
       child: Focus(
         autofocus: true,
-        onKeyEvent: _handleRootKeyEvent,
+        onKeyEvent: _playbackKeysHandler.handleKeyEvent,
         onFocusChange: (hasFocus) {
-          if (!hasFocus) _resetKeyboardState();
+          if (!hasFocus) _playbackKeysHandler.reset();
         },
         child: UserCollectionsScope(
           collections: _userCollections,

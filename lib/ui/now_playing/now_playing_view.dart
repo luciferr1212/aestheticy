@@ -27,6 +27,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import 'cover_palette.dart';
+import 'seek_bar_helper.dart';
 
 /// Full-window Now Playing screen with two-column responsive layout,
 /// artwork, transport controls, isolated seekbar, up next queue, and stream info.
@@ -941,19 +942,21 @@ class _NowPlayingSeekBarState extends State<NowPlayingSeekBar> {
       stream: engine.durationStream,
       initialData: controller?.currentDuration ?? engine.currentDuration,
       builder: (context, durSnapshot) {
-        final totalDuration = (controller != null && controller.currentState == PlaybackState.idle)
-            ? controller.currentDuration
-            : (durSnapshot.data != null && durSnapshot.data! > Duration.zero
-                ? durSnapshot.data!
-                : (controller?.currentDuration ?? Duration.zero));
+        final totalDuration = resolveSeekBarDuration(
+          engine: engine,
+          controller: controller,
+          streamDuration: durSnapshot.data,
+        );
 
         return StreamBuilder<Duration>(
           stream: engine.positionStream,
           initialData: controller?.currentPosition ?? engine.currentPosition,
           builder: (context, posSnapshot) {
-            final position = (controller != null && controller.currentState == PlaybackState.idle)
-                ? controller.currentPosition
-                : (posSnapshot.data ?? controller?.currentPosition ?? Duration.zero);
+            final position = resolveSeekBarPosition(
+              engine: engine,
+              controller: controller,
+              streamPosition: posSnapshot.data,
+            );
             final maxMs = totalDuration.inMilliseconds.toDouble();
             final currentMs =
                 position.inMilliseconds.toDouble().clamp(0.0, maxMs > 0 ? maxMs : 1.0);
@@ -991,11 +994,12 @@ class _NowPlayingSeekBarState extends State<NowPlayingSeekBar> {
                           max: maxMs > 0 ? maxMs : 1.0,
                           onChanged: (val) {
                             final target = Duration(milliseconds: val.toInt());
-                            if (controller != null) {
-                              controller.seek(target);
-                            } else {
-                              engine.seek(target);
-                            }
+                            dispatchSeekBarSeek(
+                              engine: engine,
+                              controller: controller,
+                              target: target,
+                              totalDuration: totalDuration,
+                            );
                             if (controller?.currentState == PlaybackState.idle) {
                               setState(() {});
                             }

@@ -11,7 +11,12 @@ import '../../audio/playback_controller.dart';
 import '../../diagnostics/app_logger.dart';
 import '../../ui/settings/settings_store.dart';
 import 'lyrics_models.dart';
+import 'lyrics_offset_store.dart';
 import 'lyrics_repository.dart';
+
+/// Number of milliseconds before a synced line timestamp that it becomes active
+/// so line scale/opacity and scroll transitions land on the beat.
+const int kLyricsLineLeadMs = 120;
 
 /// Presentation state of the lyrics controller.
 sealed class LyricsControllerState {
@@ -71,9 +76,15 @@ class LyricsController extends ChangeNotifier {
   final PlaybackController playbackController;
   final LyricsRepository repository;
   final SettingsStore settingsStore;
+  late final LyricsOffsetStore _offsetStore;
+  bool _createdOffsetStoreLocally = false;
 
   final List<StreamSubscription<dynamic>> _subs = [];
   int _requestId = 0;
+  int _offsetRequestId = 0;
+  int _offsetMs = 0;
+  Duration _lastPlaybackPosition = Duration.zero;
+  bool _hasRecordedPosition = false;
   String? _currentTrackUri;
   String _lastLyricsSource = '';
   Future<void>? _currentResolveFuture;
@@ -86,6 +97,8 @@ class LyricsController extends ChangeNotifier {
   int _currentLineIndex = -1;
   int _currentWordIndex = -1;
   double _wordProgress = 0.0;
+  final ValueNotifier<int> _activeLineNotifier = ValueNotifier<int>(-1);
+  final ValueNotifier<int> _activeWordNotifier = ValueNotifier<int>(-1);
   bool _disposed = false;
 
   /// Creates a [LyricsController].
@@ -93,7 +106,14 @@ class LyricsController extends ChangeNotifier {
     required this.playbackController,
     required this.repository,
     required this.settingsStore,
+    LyricsOffsetStore? offsetStore,
   }) {
+    if (offsetStore != null) {
+      _offsetStore = offsetStore;
+    } else {
+      _offsetStore = LyricsOffsetStore();
+      _createdOffsetStoreLocally = true;
+    }
     _lastLyricsSource = settingsStore.settings.lyricsSource;
 
     // Follow track changes
@@ -116,6 +136,7 @@ class LyricsController extends ChangeNotifier {
     final current = playbackController.queue.current;
     if (current != null) {
       _currentTrackUri = current.uri;
+      unawaited(_loadOffsetForTrack(current, ++_offsetRequestId));
       _currentResolveFuture = _resolveForSource(current);
     } else {
       _state = settingsStore.settings.lyricsSource == 'off'
@@ -133,11 +154,43 @@ class LyricsController extends ChangeNotifier {
   /// 0-based index of the actively playing line, or -1 if before the first line or not found.
   int get currentLineIndex => _currentLineIndex;
 
+  /// Listenables for selector-based line and word updates without whole-list rebuilds.
+  ValueListenable<int> get activeLineListenable => _activeLineNotifier;
+
+  /// Listenable notifying when the active word index changes.
+  ValueListenable<int> get activeWordListenable => _activeWordNotifier;
+
   /// 0-based index of the actively playing word within [currentLineIndex], or -1.
   int get currentWordIndex => _currentWordIndex;
 
   /// 0.0 to 1.0 progress of the current word between start and end times.
   double get wordProgress => _wordProgress;
+
+  /// Current per-track lyrics timing offset in milliseconds (`-15000..+15000`).
+  int get offsetMs => _offsetMs;
+
+  /// Updates the current track's lyrics timing offset and persists it.
+  ///
+  /// Positive values delay lyrics (show later); negative values advance them.
+  Future<void> setOffset(int ms) async {
+    if (_disposed) return;
+    final uri = _currentTrackUri;
+    if (uri == null) return;
+    _offsetRequestId++;
+    final clamped = LyricsOffsetStore.clampOffsetMs(ms);
+    if (clamped != _offsetMs) {
+      _offsetMs = clamped;
+      final pos = _hasRecordedPosition
+          ? _lastPlaybackPosition
+          : playbackController.currentPosition;
+      _calculatePosition(pos);
+      notifyListeners();
+    }
+    await _offsetStore.setOffset(_trackPathForUri(uri), clamped);
+  }
+
+  /// Resets the current track's lyrics offset to zero.
+  Future<void> resetOffset() => setOffset(0);
 
   /// Currently loaded document, or null if not found/error/loading.
   LyricsDocument? get document => switch (_state) {
@@ -166,9 +219,15 @@ class LyricsController extends ChangeNotifier {
     if (_disposed) return;
     final newUri = source?.uri;
     _currentTrackUri = newUri;
+    _offsetRequestId++;
+    _offsetMs = 0;
+    _hasRecordedPosition = false;
+    _lastPlaybackPosition = Duration.zero;
     _currentLineIndex = -1;
     _currentWordIndex = -1;
     _wordProgress = 0.0;
+    _activeLineNotifier.value = -1;
+    _activeWordNotifier.value = -1;
 
     if (source == null) {
       _requestId++;
@@ -177,7 +236,31 @@ class LyricsController extends ChangeNotifier {
       return;
     }
 
+    unawaited(_loadOffsetForTrack(source, _offsetRequestId));
     _currentResolveFuture = _resolveForSource(source);
+  }
+
+  static String _trackPathForUri(String uri) {
+    return uri.replaceFirst(RegExp(r'^file:\/\/\/|^file:\/\/'), '');
+  }
+
+  Future<void> _loadOffsetForTrack(AudioSource source, int reqId) async {
+    final trackPath = _trackPathForUri(source.uri);
+    final loaded = await _offsetStore.loadOffset(trackPath);
+    if (_disposed ||
+        reqId != _offsetRequestId ||
+        _currentTrackUri != source.uri) {
+      return;
+    }
+    final clamped = LyricsOffsetStore.clampOffsetMs(loaded);
+    if (clamped != _offsetMs) {
+      _offsetMs = clamped;
+      final pos = _hasRecordedPosition
+          ? _lastPlaybackPosition
+          : playbackController.currentPosition;
+      _calculatePosition(pos);
+      notifyListeners();
+    }
   }
 
   /// Retries resolution for the current track.
@@ -193,6 +276,7 @@ class LyricsController extends ChangeNotifier {
 
     final mode = settingsStore.settings.lyricsSource;
     if (mode == 'off') {
+      _resetPositionSelection();
       _state = const LyricsStateOff();
       notifyListeners();
       return;
@@ -227,6 +311,7 @@ class LyricsController extends ChangeNotifier {
           _calculatePosition(playbackController.currentPosition);
           notifyListeners();
         case LyricsResultNotFound():
+          _resetPositionSelection();
           _state = const LyricsStateNotFound();
           notifyListeners();
         case LyricsResultError(reason: final r):
@@ -234,17 +319,28 @@ class LyricsController extends ChangeNotifier {
             'Lyrics',
             'Lyrics resolution failed with reason: ${r.name}',
           );
+          _resetPositionSelection();
           _state = LyricsStateError(r);
           notifyListeners();
         case LyricsResultOff():
+          _resetPositionSelection();
           _state = const LyricsStateOff();
           notifyListeners();
       }
     } catch (_) {
       if (_disposed || thisRequestId != _requestId) return;
+      _resetPositionSelection();
       _state = const LyricsStateError(LyricsErrorReason.badResponse);
       notifyListeners();
     }
+  }
+
+  void _resetPositionSelection() {
+    _currentLineIndex = -1;
+    _currentWordIndex = -1;
+    _wordProgress = 0.0;
+    _activeLineNotifier.value = -1;
+    _activeWordNotifier.value = -1;
   }
 
   /// Updates current line and word positions according to [position].
@@ -253,6 +349,8 @@ class LyricsController extends ChangeNotifier {
   /// [forceNotify] is true (e.g. for smooth animation tickers).
   void updatePosition(Duration position, {bool forceNotify = false}) {
     if (_disposed) return;
+    _lastPlaybackPosition = position;
+    _hasRecordedPosition = true;
     final changed = _calculatePosition(position);
     if (changed || forceNotify) {
       notifyListeners();
@@ -265,10 +363,12 @@ class LyricsController extends ChangeNotifier {
       var didChange = false;
       if (_currentLineIndex != -1) {
         _currentLineIndex = -1;
+        _activeLineNotifier.value = -1;
         didChange = true;
       }
       if (_currentWordIndex != -1) {
         _currentWordIndex = -1;
+        _activeWordNotifier.value = -1;
         didChange = true;
       }
       if (_wordProgress != 0.0) {
@@ -278,9 +378,14 @@ class LyricsController extends ChangeNotifier {
       return didChange;
     }
 
-    final posMs = position.inMilliseconds;
-    final newLineIndex = _binarySearchLine(doc.lines, posMs);
+    // Effective position = playback position minus user offset.
+    // Positive offset delays lyrics (show later); negative shows earlier.
+    final effectivePosMs = position.inMilliseconds - _offsetMs;
+    // Apply line lead ONLY to line activation, never to word timing.
+    final linePosMs = effectivePosMs + kLyricsLineLeadMs;
+    final newLineIndex = _binarySearchLine(doc.lines, linePosMs);
 
+    final wordPosMs = effectivePosMs;
     var newWordIndex = -1;
     var newWordProgress = 0.0;
 
@@ -288,11 +393,11 @@ class LyricsController extends ChangeNotifier {
       final line = doc.lines[newLineIndex];
       final words = line.words;
       if (words != null && words.isNotEmpty) {
-        if (posMs >= words.first.startMs) {
-          // Find the active word
+        if (wordPosMs >= words.first.startMs) {
+          // Find the active word strictly from un-leaded playback position
           var wIdx = 0;
           for (var i = 0; i < words.length; i++) {
-            if (words[i].startMs <= posMs) {
+            if (words[i].startMs <= wordPosMs) {
               wIdx = i;
             } else {
               break;
@@ -303,7 +408,7 @@ class LyricsController extends ChangeNotifier {
           final w = words[wIdx];
           final end = w.endMs;
           if (end != null && end > w.startMs) {
-            newWordProgress = ((posMs - w.startMs) / (end - w.startMs)).clamp(0.0, 1.0);
+            newWordProgress = ((wordPosMs - w.startMs) / (end - w.startMs)).clamp(0.0, 1.0);
           } else {
             newWordProgress = 1.0;
           }
@@ -318,6 +423,12 @@ class LyricsController extends ChangeNotifier {
     _currentLineIndex = newLineIndex;
     _currentWordIndex = newWordIndex;
     _wordProgress = newWordProgress;
+    if (_activeLineNotifier.value != newLineIndex) {
+      _activeLineNotifier.value = newLineIndex;
+    }
+    if (_activeWordNotifier.value != newWordIndex) {
+      _activeWordNotifier.value = newWordIndex;
+    }
 
     return changed;
   }
@@ -352,6 +463,11 @@ class LyricsController extends ChangeNotifier {
     }
     _subs.clear();
     settingsStore.removeListener(_onSettingsChanged);
+    if (_createdOffsetStoreLocally) {
+      _offsetStore.dispose();
+    }
+    _activeLineNotifier.dispose();
+    _activeWordNotifier.dispose();
     super.dispose();
   }
 }

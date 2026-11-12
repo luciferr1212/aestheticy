@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
@@ -19,6 +20,7 @@ import '../settings/settings_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'volume_hud.dart';
 
 /// Floating bottom player bar providing transport controls, track metadata,
 /// seeking, and auxiliary controls.
@@ -550,6 +552,7 @@ class _EndControlsArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settingsStore = SettingsScope.maybeOf(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -587,14 +590,39 @@ class _EndControlsArea extends StatelessWidget {
         ),
         const SizedBox(width: 4),
 
-        // Volume (enabled)
-        GlassIconButton(
-          key: const Key('player_volume_button'),
-          icon: Icons.volume_up,
-          tooltip: context.t('common.volume'),
-          semanticLabel: context.t('common.volume'),
-          size: GlassButtonSize.small,
-          onPressed: () => _showVolumePopup(context),
+        // Volume (enabled, click for popup slider, scroll wheel for +/-5% step)
+        Listener(
+          key: const Key('player_volume_wheel_listener'),
+          onPointerSignal: (event) {
+            if (event is PointerScrollEvent && event.scrollDelta.dy != 0) {
+              GestureBinding.instance.pointerSignalResolver.register(
+                event,
+                (resolvedEvent) {
+                  final scroll = resolvedEvent as PointerScrollEvent;
+                  final delta = scroll.scrollDelta.dy < 0 ? 0.05 : -0.05;
+                  final currentVol = settingsStore?.settings.volume ??
+                      controller.engine.currentVolume;
+                  final hudController =
+                      context.mounted ? VolumeHudScope.maybeOf(context) : null;
+                  adjustVolumeByStep(
+                    engine: controller.engine,
+                    currentVolume: currentVol,
+                    delta: delta,
+                    settingsStore: settingsStore,
+                    hudController: hudController,
+                  );
+                },
+              );
+            }
+          },
+          child: GlassIconButton(
+            key: const Key('player_volume_button'),
+            icon: Icons.volume_up,
+            tooltip: context.t('common.volume'),
+            semanticLabel: context.t('common.volume'),
+            size: GlassButtonSize.small,
+            onPressed: () => _showVolumePopup(context),
+          ),
         ),
         const SizedBox(width: 4),
 

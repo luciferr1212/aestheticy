@@ -95,6 +95,12 @@ class AppSettings {
   /// Last remembered Y coordinate in logical pixels (used when position is 'remember').
   final double? miniPlayerLastY;
 
+  /// Whether compact lyrics are displayed in the mini player window.
+  final bool miniPlayerShowLyrics;
+
+  /// Whether smooth volume fade transitions are enabled around playback changes.
+  final bool smoothTransitions;
+
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
     this.language = 'en',
@@ -128,6 +134,8 @@ class AppSettings {
     this.miniPlayerAlwaysOnTop = true,
     this.miniPlayerLastX,
     this.miniPlayerLastY,
+    this.miniPlayerShowLyrics = false,
+    this.smoothTransitions = true,
   })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
@@ -195,6 +203,8 @@ class AppSettings {
     bool? miniPlayerAlwaysOnTop,
     double? miniPlayerLastX,
     double? miniPlayerLastY,
+    bool? miniPlayerShowLyrics,
+    bool? smoothTransitions,
   }) {
     return AppSettings(
       language: language ?? this.language,
@@ -234,6 +244,8 @@ class AppSettings {
           miniPlayerAlwaysOnTop ?? this.miniPlayerAlwaysOnTop,
       miniPlayerLastX: miniPlayerLastX ?? this.miniPlayerLastX,
       miniPlayerLastY: miniPlayerLastY ?? this.miniPlayerLastY,
+      miniPlayerShowLyrics: miniPlayerShowLyrics ?? this.miniPlayerShowLyrics,
+      smoothTransitions: smoothTransitions ?? this.smoothTransitions,
     );
   }
 
@@ -271,6 +283,8 @@ class AppSettings {
       'miniPlayerAlwaysOnTop': miniPlayerAlwaysOnTop,
       'miniPlayerLastX': miniPlayerLastX,
       'miniPlayerLastY': miniPlayerLastY,
+      'miniPlayerShowLyrics': miniPlayerShowLyrics,
+      'smoothTransitions': smoothTransitions,
     };
   }
 
@@ -438,6 +452,13 @@ class AppSettings {
     final miniPlayerLastY =
         rawLastY is num ? rawLastY.toDouble() : null;
 
+    final rawMiniLyrics = json['miniPlayerShowLyrics'];
+    final miniPlayerShowLyrics = rawMiniLyrics is bool ? rawMiniLyrics : false;
+
+    final rawSmoothTransitions = json['smoothTransitions'];
+    final smoothTransitions =
+        rawSmoothTransitions is bool ? rawSmoothTransitions : true;
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -470,6 +491,8 @@ class AppSettings {
       miniPlayerAlwaysOnTop: miniPlayerAlwaysOnTop,
       miniPlayerLastX: miniPlayerLastX,
       miniPlayerLastY: miniPlayerLastY,
+      miniPlayerShowLyrics: miniPlayerShowLyrics,
+      smoothTransitions: smoothTransitions,
     );
   }
 
@@ -508,7 +531,9 @@ class AppSettings {
           miniPlayerPosition == other.miniPlayerPosition &&
           miniPlayerAlwaysOnTop == other.miniPlayerAlwaysOnTop &&
           miniPlayerLastX == other.miniPlayerLastX &&
-          miniPlayerLastY == other.miniPlayerLastY;
+          miniPlayerLastY == other.miniPlayerLastY &&
+          miniPlayerShowLyrics == other.miniPlayerShowLyrics &&
+          smoothTransitions == other.smoothTransitions;
 
   @override
   int get hashCode => Object.hashAll([
@@ -543,5 +568,7 @@ class AppSettings {
         miniPlayerAlwaysOnTop,
         miniPlayerLastX,
         miniPlayerLastY,
+        miniPlayerShowLyrics,
+        smoothTransitions,
       ]);
 }

@@ -56,6 +56,8 @@ void main() {
       expect(store.settings.miniPlayerAlwaysOnTop, isTrue);
       expect(store.settings.miniPlayerLastX, isNull);
       expect(store.settings.miniPlayerLastY, isNull);
+      expect(store.settings.miniPlayerShowLyrics, isFalse);
+      expect(store.settings.smoothTransitions, isTrue);
 
       final file = File(p.join(tempDir.path, 'ui_settings.json'));
       expect(file.existsSync(), isFalse);
@@ -96,6 +98,8 @@ void main() {
             miniPlayerAlwaysOnTop: false,
             miniPlayerLastX: 250.0,
             miniPlayerLastY: 180.0,
+            miniPlayerShowLyrics: true,
+            smoothTransitions: false,
           ));
       await store1.flush();
       store1.dispose();
@@ -133,6 +137,8 @@ void main() {
       expect(store2.settings.miniPlayerAlwaysOnTop, isFalse);
       expect(store2.settings.miniPlayerLastX, equals(250.0));
       expect(store2.settings.miniPlayerLastY, equals(180.0));
+      expect(store2.settings.miniPlayerShowLyrics, isTrue);
+      expect(store2.settings.smoothTransitions, isFalse);
       store2.dispose();
     });
 
@@ -143,6 +149,8 @@ void main() {
         'miniPlayerAlwaysOnTop': 'not_a_bool',
         'miniPlayerLastX': 'not_a_num',
         'miniPlayerLastY': null,
+        'miniPlayerShowLyrics': 'yes',
+        'smoothTransitions': 'nope',
       };
 
       final settings = AppSettings.fromJson(json);
@@ -151,6 +159,8 @@ void main() {
       expect(settings.miniPlayerAlwaysOnTop, isTrue);
       expect(settings.miniPlayerLastX, isNull);
       expect(settings.miniPlayerLastY, isNull);
+      expect(settings.miniPlayerShowLyrics, isFalse);
+      expect(settings.smoothTransitions, isTrue);
     });
 
     test('mini player copyWith updates fields properly', () {
@@ -161,6 +171,8 @@ void main() {
         miniPlayerAlwaysOnTop: false,
         miniPlayerLastX: 120.0,
         miniPlayerLastY: 240.0,
+        miniPlayerShowLyrics: true,
+        smoothTransitions: false,
       );
 
       expect(updated.miniPlayerShape, equals('square'));
@@ -168,6 +180,8 @@ void main() {
       expect(updated.miniPlayerAlwaysOnTop, isFalse);
       expect(updated.miniPlayerLastX, equals(120.0));
       expect(updated.miniPlayerLastY, equals(240.0));
+      expect(updated.miniPlayerShowLyrics, isTrue);
+      expect(updated.smoothTransitions, isFalse);
     });
 
     test('corrupt JSON falls back to defaults and creates .bad file', () async {
@@ -240,6 +254,8 @@ void main() {
       expect(store.settings.miniPlayerAlwaysOnTop, isTrue);
       expect(store.settings.miniPlayerLastX, isNull);
       expect(store.settings.miniPlayerLastY, isNull);
+      expect(store.settings.miniPlayerShowLyrics, isFalse);
+      expect(store.settings.smoothTransitions, isTrue);
       store.dispose();
     });
 

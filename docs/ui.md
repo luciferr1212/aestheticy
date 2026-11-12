@@ -692,3 +692,32 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
 4. **Isolated Seekbar & Favorite Button Reusability:**
    - *Decision:* Reused `NowPlayingSeekBar` and `PlayerFavoriteButton` directly from existing components rather than duplicating slider or favorite logic.
    - *Rationale:* Ensures identical seek-scrubbing behavior, armed-resume edge-case handling, and favorite state responsiveness across the entire app.
+
+---
+
+## 31. Phase 4, Prompt 4 — Full Screen Performance, Seek, Shortcuts, Volume HUD & Albums by Year
+
+### 31.1 Full Screen Hang Fix & Ambient Isolation (`lib/ui/now_playing/full_screen_view.dart`, `lib/ui/shell/app_shell.dart`)
+- **Ticker Isolation:** `FullScreenViewState` drives the 30 fps ambient animation phase through a dedicated `ValueNotifier` listened to solely by the background blob `CustomPainter(repaint:)` inside its own `RepaintBoundary`. Page-level `setState` is never invoked per frame, keeping lyrics lists and controls free of tick rebuilds while preserving lifecycle pause (`inactive`/`paused`) and `reduceMotion` shutdown.
+- **Static Decorative Glass:** The two decorative `GlassSurface` shapes are static inside individual `RepaintBoundary` wrappers instead of repositioning on every ticker frame, preserving the visibility toggle setting.
+- **Serialized OS Full Screen Transitions:** `AppShellState._onNavigatorChange` funnels `getGeometry`, `setFullScreen`, and `maximize` through a single-flight transition queue that re-checks current desired destination/state after each `await`, preventing interleaved F11/Esc/Mini toggles from leaving the native window in an inconsistent state.
+
+### 31.2 Interactive Full Screen Seek Bar (`lib/ui/now_playing/now_playing_seek_bar.dart`)
+- Supports hover expansion (`2 dp` resting track -> `6 dp` active track with visible thumb and time labels), pointer hover auto-hide pause (`FullScreenView` keeps top controls visible while hovering or scrubbing), click seek, throttled drag scrub (`>= 32 ms` / commit on release) with time tooltip, idle `armResume` updates, RTL right-edge fill alignment, keyboard/Semantics slider actions (`increase`/`decrease`), and timer cleanup on `dispose()`.
+
+### 31.3 Unified Playback Keys, Volume Wheel, Root HUD & Cheat Sheet
+- **`GlobalPlaybackKeysHandler` (`lib/ui/settings/app_shortcuts.dart`, mounted in `AppShell` and `MiniPlayerView`):** Unifies `Space` release play/pause, `Space+Arrow` track skip, `ArrowLeft`/`ArrowRight` seek (`120 ms` repeat throttle), `Ctrl+ArrowUp`/`Ctrl+ArrowDown` global volume (`60 ms` throttle, `+/-5%`), plain `ArrowUp`/`ArrowDown` volume active *only* in Full Screen and Mini Player, and `?` / `Ctrl+/` cheat sheet toggle, while respecting focused `EditableText`, modals, and sliders.
+- **Bottom Bar Volume Wheel & Root `VolumeHudOverlay` (`lib/ui/shell/bottom_now_playing_bar.dart`, `lib/ui/shell/volume_hud.dart`, `lib/main.dart`):** Pointer scroll events over the bottom bar adjust volume `+/-5%`, absorb vertical scroll propagation, and display a non-interactive (`IgnorePointer`) root HUD overlay across both `AppShell` and `MiniPlayerView` (`1s` hold fade, `0 ms` with `reduceMotion`).
+- **Keyboard Shortcuts Cheat Sheet (`lib/ui/settings/shortcuts_cheat_sheet_dialog.dart`):** Accessible from Settings and `?` / `Ctrl+/`, grouping all `kAppShortcuts` by `AppShortcutScope` (`Global`, `Now playing`, `Full screen & Mini`) with formatted key chips, `Esc` dismissal, Arabic RTL localization, and compact viewport safety.
+
+### 31.4 Albums Grouped by Release Year (`lib/ui/library/albums_view.dart`)
+- When `AppSettings.albumSort == 'year'`, pure `groupAlbumsByYear(albums)` partitions albums by positive release year descending (newest first), placing `null` or `<= 0` years into a trailing `"Unknown year"` (`albums.unknownYear`) section, and sorting albums within each section alphabetically by artist then title.
+- Rendered via a lazy `CustomScrollView` (`SliverPadding` + `SliverToBoxAdapter` localized year/count headers + lazy `SliverGrid` or `SliverFixedExtentList`) across all three view modes (`square`, `wide`, `list`), preserving live search filtering, Arabic numerals/RTL layout, and smooth scrolling across `2000+` albums.
+
+### 31.5 Decisions & Windows Manual Testing Checklist
+- **Decisions:** Full screen `NowPlayingView(showHeader: false)` omits the header sync-offset controls (kept exclusively on the Lyrics page); `VolumeHudOverlay` sits above both `AppShell` and `MiniPlayerView` so volume keys and wheel feedback work identically in normal, full screen, and mini player modes.
+- **Known Limitations / Windows Manual Testing Checklist (GitHub Actions build artifact):**
+  - Rapid `F11`, `Esc`, and `Ctrl+M` full-screen / mini-player toggles under real Win32 `window_manager` geometry.
+  - Mini player live window resize and screen-bounds clamping when toggling mini lyrics and shapes (`wide` vs `square`) on real DPI displays.
+  - Actual audible smoothness of software `fadeGain` ramps (`250 ms` start, `120 ms` resume, `120+60+250 ms` switch, `100 ms` pause, `<= 145 ms` stop/exit) and pause-safe paused-jump behavior via libmpv (`mpv_audio_kit`).
+  - Hardware mouse wheel volume over bottom bar, Full Screen ambient 30 fps smoothness, and per-track `lyrics_offsets.json` persistence across restarts.

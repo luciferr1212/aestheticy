@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/features/lyrics/lrc_parser.dart';
 import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
+import 'package:aestheticy/features/lyrics/lyrics_offset_store.dart';
 import 'package:aestheticy/features/lyrics/lyrics_repository.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
@@ -32,6 +34,19 @@ class FakeLyricsRepository extends LyricsRepository {
       return onResolve!(filePath);
     }
     return const LyricsResultNotFound();
+  }
+}
+
+class DelayedOffsetStore extends LyricsOffsetStore {
+  final Map<String, Completer<int>> pendingLoads = {};
+
+  DelayedOffsetStore({required Directory directory}) : super(directory: directory);
+
+  @override
+  Future<int> loadOffset(String trackPath) {
+    final completer = Completer<int>();
+    pendingLoads[trackPath] = completer;
+    return completer.future;
   }
 }
 
@@ -289,6 +304,250 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       expect(resolveCount, equals(2), reason: 'Changing lyricsSource must re-resolve lyrics for the current track');
+    });
+
+    test('kLyricsLineLeadMs advances line activation by 120ms without shifting word timing', () async {
+      const enhancedLrc = '''
+[00:02.00]<00:02.00>First <00:02.50>Second
+[00:05.00]<00:05.00>Next
+''';
+      final doc = parseLrc(enhancedLrc);
+      repository.onResolve = (path) async => LyricsResultFound(doc);
+
+      controller = LyricsController(
+        playbackController: playbackController,
+        repository: repository,
+        settingsStore: settingsStore,
+      );
+
+      queue.replaceAll([
+        const AudioSource('file:///music/track.mp3', extras: {'title': 'Track'}),
+      ]);
+      await playbackController.play();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      // Just before lead window (2000 - 120 - 1 = 1879ms)
+      controller.updatePosition(const Duration(milliseconds: 2000 - kLyricsLineLeadMs - 1));
+      expect(controller.currentLineIndex, equals(-1));
+      expect(controller.activeLineListenable.value, equals(-1));
+      expect(controller.currentWordIndex, equals(-1));
+
+      // Exact lead boundary (1880ms): line switches early, word timing waits for 2000ms
+      controller.updatePosition(const Duration(milliseconds: 2000 - kLyricsLineLeadMs));
+      expect(controller.currentLineIndex, equals(0));
+      expect(controller.activeLineListenable.value, equals(0));
+      expect(controller.currentWordIndex, equals(-1));
+      expect(controller.wordProgress, equals(0.0));
+
+      // Real word timestamp reached (2000ms)
+      controller.updatePosition(const Duration(milliseconds: 2000));
+      expect(controller.currentLineIndex, equals(0));
+      expect(controller.currentWordIndex, equals(0));
+
+      // Next line switches 120ms early at 4880ms, word timing stays -1 until 5000ms
+      controller.updatePosition(const Duration(milliseconds: 5000 - kLyricsLineLeadMs));
+      expect(controller.currentLineIndex, equals(1));
+      expect(controller.currentWordIndex, equals(-1));
+    });
+  });
+
+  group('LyricsOffsetStore & Per-Track Offset Tests (S3)', () {
+    late Directory tempDir;
+    late FakeAudioEngine engine;
+    late PlaybackQueue queue;
+    late PlaybackController playbackController;
+    late SettingsStore settingsStore;
+    late FakeLyricsRepository repository;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('aestheticy_lyrics_offset_');
+      engine = FakeAudioEngine();
+      await engine.init();
+      queue = PlaybackQueue();
+      playbackController = PlaybackController(engine: engine, queue: queue);
+      await playbackController.init();
+      settingsStore = SettingsStore(
+        directory: tempDir,
+        initialSettings: const AppSettings(lyricsSource: 'localThenOnline'),
+      );
+      await settingsStore.init();
+      repository = FakeLyricsRepository();
+    });
+
+    tearDown(() async {
+      settingsStore.dispose();
+      await playbackController.dispose();
+      await engine.dispose();
+      if (tempDir.existsSync()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test('store saves md5-keyed JSON with 300ms debounce, clamps, and removes 0', () async {
+      final store = LyricsOffsetStore(directory: tempDir);
+      await store.init();
+
+      const trackPath = r'C:\Music\Artist\Song.flac';
+      await store.setOffset(trackPath, 300);
+      await store.setOffset(trackPath, 500);
+      expect(await store.loadOffset(trackPath), equals(500));
+
+      // Wait for 300ms debounce timer to persist atomically
+      await Future<void>.delayed(const Duration(milliseconds: 380));
+      final file = File('${tempDir.path}${Platform.pathSeparator}lyrics_offsets.json');
+      expect(file.existsSync(), isTrue);
+
+      final parsed = jsonDecode(await file.readAsString()) as Map<String, Object?>;
+      expect(parsed[LyricsOffsetStore.keyForPath(trackPath)], equals(500));
+
+      // Clamping beyond [-15000, +15000]
+      await store.setOffset(trackPath, 25000);
+      expect(await store.loadOffset(trackPath), equals(kMaxLyricsOffsetMs));
+      await store.setOffset(trackPath, -25000);
+      expect(await store.loadOffset(trackPath), equals(kMinLyricsOffsetMs));
+      await store.flush();
+
+      // Reload in a fresh instance
+      final reloaded = LyricsOffsetStore(directory: tempDir);
+      await reloaded.init();
+      expect(await reloaded.loadOffset(trackPath), equals(kMinLyricsOffsetMs));
+
+      // Value 0 deletes the key from persisted JSON
+      await reloaded.setOffset(trackPath, 0);
+      await reloaded.flush();
+      final parsedAfterZero =
+          jsonDecode(await file.readAsString()) as Map<String, Object?>;
+      expect(parsedAfterZero.containsKey(LyricsOffsetStore.keyForPath(trackPath)), isFalse);
+
+      store.dispose();
+      reloaded.dispose();
+    });
+
+    test('corrupt lyrics_offsets.json degrades cleanly to empty map', () async {
+      final file = File('${tempDir.path}${Platform.pathSeparator}lyrics_offsets.json');
+      await file.writeAsString('{not valid json!!!');
+
+      final store = LyricsOffsetStore(directory: tempDir);
+      await store.init();
+      expect(await store.loadOffset('file:///music/any.mp3'), equals(0));
+      store.dispose();
+    });
+
+    test('positive and negative offsets shift lines and words with line lead preserved', () async {
+      final offsetStore = LyricsOffsetStore(directory: tempDir);
+      await offsetStore.init();
+
+      const lrc = '[00:00.00]<00:00.00>Start <00:00.50>now\n'
+          '[00:05.00]<00:05.00>Second <00:05.50>line';
+      repository.onResolve = (path) async => LyricsResultFound(parseLrc(lrc));
+
+      final controller = LyricsController(
+        playbackController: playbackController,
+        repository: repository,
+        settingsStore: settingsStore,
+        offsetStore: offsetStore,
+      );
+
+      queue.replaceAll([
+        const AudioSource('file:///music/t1.mp3', extras: {'title': 'T1'}),
+      ]);
+      await playbackController.play();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Positive offset (+1000ms): lyrics appear LATER -> at 500ms effective is -500ms, still -1
+      await controller.setOffset(1000);
+      controller.updatePosition(const Duration(milliseconds: 500));
+      expect(controller.offsetMs, equals(1000));
+      expect(controller.currentLineIndex, equals(-1));
+      expect(controller.currentWordIndex, equals(-1));
+
+      // Line lead (120ms) stays separate: at 880ms, effective is -120ms, line 0 activates
+      controller.updatePosition(const Duration(milliseconds: 1000 - kLyricsLineLeadMs));
+      expect(controller.currentLineIndex, equals(0));
+      expect(controller.currentWordIndex, equals(-1));
+
+      // Word 0 starts at 1000ms (effective 0ms), word 1 starts at 1500ms (effective 500ms)
+      controller.updatePosition(const Duration(milliseconds: 1000));
+      expect(controller.currentWordIndex, equals(0));
+      controller.updatePosition(const Duration(milliseconds: 1500));
+      expect(controller.currentWordIndex, equals(1));
+
+      // Negative offset (-500ms): lyrics appear EARLIER -> 5000ms line triggers at 4380ms
+      await controller.setOffset(-500);
+      controller.updatePosition(const Duration(milliseconds: 4500 - kLyricsLineLeadMs));
+      expect(controller.currentLineIndex, equals(1));
+      // Line lead activates line 1 early, while word 0 still waits until 4500ms (effective 5000ms)
+      expect(controller.currentWordIndex, equals(-1));
+      controller.updatePosition(const Duration(milliseconds: 4500));
+      expect(controller.currentWordIndex, equals(0));
+
+      await controller.resetOffset();
+      expect(controller.offsetMs, equals(0));
+
+      await offsetStore.flush();
+      offsetStore.dispose();
+      controller.dispose();
+    });
+
+    test('offsets are isolated per track and stale load cannot overwrite newer track', () async {
+      final offsetStore = LyricsOffsetStore(directory: tempDir);
+      await offsetStore.init();
+      await offsetStore.setOffset('/music/a.mp3', 400);
+      await offsetStore.setOffset('/music/b.mp3', -700);
+      await offsetStore.flush();
+
+      repository.onResolve = (path) async => LyricsResultFound(parseLrc('[00:01.00]Line'));
+
+      final controller = LyricsController(
+        playbackController: playbackController,
+        repository: repository,
+        settingsStore: settingsStore,
+        offsetStore: offsetStore,
+      );
+
+      queue.replaceAll([
+        const AudioSource('/music/a.mp3', extras: {'title': 'A'}),
+        const AudioSource('/music/b.mp3', extras: {'title': 'B'}),
+      ]);
+      await playbackController.play();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(controller.offsetMs, equals(400));
+
+      await playbackController.skipNext();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(controller.offsetMs, equals(-700));
+
+      await playbackController.skipPrevious();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(controller.offsetMs, equals(400));
+      controller.dispose();
+      offsetStore.dispose();
+
+      // Verify stale async loadOffset response is ignored after rapid track switch
+      final delayedStore = DelayedOffsetStore(directory: tempDir);
+      final staleController = LyricsController(
+        playbackController: playbackController,
+        repository: repository,
+        settingsStore: settingsStore,
+        offsetStore: delayedStore,
+      );
+
+      await playbackController.skipNext();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await playbackController.skipPrevious();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      // Complete track B late (after switching back to A), then complete track A
+      delayedStore.pendingLoads['/music/b.mp3']!.complete(1200);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(staleController.offsetMs, equals(0));
+
+      delayedStore.pendingLoads['/music/a.mp3']!.complete(-200);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(staleController.offsetMs, equals(-200));
+
+      staleController.dispose();
+      delayedStore.dispose();
     });
   });
 }

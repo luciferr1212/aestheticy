@@ -250,5 +250,105 @@ void main() {
 
       expect(miniPlayerController.isMini, isTrue);
     }, timeout: const Timeout(Duration(seconds: 30)));
+
+    testWidgets('Rapid enter-exit-enter serializes window transitions and converges cleanly', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final slowWindow = _DelayedWindowService();
+      slowWindow.currentGeometry = const WindowGeometry(
+        position: Offset.zero,
+        size: Size(1920, 1080),
+        isMaximized: true,
+        isFullScreen: false,
+      );
+      final localMini = MiniPlayerController(
+        windowService: slowWindow,
+        settingsStore: settingsStore,
+      );
+      addTearDown(localMini.dispose);
+
+      await tester.pumpWidget(
+        GlassScope(
+          controller: glassController,
+          child: MaterialApp(
+            theme: buildAppTheme(),
+            home: AppShell(
+              engine: engine,
+              controller: controller,
+              repository: repository,
+              scanService: scanService,
+              settingsStore: settingsStore,
+              navigator: navigator,
+              windowService: slowWindow,
+              miniPlayerController: localMini,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      slowWindow.calls.clear();
+
+      // Rapid toggle: Enter -> Exit (while async in-flight) -> Enter
+      navigator.navigateTo(AppDestination.fullScreen);
+      await tester.pump(const Duration(milliseconds: 5));
+      navigator.goBack();
+      await tester.pump(const Duration(milliseconds: 5));
+      navigator.navigateTo(AppDestination.fullScreen);
+      await tester.pump(const Duration(milliseconds: 5));
+
+      // Drain all async fake window operations
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      });
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(slowWindow.maxConcurrentOps, equals(1));
+      expect(navigator.current, equals(AppDestination.fullScreen));
+      expect(slowWindow.currentGeometry.isFullScreen, isTrue);
+
+      // Now rapid exit while maximized restore is pending, then stay exited
+      navigator.goBack();
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      });
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(slowWindow.maxConcurrentOps, equals(1));
+      expect(navigator.current, equals(AppDestination.albums));
+      expect(slowWindow.currentGeometry.isFullScreen, isFalse);
+      expect(slowWindow.currentGeometry.isMaximized, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
+}
+
+class _DelayedWindowService extends FakeWindowService {
+  int _inFlightOps = 0;
+  int maxConcurrentOps = 0;
+
+  Future<T> _runOp<T>(Future<T> Function() action) async {
+    _inFlightOps++;
+    if (_inFlightOps > maxConcurrentOps) {
+      maxConcurrentOps = _inFlightOps;
+    }
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 15));
+      return await action();
+    } finally {
+      _inFlightOps--;
+    }
+  }
+
+  @override
+  Future<WindowGeometry> getGeometry() => _runOp(() => super.getGeometry());
+
+  @override
+  Future<void> setFullScreen(bool isFullScreen) =>
+      _runOp(() => super.setFullScreen(isFullScreen));
+
+  @override
+  Future<void> maximize() => _runOp(() => super.maximize());
 }

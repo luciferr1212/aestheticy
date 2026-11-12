@@ -15,6 +15,62 @@ import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import 'library_header.dart';
 
+/// A section of albums sharing the same release [year] (or `null` for unknown).
+class AlbumYearGroup {
+  /// Release year for this group, or `null` when the release year is unknown.
+  final int? year;
+
+  /// Albums belonging to this year, sorted alphabetically by artist then title.
+  final List<AlbumSummary> albums;
+
+  /// Creates an [AlbumYearGroup].
+  const AlbumYearGroup({
+    required this.year,
+    required this.albums,
+  });
+}
+
+/// Groups [albums] by release year (newest first, unknown years last).
+///
+/// Within each year group, albums are sorted alphabetically by artist then
+/// title. Null or non-positive (`<= 0`) years are placed together in a single
+/// trailing group with `year == null`.
+List<AlbumYearGroup> groupAlbumsByYear(List<AlbumSummary> albums) {
+  final byYear = <int, List<AlbumSummary>>{};
+  final unknown = <AlbumSummary>[];
+
+  for (final album in albums) {
+    final year = album.year;
+    if (year != null && year > 0) {
+      byYear.putIfAbsent(year, () => <AlbumSummary>[]).add(album);
+    } else {
+      unknown.add(album);
+    }
+  }
+
+  int compareWithinGroup(AlbumSummary a, AlbumSummary b) {
+    final artistA = (a.displayArtist ?? a.albumArtist ?? '').toLowerCase();
+    final artistB = (b.displayArtist ?? b.albumArtist ?? '').toLowerCase();
+    final artistCmp = artistA.compareTo(artistB);
+    if (artistCmp != 0) return artistCmp;
+    return a.album.toLowerCase().compareTo(b.album.toLowerCase());
+  }
+
+  final yearsDesc = byYear.keys.toList()..sort((a, b) => b.compareTo(a));
+  final groups = <AlbumYearGroup>[];
+  for (final year in yearsDesc) {
+    final items = byYear[year]!..sort(compareWithinGroup);
+    groups.add(AlbumYearGroup(year: year, albums: items));
+  }
+
+  if (unknown.isNotEmpty) {
+    unknown.sort(compareWithinGroup);
+    groups.add(AlbumYearGroup(year: null, albums: unknown));
+  }
+
+  return groups;
+}
+
 /// Albums library screen supporting square, wide, and list layout modes.
 class AlbumsView extends StatefulWidget {
   /// The library data repository.
@@ -143,14 +199,81 @@ class _AlbumsViewState extends State<AlbumsView> {
           ),
           const SizedBox(height: 20),
           Expanded(
-            child: _buildAlbumContent(sortedAlbums, viewMode),
+            child: _buildAlbumContent(sortedAlbums, viewMode, currentSort),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildAlbumContent(List<AlbumSummary> albums, String viewMode) {
+  static const _wideGridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+    maxCrossAxisExtent: 380,
+    mainAxisExtent: 100,
+    crossAxisSpacing: 16,
+    mainAxisSpacing: 16,
+  );
+
+  static const _squareGridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+    maxCrossAxisExtent: 180,
+    mainAxisExtent: 220,
+    crossAxisSpacing: 16,
+    mainAxisSpacing: 20,
+  );
+
+  Widget _buildTileForMode(AlbumSummary album, String viewMode) {
+    void openDetail() => widget.navigator.openAlbumDetail(album.album, album: album);
+    switch (viewMode) {
+      case 'wide':
+        return _WideAlbumTile(album: album, onTap: openDetail);
+      case 'list':
+        return _ListAlbumTile(album: album, onTap: openDetail);
+      case 'square':
+      default:
+        return _SquareAlbumTile(album: album, onTap: openDetail);
+    }
+  }
+
+  Widget _buildYearSectionHeader(BuildContext context, AlbumYearGroup group) {
+    final yearLabel = group.year != null
+        ? context.localizeDigitsText(group.year.toString())
+        : context.t('albums.unknownYear');
+    final countLabel =
+        '${context.formatCountLocalized(group.albums.length)} ${context.t('albums.count')}';
+
+    return Semantics(
+      header: true,
+      child: Row(
+        key: ValueKey<String>(
+          'album_year_header_${group.year?.toString() ?? 'unknown'}',
+        ),
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Flexible(
+            child: Text(
+              yearLabel,
+              style: AppTypography.title.copyWith(color: AppColors.text),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            countLabel,
+            style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAlbumContent(
+    List<AlbumSummary> albums,
+    String viewMode,
+    String currentSort,
+  ) {
     if (albums.isEmpty) {
       return Center(
         child: Text(
@@ -160,25 +283,55 @@ class _AlbumsViewState extends State<AlbumsView> {
       );
     }
 
+    if (currentSort == 'year') {
+      final groups = groupAlbumsByYear(albums);
+      return CustomScrollView(
+        key: const Key('albums_year_grouped_scroll'),
+        slivers: [
+          for (var i = 0; i < groups.length; i++) ...[
+            SliverPadding(
+              padding: EdgeInsetsDirectional.only(
+                top: i == 0 ? 0 : 24,
+                bottom: 12,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: _buildYearSectionHeader(context, groups[i]),
+              ),
+            ),
+            if (viewMode == 'list')
+              SliverFixedExtentList(
+                itemExtent: 56.0,
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) =>
+                      _buildTileForMode(groups[i].albums[index], viewMode),
+                  childCount: groups[i].albums.length,
+                ),
+              )
+            else
+              SliverGrid(
+                gridDelegate:
+                    viewMode == 'wide' ? _wideGridDelegate : _squareGridDelegate,
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) =>
+                      _buildTileForMode(groups[i].albums[index], viewMode),
+                  childCount: groups[i].albums.length,
+                ),
+              ),
+          ],
+          const SliverPadding(padding: EdgeInsets.only(bottom: 120)),
+        ],
+      );
+    }
+
     switch (viewMode) {
       case 'wide':
         return GridView.builder(
           key: const Key('albums_wide_grid'),
           padding: const EdgeInsets.only(bottom: 120),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 380,
-            mainAxisExtent: 100,
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
-          ),
+          gridDelegate: _wideGridDelegate,
           itemCount: albums.length,
-          itemBuilder: (context, index) {
-            final album = albums[index];
-            return _WideAlbumTile(
-              album: album,
-              onTap: () => widget.navigator.openAlbumDetail(album.album, album: album),
-            );
-          },
+          itemBuilder: (context, index) =>
+              _buildTileForMode(albums[index], viewMode),
         );
       case 'list':
         return ListView.builder(
@@ -186,33 +339,18 @@ class _AlbumsViewState extends State<AlbumsView> {
           padding: const EdgeInsets.only(bottom: 120),
           itemCount: albums.length,
           itemExtent: 56.0,
-          itemBuilder: (context, index) {
-            final album = albums[index];
-            return _ListAlbumTile(
-              album: album,
-              onTap: () => widget.navigator.openAlbumDetail(album.album, album: album),
-            );
-          },
+          itemBuilder: (context, index) =>
+              _buildTileForMode(albums[index], viewMode),
         );
       case 'square':
       default:
         return GridView.builder(
           key: const Key('albums_square_grid'),
           padding: const EdgeInsets.only(bottom: 120),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 180,
-            mainAxisExtent: 220,
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 20,
-          ),
+          gridDelegate: _squareGridDelegate,
           itemCount: albums.length,
-          itemBuilder: (context, index) {
-            final album = albums[index];
-            return _SquareAlbumTile(
-              album: album,
-              onTap: () => widget.navigator.openAlbumDetail(album.album, album: album),
-            );
-          },
+          itemBuilder: (context, index) =>
+              _buildTileForMode(albums[index], viewMode),
         );
     }
   }
@@ -335,6 +473,8 @@ class _WideAlbumTile extends StatelessWidget {
                               : '';
                           return Text(
                             '$countStr ${context.t('album.tracksCount')}$yearStr',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: AppTypography.micro.copyWith(color: AppColors.textMuted),
                           );
                         },

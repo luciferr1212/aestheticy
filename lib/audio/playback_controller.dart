@@ -5,20 +5,50 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'audio_engine.dart';
 import 'audio_models.dart';
 import 'playback_queue.dart';
 
 /// Coordinates the [AudioEngine] with a [PlaybackQueue]: auto-advances
-/// tracks, preloads the next item for gapless transitions, and skips
-/// past errors without crashing.
+/// tracks, preloads the next item for gapless transitions, skips
+/// past errors without crashing, and manages smooth fade transitions.
 class PlaybackController {
+  /// Default timer cadence for fade gain envelopes (~60 Hz).
+  static const Duration kDefaultFadeTickInterval = Duration(milliseconds: 16);
+
+  /// Fade-in duration when starting a track from silence or after a switch.
+  static const Duration kStartFadeInDuration = Duration(milliseconds: 250);
+
+  /// Fade-in duration when resuming a paused track.
+  static const Duration kResumeFadeInDuration = Duration(milliseconds: 120);
+
+  /// Fade-out duration before a manual track switch while playing.
+  static const Duration kSwitchFadeOutDuration = Duration(milliseconds: 120);
+
+  /// Silent gap held at zero gain between outgoing fade-out and incoming open.
+  static const Duration kSwitchGapDuration = Duration(milliseconds: 60);
+
+  /// Fade-out duration before pausing an actively playing track.
+  static const Duration kPauseFadeOutDuration = Duration(milliseconds: 100);
+
+  /// Fade-out duration before stopping playback.
+  static const Duration kStopFadeOutDuration = Duration(milliseconds: 100);
+
+  /// Hard upper bound for stop/shutdown fade-out so exit stays responsive.
+  static const Duration kStopMaxFadeOutDuration = Duration(milliseconds: 145);
+
   /// The underlying audio engine (real or fake).
   final AudioEngine engine;
 
   /// The playback queue.
   final PlaybackQueue queue;
+
+  /// Timer cadence used for fade gain interpolation.
+  final Duration fadeTickInterval;
+
+  bool _smoothTransitions = false;
 
   final List<StreamSubscription<dynamic>> _subs = [];
 
@@ -38,10 +68,42 @@ class PlaybackController {
   bool _isAdvancing = false;
   bool _disposed = false;
 
+  double _currentFadeGain = 1.0;
+  int _transitionGen = 0;
+  Future<void>? _activeTransition;
+  Timer? _fadeTimer;
+  Timer? _delayTimer;
+  Timer? _deadlineTimer;
+  Completer<void>? _activeWaitCompleter;
+
   /// Creates a controller wired to [engine] and [queue].
   ///
+  /// Defaults [smoothTransitions] to `false` for zero-delay standalone callers;
+  /// app startup synchronizes this flag from `AppSettings.smoothTransitions`.
   /// Call [init] before using.
-  PlaybackController({required this.engine, required this.queue});
+  PlaybackController({
+    required this.engine,
+    required this.queue,
+    bool smoothTransitions = false,
+    this.fadeTickInterval = kDefaultFadeTickInterval,
+  }) {
+    _smoothTransitions = smoothTransitions;
+  }
+
+  /// Whether smooth volume fade transitions are applied on transport actions.
+  bool get smoothTransitions => _smoothTransitions;
+
+  /// Updates whether smooth volume fade transitions are enabled.
+  ///
+  /// When disabled mid-fade, cancels active fade timers and restores full gain.
+  set smoothTransitions(bool value) {
+    if (_smoothTransitions == value) return;
+    _smoothTransitions = value;
+    if (!value) {
+      _abortPendingWaiters();
+      unawaited(_setFadeGain(1.0));
+    }
+  }
 
   // ── Lifecycle ───────────────────────────────────────────────────────
 
@@ -74,9 +136,11 @@ class PlaybackController {
     }
   }
 
-  /// Tears down subscriptions. Does **not** dispose the engine.
+  /// Tears down subscriptions and timers. Does **not** dispose the engine.
   Future<void> dispose() async {
     _disposed = true;
+    _transitionGen++;
+    _abortPendingWaiters();
     for (final s in _subs) {
       await s.cancel();
     }
@@ -163,22 +227,44 @@ class PlaybackController {
   // ── Transport ───────────────────────────────────────────────────────
 
   /// Starts playback from the current queue position, or resumes if paused.
-  Future<void> play() async {
+  Future<void> play() {
     _consecutiveFatalErrors = 0;
     final source = queue.current;
-    if (source == null) return;
+    if (source == null) return Future<void>.value();
+    final gen = _beginTransition();
+    return _enqueueTransition(() => _playOrResumeInternal(source, gen));
+  }
 
-    // When paused on the same track, simply resume playback without re-opening.
+  Future<void> _playOrResumeInternal(AudioSource source, int gen) async {
+    if (_isStale(gen)) return;
+
+    // When paused on the same track, resume playback without re-opening.
     if (_currentState == PlaybackState.paused && _openedUri == source.uri) {
-      await engine.play();
+      if (_smoothTransitions) {
+        await _setFadeGain(0.0);
+        if (_isStale(gen)) return;
+        await engine.play();
+        if (_isStale(gen)) return;
+        _startFadeIn(kResumeFadeInDuration, gen);
+      } else {
+        await _ensureUnityFadeGain();
+        if (_isStale(gen)) return;
+        await engine.play();
+      }
       return;
     }
 
-    _openedUri = source.uri;
-    await engine.open(source, autoPlay: true);
-    _checkArmedResume();
-    _emitCurrent(source);
-    unawaited(_preloadNext());
+    // Resuming while already playing the same track (e.g. aborted pause fade).
+    if (_currentState == PlaybackState.playing && _openedUri == source.uri) {
+      if (_smoothTransitions) {
+        _startFadeIn(kResumeFadeInDuration, gen);
+      } else {
+        await _ensureUnityFadeGain();
+      }
+      return;
+    }
+
+    await _switchTrackInternal(source, gen);
   }
 
   /// Toggles between play and pause.
@@ -199,52 +285,42 @@ class PlaybackController {
   }
 
   /// Jumps to track at [index] in active playback order and starts playback.
-  Future<void> playTrack(int index) async {
+  Future<void> playTrack(int index) {
     _consecutiveFatalErrors = 0;
-    if (index < 0 || index >= queue.length) return;
+    if (index < 0 || index >= queue.length) return Future<void>.value();
     if (_armedResumeUri != null && queue.items[index].uri != _armedResumeUri) {
       _armedResumePosition = null;
       _armedResumeUri = null;
     }
     queue.jumpTo(index);
     final source = queue.current;
-    if (source == null) return;
-    _openedUri = source.uri;
-    await engine.open(source, autoPlay: true);
-    _checkArmedResume();
-    _emitCurrent(source);
-    unawaited(_preloadNext());
+    if (source == null) return Future<void>.value();
+    final gen = _beginTransition();
+    return _enqueueTransition(() => _switchTrackInternal(source, gen));
   }
 
   /// Replaces the queue with [sources], starts playback at [startIndex],
   /// resets preload state, and preloads the next track for gapless transitions.
-  Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) async {
+  Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) {
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
     _armedResumeUri = null;
     if (sources.isEmpty) {
       queue.clear();
-      _openedUri = null;
-      await engine.stop();
-      _emitCurrent(null);
-      return;
+      final gen = _beginTransition();
+      return _enqueueTransition(() => _stopInternal(gen, clearResume: false));
     }
 
     queue.replaceAll(sources, startIndex: startIndex);
     notifyQueueChanged();
     final source = queue.current;
     if (source == null) {
-      _openedUri = null;
-      await engine.stop();
-      _emitCurrent(null);
-      return;
+      final gen = _beginTransition();
+      return _enqueueTransition(() => _stopInternal(gen, clearResume: false));
     }
 
-    _openedUri = source.uri;
-    await engine.open(source, autoPlay: true);
-    _checkArmedResume();
-    _emitCurrent(source);
-    unawaited(_preloadNext());
+    final gen = _beginTransition();
+    return _enqueueTransition(() => _switchTrackInternal(source, gen));
   }
 
   /// Removes upcoming items from the queue while keeping the currently
@@ -358,12 +434,11 @@ class PlaybackController {
 
     if (queue.length == 1) {
       queue.clear();
-      _openedUri = null;
       _armedResumePosition = null;
       _armedResumeUri = null;
       notifyQueueChanged();
-      await engine.stop();
-      _emitCurrent(null);
+      final gen = _beginTransition();
+      await _enqueueTransition(() => _stopInternal(gen, clearResume: false));
       await _preloadNext();
       return;
     }
@@ -382,16 +457,14 @@ class PlaybackController {
     _armedResumePosition = null;
     _armedResumeUri = null;
     final nextSource = queue.current;
-    if (nextSource != null) {
-      _openedUri = nextSource.uri;
-      await engine.open(nextSource, autoPlay: true);
-      _checkArmedResume();
-      _emitCurrent(nextSource);
-    } else {
-      _openedUri = null;
-      await engine.stop();
-      _emitCurrent(null);
-    }
+    final gen = _beginTransition();
+    await _enqueueTransition(() async {
+      if (nextSource != null) {
+        await _switchTrackInternal(nextSource, gen);
+      } else {
+        await _stopInternal(gen, clearResume: false);
+      }
+    });
     await _preloadNext();
   }
 
@@ -407,35 +480,71 @@ class PlaybackController {
   }
 
   /// Pauses playback.
-  Future<void> pause() async {
+  Future<void> pause() {
+    final gen = _beginTransition();
+    return _enqueueTransition(() => _pauseInternal(gen));
+  }
+
+  Future<void> _pauseInternal(int gen) async {
+    if (_isStale(gen)) return;
+    if (_smoothTransitions && _currentState == PlaybackState.playing) {
+      await _rampOut(kPauseFadeOutDuration, gen);
+      if (_isStale(gen)) return;
+      await engine.pause();
+      if (!_disposed && !_isStale(gen)) {
+        await _setFadeGain(1.0);
+      }
+      return;
+    }
+
+    await _ensureUnityFadeGain();
+    if (_isStale(gen)) return;
     await engine.pause();
   }
 
   /// Stops playback and clears the active track.
-  Future<void> stop() async {
-    _openedUri = null;
+  Future<void> stop() {
     _armedResumePosition = null;
     _armedResumeUri = null;
+    final gen = _beginTransition();
+    return _enqueueTransition(() => _stopInternal(gen));
+  }
+
+  Future<void> _stopInternal(int gen, {bool clearResume = true}) async {
+    if (_isStale(gen)) return;
+    if (clearResume) {
+      _armedResumePosition = null;
+      _armedResumeUri = null;
+    }
+    if (_smoothTransitions && _currentState == PlaybackState.playing) {
+      await _rampOut(
+        kStopFadeOutDuration,
+        gen,
+        maxDuration: kStopMaxFadeOutDuration,
+      );
+      if (_isStale(gen)) return;
+    }
+    _openedUri = null;
     await engine.stop();
-    _emitCurrent(null);
+    if (!_disposed) {
+      _emitCurrent(null);
+    }
+    if (!_disposed && !_isStale(gen)) {
+      await _setFadeGain(1.0);
+    }
   }
 
   /// Skips to the next track.
-  Future<void> skipNext() async {
+  Future<void> skipNext() {
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
     _armedResumeUri = null;
     final next = queue.next();
+    final gen = _beginTransition();
     if (next == null) {
-      _openedUri = null;
-      await engine.stop();
-      _emitCurrent(null);
-      return;
+      return _enqueueTransition(() => _stopInternal(gen));
     }
-    _openedUri = next.uri;
-    await engine.open(next, autoPlay: true);
-    _emitCurrent(next);
-    unawaited(_preloadNext());
+    return _enqueueTransition(() => _switchTrackInternal(next, gen));
   }
 
   /// Skips to the previous track, or restarts current track if played past 3 seconds.
@@ -455,14 +564,237 @@ class PlaybackController {
       await engine.seek(Duration.zero);
       return;
     }
-    _openedUri = prev.uri;
     _currentPosition = Duration.zero;
-    await engine.open(prev, autoPlay: true);
-    _emitCurrent(prev);
-    unawaited(_preloadNext());
+    final gen = _beginTransition();
+    await _enqueueTransition(() => _switchTrackInternal(prev, gen));
   }
 
-  // ── Internal ────────────────────────────────────────────────────────
+  // ── Internal transition & fade helpers ──────────────────────────────
+
+  int _beginTransition() {
+    _transitionGen++;
+    _abortPendingWaiters();
+    return _transitionGen;
+  }
+
+  bool _isStale(int gen) => _disposed || gen != _transitionGen;
+
+  Future<void> _enqueueTransition(Future<void> Function() task) {
+    final prev = _activeTransition;
+    final next = prev == null
+        ? task()
+        : prev.catchError((Object _) {}).then((_) => task());
+    late final Future<void> tracked;
+    tracked = next.whenComplete(() {
+      if (identical(_activeTransition, tracked)) {
+        _activeTransition = null;
+      }
+    });
+    _activeTransition = tracked;
+    return tracked;
+  }
+
+  void _abortPendingWaiters() {
+    _fadeTimer?.cancel();
+    _fadeTimer = null;
+    _delayTimer?.cancel();
+    _delayTimer = null;
+    _deadlineTimer?.cancel();
+    _deadlineTimer = null;
+    final completer = _activeWaitCompleter;
+    _activeWaitCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
+
+  Future<void> _setFadeGain(double gain) async {
+    final clamped = gain.clamp(0.0, 1.0);
+    _currentFadeGain = clamped;
+    if (_disposed) return;
+    await engine.setFadeGain(clamped);
+  }
+
+  Future<void> _ensureUnityFadeGain() async {
+    if ((_currentFadeGain - 1.0).abs() > 1e-6) {
+      await _setFadeGain(1.0);
+    }
+  }
+
+  static double _smoothStep(double t) => 0.5 * (1.0 - math.cos(math.pi * t));
+
+  double _fadeProgress(int step, int totalDurationUs, int swElapsedUs) {
+    final tickUs = step * fadeTickInterval.inMicroseconds;
+    final elapsedUs = math.max(tickUs, swElapsedUs);
+    return (elapsedUs / totalDurationUs).clamp(0.0, 1.0);
+  }
+
+  Future<void> _rampOut(
+    Duration duration,
+    int gen, {
+    Duration? maxDuration,
+  }) async {
+    if (_isStale(gen)) return;
+    final startGain = _currentFadeGain.clamp(0.0, 1.0);
+    if (startGain <= 0.0 || duration <= Duration.zero) {
+      await _setFadeGain(0.0);
+      return;
+    }
+
+    final scaledMs = (duration.inMilliseconds * startGain).round();
+    final effectiveMs = maxDuration != null
+        ? math.min(scaledMs, maxDuration.inMilliseconds)
+        : scaledMs;
+    if (effectiveMs <= 0) {
+      await _setFadeGain(0.0);
+      return;
+    }
+
+    final totalDurationUs = effectiveMs * 1000;
+    final sw = Stopwatch()..start();
+    var step = 0;
+    final completer = Completer<void>();
+    _activeWaitCompleter = completer;
+
+    void finish() {
+      _fadeTimer?.cancel();
+      _fadeTimer = null;
+      _deadlineTimer?.cancel();
+      _deadlineTimer = null;
+      if (identical(_activeWaitCompleter, completer)) {
+        _activeWaitCompleter = null;
+      }
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    }
+
+    if (maxDuration != null) {
+      _deadlineTimer = Timer(maxDuration, () {
+        if (!_isStale(gen)) {
+          unawaited(_setFadeGain(0.0));
+        }
+        finish();
+      });
+    }
+
+    _fadeTimer = Timer.periodic(fadeTickInterval, (_) {
+      if (_isStale(gen)) {
+        finish();
+        return;
+      }
+      step++;
+      final t = _fadeProgress(step, totalDurationUs, sw.elapsedMicroseconds);
+      final gain = startGain * (1.0 - _smoothStep(t));
+      unawaited(_setFadeGain(gain));
+      if (t >= 1.0) {
+        finish();
+      }
+    });
+
+    await completer.future;
+    if (!_isStale(gen)) {
+      await _setFadeGain(0.0);
+    }
+  }
+
+  Future<void> _waitGap(Duration duration, int gen) async {
+    if (_isStale(gen) || duration <= Duration.zero) return;
+    final completer = Completer<void>();
+    _activeWaitCompleter = completer;
+    _delayTimer = Timer(duration, () {
+      _delayTimer = null;
+      if (identical(_activeWaitCompleter, completer)) {
+        _activeWaitCompleter = null;
+      }
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    });
+    await completer.future;
+  }
+
+  void _startFadeIn(Duration duration, int gen) {
+    if (_isStale(gen)) return;
+    _fadeTimer?.cancel();
+    _fadeTimer = null;
+
+    if (!_smoothTransitions || duration <= Duration.zero) {
+      if ((_currentFadeGain - 1.0).abs() > 1e-6) {
+        unawaited(_setFadeGain(1.0));
+      }
+      return;
+    }
+
+    final startGain = _currentFadeGain.clamp(0.0, 1.0);
+    if (startGain >= 1.0) {
+      return;
+    }
+
+    final remainingFraction = 1.0 - startGain;
+    final totalDurationUs =
+        (duration.inMilliseconds * remainingFraction * 1000).round().clamp(1, 10000000);
+    final sw = Stopwatch()..start();
+    var step = 0;
+
+    _fadeTimer = Timer.periodic(fadeTickInterval, (timer) {
+      if (_isStale(gen) || !_smoothTransitions) {
+        timer.cancel();
+        if (identical(_fadeTimer, timer)) {
+          _fadeTimer = null;
+        }
+        return;
+      }
+      step++;
+      final t = _fadeProgress(step, totalDurationUs, sw.elapsedMicroseconds);
+      final gain = startGain + (1.0 - startGain) * _smoothStep(t);
+      unawaited(_setFadeGain(gain));
+      if (t >= 1.0) {
+        timer.cancel();
+        if (identical(_fadeTimer, timer)) {
+          _fadeTimer = null;
+        }
+      }
+    });
+  }
+
+  Future<void> _switchTrackInternal(AudioSource source, int gen) async {
+    if (_isStale(gen)) return;
+
+    final wasPlaying = _currentState == PlaybackState.playing;
+    if (_smoothTransitions) {
+      if (wasPlaying) {
+        await _rampOut(kSwitchFadeOutDuration, gen);
+        if (_isStale(gen)) return;
+        await _waitGap(kSwitchGapDuration, gen);
+        if (_isStale(gen)) return;
+      } else {
+        await _setFadeGain(0.0);
+        if (_isStale(gen)) return;
+      }
+    } else if ((_currentFadeGain - 1.0).abs() > 1e-6) {
+      await _setFadeGain(1.0);
+      if (_isStale(gen)) return;
+    }
+
+    _openedUri = source.uri;
+    try {
+      await engine.open(source, autoPlay: true);
+    } catch (_) {
+      if (!_disposed && !_isStale(gen)) {
+        await _setFadeGain(1.0);
+      }
+      rethrow;
+    }
+    if (_isStale(gen)) return;
+
+    _checkArmedResume();
+    _emitCurrent(source);
+    unawaited(_preloadNext());
+    _startFadeIn(kStartFadeInDuration, gen);
+  }
+
+  // ── Internal listeners ──────────────────────────────────────────────
 
   void _onPlaybackState(PlaybackState state) {
     if (_disposed) return;
@@ -491,12 +823,14 @@ class PlaybackController {
     _consecutiveFatalErrors++;
     if (_consecutiveFatalErrors > queue.length || _consecutiveFatalErrors >= 3) {
       await stop();
-      _errorCtrl.add(AudioError(
-        code: AudioErrorCode.engineFailure,
-        message:
-            'Playback stopped after $_consecutiveFatalErrors consecutive fatal errors.',
-        isFatal: true,
-      ));
+      if (!_disposed) {
+        _errorCtrl.add(AudioError(
+          code: AudioErrorCode.engineFailure,
+          message:
+              'Playback stopped after $_consecutiveFatalErrors consecutive fatal errors.',
+          isFatal: true,
+        ));
+      }
       return;
     }
 
@@ -508,18 +842,25 @@ class PlaybackController {
     _isAdvancing = true;
     try {
       final next = queue.advance();
-      if (next == null) {
-        _openedUri = null;
-        _emitCurrent(null);
-        await engine.stop();
-        return;
-      }
-      _openedUri = next.uri;
-      // continuingGapless: if the engine already moved on to this track by
-      // itself, it only confirms the switch instead of reloading the file.
-      await engine.open(next, autoPlay: true, continuingGapless: true);
-      _emitCurrent(next);
-      unawaited(_preloadNext());
+      final gen = _beginTransition();
+      await _enqueueTransition(() async {
+        if (_isStale(gen)) return;
+        await _ensureUnityFadeGain();
+        if (_isStale(gen)) return;
+        if (next == null) {
+          _openedUri = null;
+          _emitCurrent(null);
+          await engine.stop();
+          return;
+        }
+        _openedUri = next.uri;
+        // continuingGapless: if the engine already moved on to this track by
+        // itself, it only confirms the switch instead of reloading the file.
+        await engine.open(next, autoPlay: true, continuingGapless: true);
+        if (_isStale(gen)) return;
+        _emitCurrent(next);
+        unawaited(_preloadNext());
+      });
     } finally {
       _isAdvancing = false;
     }
