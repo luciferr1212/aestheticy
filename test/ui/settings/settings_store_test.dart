@@ -9,6 +9,8 @@ import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 
+import '../../helpers/wait_for.dart';
+
 void main() {
   group('SettingsStore & AppSettings Tests', () {
     late Directory tempDir;
@@ -294,6 +296,7 @@ void main() {
 
       // Now flush
       await store.flush();
+      await waitFor(() => file.existsSync());
       expect(file.existsSync(), isTrue);
 
       final content = await file.readAsString();

@@ -8,6 +8,8 @@ import 'package:aestheticy/ui/audio_panels/eq_controller.dart';
 import 'package:aestheticy/ui/audio_panels/eq_store.dart';
 import 'package:aestheticy/ui/settings/audio_settings_applier.dart';
 
+import '../../helpers/wait_for.dart';
+
 class _NoEqEngine extends FakeAudioEngine {
   @override
   EngineCapabilities get capabilities => const EngineCapabilities(
@@ -123,7 +125,7 @@ void main() {
       expect(controller.gains[3], 6.0);
 
       // Wait for trailing 50ms throttle
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await waitFor(() => engine.eqGains[3] == 6.0);
 
       expect(engine.eqGains[3], 6.0);
     });
@@ -144,7 +146,7 @@ void main() {
       expect(controller.gains[9], -2.0);
 
       // Wait for trailing throttle
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await waitFor(() => engine.eqGains[0] == 3.0 && engine.preamp == -3.0);
       expect(engine.eqGains[0], 3.0);
       expect(engine.preamp, -3.0);
     });
@@ -239,7 +241,7 @@ void main() {
       engine.failNext = true;
       await controller.setBand(0, 5.0);
       expect(controller.gains[0], 5.0); // Immediately responsive in memory
-      await Future<void>.delayed(const Duration(milliseconds: 100)); // Dispatches and fails
+      await waitFor(() => controller.gains[0] == 0.0); // Dispatches and fails
       expect(controller.gains[0], 0.0); // Reverted to last good values
     });
   });

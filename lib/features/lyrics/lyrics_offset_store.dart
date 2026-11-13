@@ -137,7 +137,8 @@ class LyricsOffsetStore {
     if (_disposed) return;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      _writeFuture = _writeToDisk();
+      _writeFuture =
+          (_writeFuture ?? Future<void>.value()).then((_) => _writeToDisk());
     });
   }
 
@@ -163,13 +164,12 @@ class LyricsOffsetStore {
   Future<void> flush() async {
     _debounceTimer?.cancel();
     _debounceTimer = null;
-    if (_writeFuture != null) {
-      await _writeFuture;
-    }
     if (!_loaded) {
       await init();
     }
-    await _writeToDisk();
+    _writeFuture =
+        (_writeFuture ?? Future<void>.value()).then((_) => _writeToDisk());
+    await _writeFuture;
   }
 
   /// Cancels any pending debounce timer without writing if disposed.

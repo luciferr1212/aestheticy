@@ -23,6 +23,8 @@ import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/glass/glass_button.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/lyrics/lyrics_view.dart';
+
+import '../../helpers/wait_for.dart';
 import 'package:aestheticy/ui/mini_player/mini_player_controller.dart';
 import 'package:aestheticy/ui/mini_player/mini_player_view.dart';
 import 'package:aestheticy/ui/now_playing/now_playing_view.dart';
@@ -690,9 +692,7 @@ void main() {
 
         await tester.tap(find.byKey(const Key('mini_player_close')));
         await tester.runAsync(() async {
-          for (var i = 0; i < 50 && fakeWindow.isVisible; i++) {
-            await Future<void>.delayed(const Duration(milliseconds: 20));
-          }
+          await waitFor(() => !fakeWindow.isVisible);
         });
         await tester.pumpAndSettle();
 
@@ -730,9 +730,7 @@ void main() {
 
         await tester.tap(find.byKey(const Key('mini_player_close')));
         await tester.runAsync(() async {
-          for (var i = 0; i < 50 && !shutdownQuit.hasShutdown; i++) {
-            await Future<void>.delayed(const Duration(milliseconds: 20));
-          }
+          await waitFor(() => shutdownQuit.hasShutdown);
         });
         await tester.pumpAndSettle();
 

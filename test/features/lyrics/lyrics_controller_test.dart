@@ -15,6 +15,8 @@ import 'package:aestheticy/features/lyrics/lyrics_repository.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 
+import '../../helpers/wait_for.dart';
+
 class FakeLyricsRepository extends LyricsRepository {
   Future<LyricsResult> Function(String filePath)? onResolve;
 
@@ -379,48 +381,65 @@ void main() {
       await playbackController.dispose();
       await engine.dispose();
       if (tempDir.existsSync()) {
-        await tempDir.delete(recursive: true);
+        for (var i = 0; i < 5; i++) {
+          try {
+            await tempDir.delete(recursive: true);
+            break;
+          } on FileSystemException {
+            if (i < 4) {
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+            }
+          }
+        }
       }
     });
 
     test('store saves md5-keyed JSON with 300ms debounce, clamps, and removes 0', () async {
       final store = LyricsOffsetStore(directory: tempDir);
-      await store.init();
+      LyricsOffsetStore? reloaded;
+      try {
+        await store.init();
 
-      const trackPath = r'C:\Music\Artist\Song.flac';
-      await store.setOffset(trackPath, 300);
-      await store.setOffset(trackPath, 500);
-      expect(await store.loadOffset(trackPath), equals(500));
+        const trackPath = r'C:\Music\Artist\Song.flac';
+        await store.setOffset(trackPath, 300);
+        await store.setOffset(trackPath, 500);
+        expect(await store.loadOffset(trackPath), equals(500));
 
-      // Wait for 300ms debounce timer to persist atomically
-      await Future<void>.delayed(const Duration(milliseconds: 380));
-      final file = File('${tempDir.path}${Platform.pathSeparator}lyrics_offsets.json');
-      expect(file.existsSync(), isTrue);
+        final file = File('${tempDir.path}${Platform.pathSeparator}lyrics_offsets.json');
+        expect(file.existsSync(), isFalse);
 
-      final parsed = jsonDecode(await file.readAsString()) as Map<String, Object?>;
-      expect(parsed[LyricsOffsetStore.keyForPath(trackPath)], equals(500));
+        await waitFor(() => file.existsSync());
+        expect(file.existsSync(), isTrue);
 
-      // Clamping beyond [-15000, +15000]
-      await store.setOffset(trackPath, 25000);
-      expect(await store.loadOffset(trackPath), equals(kMaxLyricsOffsetMs));
-      await store.setOffset(trackPath, -25000);
-      expect(await store.loadOffset(trackPath), equals(kMinLyricsOffsetMs));
-      await store.flush();
+        final parsed = jsonDecode(await file.readAsString()) as Map<String, Object?>;
+        expect(parsed[LyricsOffsetStore.keyForPath(trackPath)], equals(500));
 
-      // Reload in a fresh instance
-      final reloaded = LyricsOffsetStore(directory: tempDir);
-      await reloaded.init();
-      expect(await reloaded.loadOffset(trackPath), equals(kMinLyricsOffsetMs));
+        // Clamping beyond [-15000, +15000]
+        await store.setOffset(trackPath, 25000);
+        expect(await store.loadOffset(trackPath), equals(kMaxLyricsOffsetMs));
+        await store.setOffset(trackPath, -25000);
+        expect(await store.loadOffset(trackPath), equals(kMinLyricsOffsetMs));
+        await store.flush();
 
-      // Value 0 deletes the key from persisted JSON
-      await reloaded.setOffset(trackPath, 0);
-      await reloaded.flush();
-      final parsedAfterZero =
-          jsonDecode(await file.readAsString()) as Map<String, Object?>;
-      expect(parsedAfterZero.containsKey(LyricsOffsetStore.keyForPath(trackPath)), isFalse);
+        // Reload in a fresh instance
+        reloaded = LyricsOffsetStore(directory: tempDir);
+        await reloaded.init();
+        expect(await reloaded.loadOffset(trackPath), equals(kMinLyricsOffsetMs));
 
-      store.dispose();
-      reloaded.dispose();
+        // Value 0 deletes the key from persisted JSON
+        await reloaded.setOffset(trackPath, 0);
+        await reloaded.flush();
+        final parsedAfterZero =
+            jsonDecode(await file.readAsString()) as Map<String, Object?>;
+        expect(parsedAfterZero.containsKey(LyricsOffsetStore.keyForPath(trackPath)), isFalse);
+      } finally {
+        await store.flush();
+        store.dispose();
+        if (reloaded != null) {
+          await reloaded.flush();
+          reloaded.dispose();
+        }
+      }
     });
 
     test('corrupt lyrics_offsets.json degrades cleanly to empty map', () async {
@@ -510,15 +529,15 @@ void main() {
         const AudioSource('/music/b.mp3', extras: {'title': 'B'}),
       ]);
       await playbackController.play();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await waitFor(() => controller.offsetMs == 400);
       expect(controller.offsetMs, equals(400));
 
       await playbackController.skipNext();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await waitFor(() => controller.offsetMs == -700);
       expect(controller.offsetMs, equals(-700));
 
       await playbackController.skipPrevious();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await waitFor(() => controller.offsetMs == 400);
       expect(controller.offsetMs, equals(400));
       controller.dispose();
       offsetStore.dispose();
