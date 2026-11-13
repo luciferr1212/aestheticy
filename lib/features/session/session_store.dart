@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../diagnostics/app_logger.dart';
+import '../persistence/atomic_file_writer.dart';
 import 'saved_session.dart';
 
 /// Single source of truth managing playback session persistence to `session.json`.
@@ -16,16 +17,34 @@ class SessionStore {
   SavedSession _session = SavedSession.empty;
   Timer? _debounceTimer;
   int _writeGeneration = 0;
+  AtomicFileWriter? _writer;
 
   /// Creates a [SessionStore] with an optional injected [directory] or [directoryProvider].
   SessionStore({
     this.directoryProvider,
     this.directory,
     SavedSession initialSession = SavedSession.empty,
-  }) : _session = initialSession;
+  }) : _session = initialSession {
+    if (directory != null) {
+      _writer = AtomicFileWriter(File(p.join(directory!.path, 'session.json')));
+    }
+  }
 
   /// Current in-memory session snapshot.
   SavedSession get session => _session;
+
+  /// Current write generation counter.
+  @visibleForTesting
+  int get writeGeneration => _writeGeneration;
+
+  AtomicFileWriter? _getWriter() {
+    if (_writer != null) return _writer;
+    if (directory != null) {
+      return _writer =
+          AtomicFileWriter(File(p.join(directory!.path, 'session.json')));
+    }
+    return null;
+  }
 
   /// Initializes the store and loads the last session from disk.
   Future<void> init() async {
@@ -41,6 +60,8 @@ class SessionStore {
       if (!directory!.existsSync()) {
         directory!.createSync(recursive: true);
       }
+      _writer ??=
+          AtomicFileWriter(File(p.join(directory!.path, 'session.json')));
       await _loadFromFile();
     } catch (_) {
       // Keep empty defaults, never throw to playback
@@ -55,7 +76,8 @@ class SessionStore {
       _scheduleWrite();
     } else {
       _debounceTimer?.cancel();
-      unawaited(_writeToDisk());
+      _debounceTimer = null;
+      _writeToDisk();
     }
   }
 
@@ -63,41 +85,19 @@ class SessionStore {
   void saveSync(SavedSession newSession) {
     _writeGeneration++;
     _debounceTimer?.cancel();
+    _debounceTimer = null;
     _session = newSession;
     writeToDiskSync();
   }
 
   /// Synchronously writes session snapshot to disk atomically.
   void writeToDiskSync() {
-    if (directory == null) return;
+    final writer = _getWriter();
+    if (writer == null) return;
     try {
-      final targetPath = p.join(directory!.path, 'session.json');
-      final tmpPath = p.join(
-        directory!.path,
-        'session.json.${DateTime.now().microsecondsSinceEpoch}.tmp',
-      );
-      final tmpFile = File(tmpPath);
       final jsonStr =
           const JsonEncoder.withIndent('  ').convert(_session.toJson());
-
-      tmpFile.writeAsStringSync(jsonStr, flush: true);
-
-      if (tmpFile.existsSync()) {
-        final targetFile = File(targetPath);
-        try {
-          if (targetFile.existsSync()) {
-            targetFile.deleteSync();
-          }
-          tmpFile.renameSync(targetPath);
-        } catch (_) {
-          try {
-            tmpFile.copySync(targetPath);
-            tmpFile.deleteSync();
-          } catch (_) {
-            File(targetPath).writeAsStringSync(jsonStr, flush: true);
-          }
-        }
-      }
+      writer.writeSync(jsonStr);
     } catch (_) {
       // In-memory value preserved, failed write does not crash
     }
@@ -106,8 +106,10 @@ class SessionStore {
   /// Clears the stored session and writes an empty session to disk.
   Future<void> clear() async {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
     _session = SavedSession.empty;
     await _writeToDisk();
+    await _writer?.flush();
   }
 
   Future<void> _loadFromFile() async {
@@ -138,10 +140,6 @@ class SessionStore {
     );
     try {
       final badPath = p.join(directory!.path, 'session.json.bad');
-      final badFile = File(badPath);
-      if (badFile.existsSync()) {
-        badFile.deleteSync();
-      }
       file.renameSync(badPath);
     } catch (_) {}
   }
@@ -149,49 +147,19 @@ class SessionStore {
   void _scheduleWrite() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(seconds: 1), () {
-      unawaited(_writeToDisk());
+      _writeToDisk();
     });
   }
 
   Future<void> _writeToDisk() async {
-    if (directory == null) return;
+    final writer = _getWriter();
+    if (writer == null) return;
     final gen = _writeGeneration;
     try {
-      final targetPath = p.join(directory!.path, 'session.json');
-      final tmpPath = p.join(
-        directory!.path,
-        'session.json.${DateTime.now().microsecondsSinceEpoch}.tmp',
-      );
-      final tmpFile = File(tmpPath);
       final jsonStr =
           const JsonEncoder.withIndent('  ').convert(_session.toJson());
-
-      await tmpFile.writeAsString(jsonStr, flush: true);
-
-      if (_writeGeneration != gen) {
-        // Newer write occurred while writing; discard stale file
-        try {
-          if (tmpFile.existsSync()) tmpFile.deleteSync();
-        } catch (_) {}
-        return;
-      }
-
-      if (tmpFile.existsSync()) {
-        final targetFile = File(targetPath);
-        try {
-          if (targetFile.existsSync()) {
-            await targetFile.delete();
-          }
-          await tmpFile.rename(targetPath);
-        } catch (_) {
-          try {
-            await tmpFile.copy(targetPath);
-            await tmpFile.delete();
-          } catch (_) {
-            await File(targetPath).writeAsString(jsonStr, flush: true);
-          }
-        }
-      }
+      if (_writeGeneration != gen) return;
+      await writer.write(jsonStr);
     } catch (_) {
       // In-memory value preserved, failed write does not crash
     }
@@ -201,10 +169,14 @@ class SessionStore {
   @visibleForTesting
   Future<void> flush() async {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
     await _writeToDisk();
+    await _writer?.flush();
   }
 
   void dispose() {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
+    _writer?.dispose();
   }
 }

@@ -944,9 +944,9 @@ void main() {
         await tester.pump();
         expect(find.text('Synced line 79'), findsOneWidget);
 
+        await tester.runAsync(() => settingsStore.flush());
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(seconds: 5));
-        await tester.runAsync(() => settingsStore.flush());
       },
     );
 
@@ -1027,9 +1027,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 1100));
         expect(scrollbar().thumbVisibility, isFalse);
 
+        await tester.runAsync(() => settingsStore.flush());
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(seconds: 5));
-        await tester.runAsync(() => settingsStore.flush());
       },
     );
   });

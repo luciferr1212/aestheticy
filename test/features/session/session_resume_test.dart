@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -40,11 +41,18 @@ void main() {
       await engine.dispose();
       sessionStore.dispose();
       settingsStore.dispose();
-      try {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
+      if (tempDir.existsSync()) {
+        for (var i = 0; i < 5; i++) {
+          try {
+            await tempDir.delete(recursive: true);
+            break;
+          } on FileSystemException {
+            if (i < 4) {
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+            }
+          }
         }
-      } catch (_) {}
+      }
     });
 
     AudioSource createTrack(String name) {
@@ -119,6 +127,41 @@ void main() {
       await saver.dispose();
       await freshController.dispose();
       await freshEngine.dispose();
+    });
+
+    test(
+        'saveSnapshot(debounce: false) twice and flush immediately persists second snapshot',
+        () async {
+      final t1 = createTrack('track1');
+      final t2 = createTrack('track2');
+
+      final saver = SessionSaver(
+        controller: controller,
+        sessionStore: sessionStore,
+        settingsStore: settingsStore,
+      );
+
+      // Snapshot 1
+      controller.queue.replaceAll([t1], startIndex: 0);
+      saver.saveSnapshot(debounce: false);
+
+      // Snapshot 2 immediately
+      controller.queue.replaceAll([t1, t2], startIndex: 1);
+      saver.saveSnapshot(debounce: false);
+
+      await sessionStore.flush();
+
+      final sessionFile = File('${tempDir.path}/session.json');
+      expect(sessionFile.existsSync(), isTrue);
+
+      final decoded =
+          jsonDecode(await sessionFile.readAsString()) as Map<String, Object?>;
+      final parsed = SavedSession.fromJson(decoded);
+      expect(parsed.queue.length, equals(2));
+      expect(parsed.queue[1].uri, equals(t2.uri));
+      expect(parsed.currentIndex, equals(1));
+
+      await saver.dispose();
     });
 
     test('Position applies lazily once after load only to the same track', () async {

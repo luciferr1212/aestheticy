@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../features/persistence/atomic_file_writer.dart';
+
 /// Predefined equalizer preset descriptor.
 class EqPreset {
   /// Unique identifier of the preset.
@@ -273,6 +275,7 @@ class EqStore extends ChangeNotifier {
   Directory? _directory;
   EqSettings _settings;
   Timer? _debounceTimer;
+  AtomicFileWriter? _writer;
 
   /// Creates an [EqStore] with an optional injected directory or directory provider.
   EqStore({
@@ -282,10 +285,23 @@ class EqStore extends ChangeNotifier {
   }) : _settings = initialSettings {
     _directoryProvider = directoryProvider;
     _directory = directory;
+    if (directory != null) {
+      _writer =
+          AtomicFileWriter(File(p.join(directory.path, 'eq_settings.json')));
+    }
   }
 
   /// Current immutable equalizer settings.
   EqSettings get settings => _settings;
+
+  AtomicFileWriter? _getWriter() {
+    if (_writer != null) return _writer;
+    if (_directory != null) {
+      return _writer =
+          AtomicFileWriter(File(p.join(_directory!.path, 'eq_settings.json')));
+    }
+    return null;
+  }
 
   /// Initializes the store and loads configuration from disk.
   Future<void> init() async {
@@ -302,6 +318,8 @@ class EqStore extends ChangeNotifier {
       if (!_directory!.existsSync()) {
         _directory!.createSync(recursive: true);
       }
+      _writer ??=
+          AtomicFileWriter(File(p.join(_directory!.path, 'eq_settings.json')));
       await _loadFromFile();
     } catch (_) {
       // Retain in-memory defaults on error
@@ -339,10 +357,6 @@ class EqStore extends ChangeNotifier {
     _settings = const EqSettings();
     try {
       final badPath = p.join(_directory!.path, 'eq_settings.json.bad');
-      final badFile = File(badPath);
-      if (badFile.existsSync()) {
-        badFile.deleteSync();
-      }
       file.renameSync(badPath);
     } catch (_) {}
   }
@@ -350,30 +364,17 @@ class EqStore extends ChangeNotifier {
   void _scheduleWrite() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 400), () {
-      unawaited(_writeToDisk());
+      _writeToDisk();
     });
   }
 
   Future<void> _writeToDisk() async {
-    if (_directory == null) return;
+    final writer = _getWriter();
+    if (writer == null) return;
     try {
-      final targetPath = p.join(_directory!.path, 'eq_settings.json');
-      final tmpPath = p.join(_directory!.path, 'eq_settings.json.tmp');
-      final tmpFile = File(tmpPath);
       final jsonStr =
           const JsonEncoder.withIndent('  ').convert(_settings.toJson());
-
-      await tmpFile.writeAsString(jsonStr, flush: true);
-
-      if (tmpFile.existsSync()) {
-        final targetFile = File(targetPath);
-        if (targetFile.existsSync()) {
-          try {
-            await targetFile.delete();
-          } catch (_) {}
-        }
-        await tmpFile.rename(targetPath);
-      }
+      await writer.write(jsonStr);
     } catch (_) {}
   }
 
@@ -381,12 +382,16 @@ class EqStore extends ChangeNotifier {
   @visibleForTesting
   Future<void> flush() async {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
     await _writeToDisk();
+    await _writer?.flush();
   }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
+    _writer?.dispose();
     super.dispose();
   }
 }

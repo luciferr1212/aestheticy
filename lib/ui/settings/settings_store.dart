@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../diagnostics/app_logger.dart';
+import '../../features/persistence/atomic_file_writer.dart';
 import '../glass/glass_scope.dart';
 import 'app_settings.dart';
 
@@ -16,6 +17,7 @@ class SettingsStore extends ChangeNotifier {
   Directory? _directory;
   AppSettings _settings;
   Timer? _debounceTimer;
+  AtomicFileWriter? _writer;
 
   /// Creates a [SettingsStore] with an optional injected [directory] or [directoryProvider].
   SettingsStore({
@@ -25,10 +27,23 @@ class SettingsStore extends ChangeNotifier {
   }) : _settings = initialSettings {
     _directoryProvider = directoryProvider;
     _directory = directory;
+    if (directory != null) {
+      _writer =
+          AtomicFileWriter(File(p.join(directory.path, 'ui_settings.json')));
+    }
   }
 
   /// Current immutable application settings.
   AppSettings get settings => _settings;
+
+  AtomicFileWriter? _getWriter() {
+    if (_writer != null) return _writer;
+    if (_directory != null) {
+      return _writer =
+          AtomicFileWriter(File(p.join(_directory!.path, 'ui_settings.json')));
+    }
+    return null;
+  }
 
   /// Initializes the store and loads settings from disk.
   Future<void> init() async {
@@ -45,6 +60,8 @@ class SettingsStore extends ChangeNotifier {
       if (!_directory!.existsSync()) {
         _directory!.createSync(recursive: true);
       }
+      _writer ??=
+          AtomicFileWriter(File(p.join(_directory!.path, 'ui_settings.json')));
       await _loadFromFile();
     } catch (_) {
       // Keep in-memory defaults, never throw to the UI
@@ -99,10 +116,6 @@ class SettingsStore extends ChangeNotifier {
     );
     try {
       final badPath = p.join(_directory!.path, 'ui_settings.json.bad');
-      final badFile = File(badPath);
-      if (badFile.existsSync()) {
-        badFile.deleteSync();
-      }
       file.renameSync(badPath);
     } catch (_) {
       // Ignore renaming errors, never crash
@@ -112,29 +125,17 @@ class SettingsStore extends ChangeNotifier {
   void _scheduleWrite() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 400), () {
-      unawaited(_writeToDisk());
+      _writeToDisk();
     });
   }
 
   Future<void> _writeToDisk() async {
-    if (_directory == null) return;
+    final writer = _getWriter();
+    if (writer == null) return;
     try {
-      final targetPath = p.join(_directory!.path, 'ui_settings.json');
-      final tmpPath = p.join(_directory!.path, 'ui_settings.json.tmp');
-      final tmpFile = File(tmpPath);
-      final jsonStr = const JsonEncoder.withIndent('  ').convert(_settings.toJson());
-
-      await tmpFile.writeAsString(jsonStr, flush: true);
-
-      if (tmpFile.existsSync()) {
-        final targetFile = File(targetPath);
-        if (targetFile.existsSync()) {
-          try {
-            await targetFile.delete();
-          } catch (_) {}
-        }
-        await tmpFile.rename(targetPath);
-      }
+      final jsonStr =
+          const JsonEncoder.withIndent('  ').convert(_settings.toJson());
+      await writer.write(jsonStr);
     } catch (_) {
       // In-memory value is preserved; failed write does not crash
     }
@@ -143,12 +144,16 @@ class SettingsStore extends ChangeNotifier {
   /// Immediately flushes pending writes to disk.
   Future<void> flush() async {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
     await _writeToDisk();
+    await _writer?.flush();
   }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
+    _writer?.dispose();
     super.dispose();
   }
 }
