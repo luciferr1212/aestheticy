@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
@@ -12,6 +11,7 @@ import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'volume_wheel_region.dart';
 
 /// Shared state controller for the transient on-screen volume HUD.
 class VolumeHudController extends ChangeNotifier {
@@ -347,28 +347,11 @@ class _VolumeHudOverlayState extends State<VolumeHudOverlay> {
                           child: MouseRegion(
                             onEnter: (_) => widget.controller.setHovered(true),
                             onExit: (_) => widget.controller.setHovered(false),
-                            child: Listener(
+                            child: VolumeWheelRegion(
                               key: const Key('volume_hud_wheel_listener'),
-                              onPointerSignal: (event) {
-                                if (widget.engine == null) return;
-                                if (event is PointerScrollEvent &&
-                                    event.scrollDelta.dy != 0) {
-                                  GestureBinding.instance.pointerSignalResolver
-                                      .register(
-                                    event,
-                                    (resolved) {
-                                      final scroll =
-                                          resolved as PointerScrollEvent;
-                                      final delta = scroll.scrollDelta.dy < 0
-                                          ? 0.05
-                                          : -0.05;
-                                      if (mounted) {
-                                        _stepVolume(context, delta);
-                                      }
-                                    },
-                                  );
-                                }
-                              },
+                              engine: widget.engine,
+                              settingsStore: _resolveSettingsStore(context),
+                              hudController: widget.controller,
                               child: Container(
                                 key: const Key('volume_hud'),
                                 constraints: const BoxConstraints(maxWidth: 232),

@@ -20,6 +20,7 @@ import '../shell/global_playback_keys.dart';
 import '../shell/volume_hud.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import '../theme/dither_noise.dart';
 import 'mini_player_controller.dart';
 
 /// Compact desktop player view rendered when [MiniPlayerController] is in mini mode.
@@ -661,44 +662,55 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
                   return GlassSurface(
                     borderRadius: 0,
                     padding: EdgeInsets.zero,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            _palette.secondary.withValues(alpha: 0.35),
-                            AppColors.surface,
-                          ],
-                        ),
-                      ),
-                      child: isWide
-                          ? _buildWideLayout(
-                              context: context,
-                              constraints: constraints,
-                              hasTrack: hasTrack,
-                              isPlaying: isPlaying,
-                              title: title,
-                              artist: artist,
-                              coverKey: coverKey,
-                              trackPath: trackPath,
-                              isPinned: isPinned,
-                              showLyrics: showLyrics,
-                              reduceMotion: reduceMotion,
-                            )
-                          : _buildSquareLayout(
-                              context: context,
-                              constraints: constraints,
-                              hasTrack: hasTrack,
-                              isPlaying: isPlaying,
-                              title: title,
-                              artist: artist,
-                              coverKey: coverKey,
-                              trackPath: trackPath,
-                              isPinned: isPinned,
-                              showLyrics: showLyrics,
-                              reduceMotion: reduceMotion,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  _palette.secondary.withValues(alpha: 0.35),
+                                  AppColors.surface,
+                                ],
+                              ),
                             ),
+                          ),
+                        ),
+                        const Positioned.fill(
+                          child: DitherOverlay(),
+                        ),
+                        Positioned.fill(
+                          child: isWide
+                              ? _buildWideLayout(
+                                  context: context,
+                                  constraints: constraints,
+                                  hasTrack: hasTrack,
+                                  isPlaying: isPlaying,
+                                  title: title,
+                                  artist: artist,
+                                  coverKey: coverKey,
+                                  trackPath: trackPath,
+                                  isPinned: isPinned,
+                                  showLyrics: showLyrics,
+                                  reduceMotion: reduceMotion,
+                                )
+                              : _buildSquareLayout(
+                                  context: context,
+                                  constraints: constraints,
+                                  hasTrack: hasTrack,
+                                  isPlaying: isPlaying,
+                                  title: title,
+                                  artist: artist,
+                                  coverKey: coverKey,
+                                  trackPath: trackPath,
+                                  isPinned: isPinned,
+                                  showLyrics: showLyrics,
+                                  reduceMotion: reduceMotion,
+                                ),
+                        ),
+                      ],
                     ),
                   );
                 },

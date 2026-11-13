@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/dither_noise.dart';
 
 /// Calm, static ambient background rendered with radial gradients on a dark base.
 ///
@@ -11,11 +12,20 @@ class AmbientBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const RepaintBoundary(
-      child: CustomPaint(
-        painter: _AmbientBackgroundPainter(),
-        size: Size.infinite,
-      ),
+    return const Stack(
+      children: [
+        Positioned.fill(
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _AmbientBackgroundPainter(),
+              size: Size.infinite,
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: DitherOverlay(),
+        ),
+      ],
     );
   }
 }

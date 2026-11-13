@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
@@ -210,6 +211,7 @@ class _LyricsViewState extends State<LyricsView>
   bool _userScrollbarVisible = false;
   bool _isPointerDown = false;
   bool _handlingSeek = false;
+  bool _isHovered = false;
   int _lastScrolledLine = -1;
   String? _currentTrackUri;
   Duration? _lastObservedPosition;
@@ -785,15 +787,19 @@ class _LyricsViewState extends State<LyricsView>
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (widget.showHeader && _effectiveDensity != LyricsViewDensity.mini)
-          _buildHeader(context),
-        Expanded(
-          child: _buildBody(context),
-        ),
-      ],
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.showHeader && _effectiveDensity != LyricsViewDensity.mini)
+            _buildHeader(context),
+          Expanded(
+            child: _buildBody(context),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1109,7 +1115,7 @@ class _LyricsViewState extends State<LyricsView>
       LyricsViewDensity.page => 20.0,
     };
 
-    return ShaderMask(
+    final plainView = ShaderMask(
       shaderCallback: (Rect bounds) {
         return const LinearGradient(
           begin: Alignment.topCenter,
@@ -1140,36 +1146,75 @@ class _LyricsViewState extends State<LyricsView>
                 LyricsViewDensity.page => 48,
               },
             ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 680),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final line in doc.lines)
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        vertical: density == LyricsViewDensity.mini ? 4 : 6,
-                      ),
-                      child: Text(
-                        line.text,
-                        textAlign: TextAlign.center,
-                        textDirection: textDirectionFor(line.text),
-                        style: AppTypography.title.copyWith(
-                          fontSize: plainFontSize,
-                          fontWeight: FontWeight.normal,
-                          color: AppColors.textSecondary,
-                          height: density == LyricsViewDensity.mini ? 1.45 : 1.6,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final line in doc.lines)
+                      Padding(
+                        padding: EdgeInsets.symmetric(
+                          vertical: density == LyricsViewDensity.mini ? 4 : 6,
+                        ),
+                        child: Text(
+                          line.text,
+                          textAlign: TextAlign.center,
+                          textDirection: textDirectionFor(line.text),
+                          style: AppTypography.title.copyWith(
+                            fontSize: plainFontSize,
+                            fontWeight: FontWeight.normal,
+                            color: AppColors.textSecondary,
+                            height: density == LyricsViewDensity.mini ? 1.45 : 1.6,
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
-        ),
       ),
+    );
+
+    final showNotice =
+        density == LyricsViewDensity.page && !widget.isFullScreen;
+    if (!showNotice) {
+      return plainView;
+    }
+
+    final noticeText = context.t('lyrics.notSynced');
+
+    return Stack(
+      children: [
+        Positioned.fill(child: plainView),
+        Positioned(
+          top: 12.0,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(
+              child: Semantics(
+                label: noticeText,
+                child: AnimatedOpacity(
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 200),
+                  opacity: _isHovered ? 1.0 : 0.0,
+                  child: Text(
+                    noticeText,
+                    key: const Key('lyrics_unsynced_notice'),
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1214,6 +1259,10 @@ class _LyricsViewState extends State<LyricsView>
                 ? mapWordsToLineRanges(line.text, line.words!)
                 : null;
 
+            final canSweep = !reduceMotion &&
+                hasWordTiming &&
+                highlightMode == 'word';
+
             return RepaintBoundary(
               child: _SyncedLineItem(
                 key: key,
@@ -1229,6 +1278,7 @@ class _LyricsViewState extends State<LyricsView>
                 isFullScreen: widget.isFullScreen,
                 density: density,
                 isWideMini: widget.isWideMini,
+                canSweep: canSweep,
                 onBuildProbe: widget.onLineBuild,
                 onTap: () {
                   _cancelAutoFollowPause();
@@ -1260,6 +1310,7 @@ class _SyncedLineItem extends StatefulWidget {
   final bool isFullScreen;
   final LyricsViewDensity density;
   final bool isWideMini;
+  final bool canSweep;
   final void Function(int index)? onBuildProbe;
   final VoidCallback onTap;
 
@@ -1277,6 +1328,7 @@ class _SyncedLineItem extends StatefulWidget {
     required this.isFullScreen,
     required this.density,
     this.isWideMini = false,
+    this.canSweep = true,
     this.onBuildProbe,
     required this.onTap,
   });
@@ -1436,6 +1488,7 @@ class _SyncedLineItemState extends State<_SyncedLineItem> {
                             activeWordListenable: widget.activeWordListenable,
                             wordProgressListenable:
                                 widget.wordProgressListenable,
+                            canSweep: widget.canSweep,
                           )
                         : Text(
                             widget.line.text,
@@ -1454,7 +1507,7 @@ class _SyncedLineItemState extends State<_SyncedLineItem> {
   }
 }
 
-class _WordHighlightedLineText extends StatelessWidget {
+class _WordHighlightedLineText extends StatefulWidget {
   final String lineText;
   final List<WordCharRange> ranges;
   final TextDirection lineDirection;
@@ -1462,6 +1515,7 @@ class _WordHighlightedLineText extends StatelessWidget {
   final bool reduceMotion;
   final ValueListenable<int> activeWordListenable;
   final ValueListenable<double> wordProgressListenable;
+  final bool canSweep;
 
   const _WordHighlightedLineText({
     required this.lineText,
@@ -1471,43 +1525,106 @@ class _WordHighlightedLineText extends StatelessWidget {
     required this.reduceMotion,
     required this.activeWordListenable,
     required this.wordProgressListenable,
+    this.canSweep = true,
   });
+
+  @override
+  State<_WordHighlightedLineText> createState() =>
+      _WordHighlightedLineTextState();
+}
+
+class _WordHighlightedLineTextState extends State<_WordHighlightedLineText>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _fadeController;
+  int _lastActiveWordIdx = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: widget.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 200),
+      value: 1.0,
+    );
+    _lastActiveWordIdx = widget.activeWordListenable.value;
+    widget.activeWordListenable.addListener(_onActiveWordChanged);
+  }
+
+  @override
+  void didUpdateWidget(_WordHighlightedLineText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeWordListenable != widget.activeWordListenable) {
+      oldWidget.activeWordListenable.removeListener(_onActiveWordChanged);
+      widget.activeWordListenable.addListener(_onActiveWordChanged);
+    }
+    if (oldWidget.reduceMotion != widget.reduceMotion) {
+      _fadeController.duration = widget.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 200);
+    }
+  }
+
+  void _onActiveWordChanged() {
+    final current = widget.activeWordListenable.value;
+    if (current != _lastActiveWordIdx) {
+      _lastActiveWordIdx = current;
+      if (!widget.canSweep && !widget.reduceMotion) {
+        _fadeController.forward(from: 0.0);
+      } else {
+        _fadeController.value = 1.0;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.activeWordListenable.removeListener(_onActiveWordChanged);
+    _fadeController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final dimColor = AppColors.textMuted.withValues(alpha: 0.45);
     final geometryOnlyStyle = TextStyle(
-      fontFamily: baseStyle.fontFamily,
-      fontFamilyFallback: baseStyle.fontFamilyFallback,
-      fontSize: baseStyle.fontSize,
-      fontWeight: baseStyle.fontWeight,
-      height: baseStyle.height,
-      letterSpacing: baseStyle.letterSpacing,
+      fontFamily: widget.baseStyle.fontFamily,
+      fontFamilyFallback: widget.baseStyle.fontFamilyFallback,
+      fontSize: widget.baseStyle.fontSize,
+      fontWeight: widget.baseStyle.fontWeight,
+      height: widget.baseStyle.height,
+      letterSpacing: widget.baseStyle.letterSpacing,
     );
     final textScaler = MediaQuery.textScalerOf(context);
-    final isRtl = lineDirection == TextDirection.rtl;
+    final isRtl = widget.lineDirection == TextDirection.rtl;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         return ListenableBuilder(
           listenable: Listenable.merge(
-            [activeWordListenable, wordProgressListenable],
+            [
+              widget.activeWordListenable,
+              widget.wordProgressListenable,
+              _fadeController,
+            ],
           ),
           builder: (context, _) {
-            final activeWordIdx = activeWordListenable.value;
-            final progress = wordProgressListenable.value.clamp(0.0, 1.0);
+            final activeWordIdx = widget.activeWordListenable.value;
+            final progress = widget.wordProgressListenable.value.clamp(0.0, 1.0);
 
             Rect? activeWordRect;
-            if (!reduceMotion &&
+            if (!widget.reduceMotion &&
+                widget.canSweep &&
                 activeWordIdx >= 0 &&
-                activeWordIdx < ranges.length &&
+                activeWordIdx < widget.ranges.length &&
                 progress > 0.0 &&
                 progress < 1.0) {
-              final r = ranges[activeWordIdx];
+              final r = widget.ranges[activeWordIdx];
               final tp = TextPainter(
-                text: TextSpan(text: lineText, style: geometryOnlyStyle),
+                text: TextSpan(text: widget.lineText, style: geometryOnlyStyle),
                 textAlign: TextAlign.start,
-                textDirection: lineDirection,
+                textDirection: widget.lineDirection,
                 textScaler: textScaler,
               )..layout(maxWidth: constraints.maxWidth);
               final boxes = tp.getBoxesForSelection(
@@ -1528,45 +1645,67 @@ class _WordHighlightedLineText extends StatelessWidget {
             final spans = <InlineSpan>[];
             var cursor = 0;
 
-            for (var i = 0; i < ranges.length; i++) {
-              final r = ranges[i];
+            for (var i = 0; i < widget.ranges.length; i++) {
+              final r = widget.ranges[i];
               if (r.start > cursor) {
                 final gapColor = (activeWordIdx >= 0 && i <= activeWordIdx)
                     ? AppColors.text
                     : dimColor;
                 spans.add(
                   TextSpan(
-                    text: lineText.substring(cursor, r.start),
+                    text: widget.lineText.substring(cursor, r.start),
                     style: TextStyle(color: gapColor),
                   ),
                 );
               }
 
-              final wordSlice = lineText.substring(r.start, r.end);
+              final wordSlice = widget.lineText.substring(r.start, r.end);
               final TextStyle wordStyle;
               if (activeWordIdx < 0) {
                 wordStyle = TextStyle(color: dimColor);
               } else if (i < activeWordIdx) {
                 wordStyle = const TextStyle(color: AppColors.text);
               } else if (i == activeWordIdx) {
-                if (reduceMotion || progress >= 1.0) {
+                if (widget.reduceMotion || progress >= 1.0) {
                   wordStyle = const TextStyle(color: AppColors.text);
+                } else if (!widget.canSweep) {
+                  final t = _fadeController.value;
+                  wordStyle = TextStyle(
+                    color: Color.lerp(dimColor, AppColors.text, t),
+                  );
                 } else if (progress <= 0.0 || activeWordRect == null) {
                   wordStyle = TextStyle(
                     color: progress >= 0.5 ? AppColors.text : dimColor,
                   );
                 } else {
+                  final featherPx = 0.6 * activeWordRect.height;
+                  final featherFrac = activeWordRect.width > 0
+                      ? (featherPx / activeWordRect.width)
+                      : 0.05;
+                  final halfFeather = featherFrac / 2.0;
+                  final stop1 = (progress - halfFeather).clamp(0.0, 1.0);
+                  final stop2 = math.max(
+                    stop1 + 0.001,
+                    (progress + halfFeather).clamp(0.0, 1.0),
+                  );
+                  final finalStop2 = stop2.clamp(0.0, 1.0);
+                  final finalStop1 =
+                      math.min(stop1, finalStop2 - 0.001).clamp(0.0, 1.0);
+
                   final shader = LinearGradient(
-                    begin:
-                        isRtl ? Alignment.centerRight : Alignment.centerLeft,
-                    end: isRtl ? Alignment.centerLeft : Alignment.centerRight,
+                    begin: isRtl
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft,
+                    end: isRtl
+                        ? Alignment.centerLeft
+                        : Alignment.centerRight,
                     colors: [
                       AppColors.text,
                       AppColors.text,
                       dimColor,
                       dimColor,
                     ],
-                    stops: [0.0, progress, progress, 1.0],
+                    stops: [0.0, finalStop1, finalStop2, 1.0],
                   ).createShader(activeWordRect);
                   wordStyle = TextStyle(foreground: Paint()..shader = shader);
                 }
@@ -1578,13 +1717,13 @@ class _WordHighlightedLineText extends StatelessWidget {
               cursor = r.end;
             }
 
-            if (cursor < lineText.length) {
-              final tailColor = (activeWordIdx >= ranges.length)
+            if (cursor < widget.lineText.length) {
+              final tailColor = (activeWordIdx >= widget.ranges.length)
                   ? AppColors.text
                   : dimColor;
               spans.add(
                 TextSpan(
-                  text: lineText.substring(cursor),
+                  text: widget.lineText.substring(cursor),
                   style: TextStyle(color: tailColor),
                 ),
               );
@@ -1595,7 +1734,7 @@ class _WordHighlightedLineText extends StatelessWidget {
               child: Text.rich(
                 TextSpan(children: spans),
                 textAlign: TextAlign.start,
-                textDirection: lineDirection,
+                textDirection: widget.lineDirection,
               ),
             );
           },

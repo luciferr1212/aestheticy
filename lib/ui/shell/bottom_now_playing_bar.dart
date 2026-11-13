@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
@@ -17,10 +16,12 @@ import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
 import '../settings/settings_scope.dart';
+import '../now_playing/metadata_link.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import 'volume_hud.dart';
+import 'volume_wheel_region.dart';
 
 /// Floating bottom player bar providing transport controls, track metadata,
 /// seeking, and auxiliary controls.
@@ -173,14 +174,36 @@ class _TrackInfoArea extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textDirection: textDirectionFor(artist),
-                          style: AppTypography.caption.copyWith(
-                            color: AppColors.textSecondary,
-                          ),
+                        Builder(
+                          builder: (context) {
+                            final canLink = hasTrack &&
+                                rawArtist != null &&
+                                rawArtist.trim().isNotEmpty &&
+                                navigator != null;
+                            return MetadataLink(
+                              text: artist,
+                              style: AppTypography.caption.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                              reduceMotion: SettingsScope.maybeOf(context)
+                                      ?.settings
+                                      .reduceMotion ??
+                                  false,
+                              semanticLabel: canLink
+                                  ? context.t(
+                                      'common.goToArtist',
+                                      args: {'name': artist},
+                                    )
+                                  : null,
+                              onTap: canLink
+                                  ? () => MetadataNavHelper.openArtist(
+                                        context: context,
+                                        navigator: navigator!,
+                                        rawArtist: rawArtist,
+                                      )
+                                  : null,
+                            );
+                          },
                         ),
                       ],
                     ),
@@ -497,52 +520,60 @@ class _EndControlsArea extends StatelessWidget {
             padding: const EdgeInsetsDirectional.only(end: 32, bottom: 104),
             child: Material(
               color: Colors.transparent,
-              child: GlassSurface(
-                borderRadius: AppSpacing.r16,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                width: 200,
-                height: 52,
-                child: StreamBuilder<double>(
-                  stream: controller.engine.volumeStream,
-                  initialData: controller.engine.currentVolume,
-                  builder: (context, snapshot) {
-                    final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
-                    return Row(
-                      children: [
-                        const Icon(
-                          Icons.volume_down,
-                          size: 18,
-                          color: AppColors.textSecondary,
-                        ),
-                        Expanded(
-                          child: SliderTheme(
-                            data: const SliderThemeData(
-                              thumbShape:
-                                  RoundSliderThumbShape(enabledThumbRadius: 5.0),
-                              trackHeight: 3.0,
-                              activeTrackColor: AppColors.accent,
-                              inactiveTrackColor: AppColors.border,
-                              thumbColor: AppColors.accent,
-                            ),
-                            child: Slider(
-                              value: vol,
-                              onChanged: (newVol) {
-                                final hudCtrl = VolumeHudScope.maybeOf(context);
-                                hudCtrl?.clearMuteBackup();
-                                controller.engine.setVolume(newVol);
-                                settingsStore?.update((s) => s.copyWith(volume: newVol));
-                              },
+              child: VolumeWheelRegion(
+                engine: controller.engine,
+                settingsStore: settingsStore,
+                behavior: HitTestBehavior.opaque,
+                child: GlassSurface(
+                  borderRadius: AppSpacing.r16,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  width: 200,
+                  height: 52,
+                  child: StreamBuilder<double>(
+                    stream: controller.engine.volumeStream,
+                    initialData: controller.engine.currentVolume,
+                    builder: (context, snapshot) {
+                      final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
+                      return Row(
+                        children: [
+                          const Icon(
+                            Icons.volume_down,
+                            size: 18,
+                            color: AppColors.textSecondary,
+                          ),
+                          Expanded(
+                            child: SliderTheme(
+                              data: const SliderThemeData(
+                                thumbShape:
+                                    RoundSliderThumbShape(enabledThumbRadius: 5.0),
+                                trackHeight: 3.0,
+                                activeTrackColor: AppColors.accent,
+                                inactiveTrackColor: AppColors.border,
+                                thumbColor: AppColors.accent,
+                              ),
+                              child: Slider(
+                                value: vol,
+                                onChanged: (newVol) {
+                                  final hudCtrl = VolumeHudScope.maybeOf(context);
+                                  setVolumeDirect(
+                                    engine: controller.engine,
+                                    volume: newVol,
+                                    settingsStore: settingsStore,
+                                    hudController: hudCtrl,
+                                  );
+                                },
+                              ),
                             ),
                           ),
-                        ),
-                        const Icon(
-                          Icons.volume_up,
-                          size: 18,
-                          color: AppColors.textSecondary,
-                        ),
-                      ],
-                    );
-                  },
+                          const Icon(
+                            Icons.volume_up,
+                            size: 18,
+                            color: AppColors.textSecondary,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
@@ -593,30 +624,11 @@ class _EndControlsArea extends StatelessWidget {
         const SizedBox(width: 4),
 
         // Volume (enabled, click for popup slider, scroll wheel for +/-5% step)
-        Listener(
+        VolumeWheelRegion(
           key: const Key('player_volume_wheel_listener'),
-          onPointerSignal: (event) {
-            if (event is PointerScrollEvent && event.scrollDelta.dy != 0) {
-              GestureBinding.instance.pointerSignalResolver.register(
-                event,
-                (resolvedEvent) {
-                  final scroll = resolvedEvent as PointerScrollEvent;
-                  final delta = scroll.scrollDelta.dy < 0 ? 0.05 : -0.05;
-                  final currentVol = settingsStore?.settings.volume ??
-                      controller.engine.currentVolume;
-                  final hudController =
-                      context.mounted ? VolumeHudScope.maybeOf(context) : null;
-                  adjustVolumeByStep(
-                    engine: controller.engine,
-                    currentVolume: currentVol,
-                    delta: delta,
-                    settingsStore: settingsStore,
-                    hudController: hudController,
-                  );
-                },
-              );
-            }
-          },
+          engine: controller.engine,
+          settingsStore: settingsStore,
+          behavior: HitTestBehavior.opaque,
           child: GlassIconButton(
             key: const Key('player_volume_button'),
             icon: Icons.volume_up,

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -150,14 +149,19 @@ void main() {
         ),
       );
 
-      // Trigger hover over bottom progress bar so time labels are visible
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: Offset.zero);
-      await mouse.moveTo(tester.getRect(find.byType(FullScreenView)).bottomCenter - const Offset(0, 1));
+      // Trigger drag over bottom progress bar so time tooltip is visible with duration
+      final barFinder = find.byKey(const Key('fullscreen_seek_bar'));
+      expect(barFinder, findsOneWidget);
+      final barRect = tester.getRect(barFinder);
+
+      final dragGesture = await tester.startGesture(
+        Offset(barRect.width * 0.25, barRect.center.dy),
+      );
+      await dragGesture.moveTo(Offset(barRect.width, barRect.center.dy));
       await tester.pump(const Duration(milliseconds: 50));
 
       expect(find.text('3:00'), findsOneWidget);
-      await mouse.removePointer();
+      await dragGesture.up();
     });
   });
 }

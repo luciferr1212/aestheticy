@@ -482,7 +482,7 @@ void main() {
     }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets(
-      'Seek bar keeps fixed 36dp box and identical track rect across idle, hover, and drag while showing overlay thumb, times, and tooltip',
+      'Seek bar keeps fixed 28dp strip and identical 3dp track rect anchored at bottom 0 across idle, hover, and drag',
       (tester) async {
         setupDesktopViewport(tester);
         await controller.playQueue(createSampleTracks(), startIndex: 0);
@@ -491,18 +491,27 @@ void main() {
 
         final barFinder = find.byKey(const Key('fullscreen_seek_bar'));
         final trackFinder = find.byKey(const Key('fullscreen_seek_track'));
-        final thumbScaleFinder =
-            find.byKey(const Key('fullscreen_seek_thumb_scale'));
         expect(barFinder, findsOneWidget);
         expect(trackFinder, findsOneWidget);
 
         final idleBarRect = tester.getRect(barFinder);
         final idleTrackRect = tester.getRect(trackFinder);
-        expect(idleBarRect.height, equals(36.0));
-        expect(idleTrackRect.height, equals(4.0));
-        expect(tester.widget<AnimatedScale>(thumbScaleFinder).scale, equals(0.0));
-        expect(find.byKey(const Key('fullscreen_seek_times')), findsNothing);
+        expect(idleBarRect.height, equals(28.0));
+        expect(idleBarRect.bottom, equals(800.0));
+        expect(idleTrackRect.height, equals(3.0));
+        expect(idleTrackRect.bottom, equals(800.0));
         expect(find.byKey(const Key('fullscreen_seek_tooltip')), findsNothing);
+
+        // Strip cursor is SystemMouseCursors.click
+        final mouseRegion = tester.widget<MouseRegion>(
+          find
+              .ancestor(
+                of: barFinder,
+                matching: find.byType(MouseRegion),
+              )
+              .first,
+        );
+        expect(mouseRegion.cursor, equals(SystemMouseCursors.click));
 
         final gesture =
             await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -515,13 +524,6 @@ void main() {
         final hoverTrackRect = tester.getRect(trackFinder);
         expect(hoverBarRect, equals(idleBarRect));
         expect(hoverTrackRect, equals(idleTrackRect));
-        expect(find.byKey(const Key('fullscreen_seek_thumb')), findsOneWidget);
-        expect(tester.widget<AnimatedScale>(thumbScaleFinder).scale, equals(1.0));
-        expect(find.byKey(const Key('fullscreen_seek_times')), findsOneWidget);
-        expect(
-          tester.getRect(find.byKey(const Key('fullscreen_seek_times'))).bottom,
-          lessThanOrEqualTo(idleBarRect.top),
-        );
 
         // Top-bar controls stay visible while hovering the scrubber beyond 3s.
         await tester.pump(const Duration(milliseconds: 3500));
@@ -541,11 +543,10 @@ void main() {
         await dragGesture.up();
         await tester.pump(const Duration(milliseconds: 20));
 
-        // Moving away hides overlay times and resumes the 3s auto-hide timer.
+        // Moving away hides tooltip and resumes the 3s auto-hide timer.
         await gesture.moveTo(const Offset(100, 100));
         await tester.pump(const Duration(milliseconds: 160));
-        expect(tester.widget<AnimatedScale>(thumbScaleFinder).scale, equals(0.0));
-        expect(find.byKey(const Key('fullscreen_seek_times')), findsNothing);
+        expect(find.byKey(const Key('fullscreen_seek_tooltip')), findsNothing);
         expect(tester.getRect(trackFinder), equals(idleTrackRect));
 
         await tester.pump(const Duration(milliseconds: 3500));
@@ -617,6 +618,39 @@ void main() {
     );
 
     testWidgets(
+      'Seek bar strip is 28 dp and clicks at top, middle, and bottom seek to the same fraction',
+      (tester) async {
+        setupDesktopViewport(tester);
+        await controller.playQueue(createSampleTracks(), startIndex: 0);
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final barFinder = find.byKey(const Key('fullscreen_seek_bar'));
+        final barRect = tester.getRect(barFinder);
+        expect(barRect.height, equals(28.0));
+
+        // Click top edge of strip
+        await tester.tapAt(Offset(barRect.width * 0.25, barRect.top + 1));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.lastSeekTarget!.inMilliseconds, closeTo(45000, 1500));
+
+        // Click middle of strip
+        await tester.tapAt(Offset(barRect.width * 0.25, barRect.center.dy));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.lastSeekTarget!.inMilliseconds, closeTo(45000, 1500));
+
+        // Click bottom edge of strip
+        await tester.tapAt(Offset(barRect.width * 0.25, barRect.bottom - 1));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.lastSeekTarget!.inMilliseconds, closeTo(45000, 1500));
+
+        await tester.pumpWidget(const SizedBox());
+        await settingsStore.flush();
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+
+    testWidgets(
       'Seek bar idle armResume updates cleanly and RTL fills from right edge',
       (tester) async {
         setupDesktopViewport(tester);
@@ -660,6 +694,39 @@ void main() {
 
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(seconds: 4));
+        await settingsStore.flush();
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+
+    testWidgets(
+      'Seek bar strip is 28 dp and clicks at top, middle, and bottom seek to the same fraction',
+      (tester) async {
+        setupDesktopViewport(tester);
+        await controller.playQueue(createSampleTracks(), startIndex: 0);
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final barFinder = find.byKey(const Key('fullscreen_seek_bar'));
+        final barRect = tester.getRect(barFinder);
+        expect(barRect.height, equals(28.0));
+
+        // Click top edge of strip
+        await tester.tapAt(Offset(barRect.width * 0.25, barRect.top + 1));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.lastSeekTarget!.inMilliseconds, closeTo(45000, 1500));
+
+        // Click middle of strip
+        await tester.tapAt(Offset(barRect.width * 0.25, barRect.center.dy));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.lastSeekTarget!.inMilliseconds, closeTo(45000, 1500));
+
+        // Click bottom edge of strip
+        await tester.tapAt(Offset(barRect.width * 0.25, barRect.bottom - 1));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(engine.lastSeekTarget!.inMilliseconds, closeTo(45000, 1500));
+
+        await tester.pumpWidget(const SizedBox());
         await settingsStore.flush();
       },
       timeout: const Timeout(Duration(seconds: 30)),

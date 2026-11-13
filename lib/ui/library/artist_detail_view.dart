@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
 import '../../features/library/artist_rules_sheet.dart';
+import '../../features/library_view/release_kind.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/track_audio_source_mapper.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../l10n/app_strings.dart';
+import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -70,11 +72,23 @@ class ArtistDetailView extends StatefulWidget {
 class _ArtistDetailViewState extends State<ArtistDetailView> {
   List<Track> _tracks = [];
   bool _isLoading = true;
+  ReleaseCategory _selectedCategory = ReleaseCategory.all;
 
   @override
   void initState() {
     super.initState();
     _loadTracks();
+  }
+
+  @override
+  void didUpdateWidget(ArtistDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.artist.key != widget.artist.key ||
+        oldWidget.artist.name != widget.artist.name) {
+      _selectedCategory = ReleaseCategory.all;
+      _isLoading = true;
+      _loadTracks();
+    }
   }
 
   Future<void> _loadTracks() async {
@@ -90,9 +104,14 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
     }
   }
 
-  Future<void> _playArtist({bool shuffle = false, int startIndex = 0}) async {
-    if (_tracks.isEmpty) return;
-    final sources = _tracks.map((t) => t.toAudioSource()).toList();
+  Future<void> _playArtist({
+    bool shuffle = false,
+    int startIndex = 0,
+    List<Track>? tracksToPlay,
+  }) async {
+    final list = tracksToPlay ?? _tracks;
+    if (list.isEmpty) return;
+    final sources = list.map((t) => t.toAudioSource()).toList();
     if (shuffle) {
       sources.shuffle();
       await widget.controller.playQueue(sources, startIndex: 0);
@@ -108,10 +127,36 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 
+  String _categoryLabelKey(ReleaseCategory cat) => switch (cat) {
+        ReleaseCategory.all => 'artist.category.all',
+        ReleaseCategory.albums => 'artist.category.albums',
+        ReleaseCategory.singles => 'artist.category.singles',
+        ReleaseCategory.eps => 'artist.category.eps',
+        ReleaseCategory.compilations => 'artist.category.compilations',
+        ReleaseCategory.appearsOn => 'artist.category.appearsOn',
+      };
+
   @override
   Widget build(BuildContext context) {
     final gradient = _gradientForArtist(widget.artist.name);
     final initial = _initialForArtist(widget.artist.name);
+
+    final classified = ReleaseKindClassifier.classifyTracks(
+      tracks: _tracks,
+      artistName: widget.artist.name,
+      artistKey: widget.artist.key,
+    );
+    final nonAllCategoriesWithTracks = [
+      ReleaseCategory.albums,
+      ReleaseCategory.singles,
+      ReleaseCategory.eps,
+      ReleaseCategory.compilations,
+      ReleaseCategory.appearsOn,
+    ].where((c) => (classified[c]?.isNotEmpty ?? false)).toList();
+    final showCategoryChips = nonAllCategoriesWithTracks.length > 1;
+    final filteredTracks = _selectedCategory == ReleaseCategory.all
+        ? _tracks
+        : (classified[_selectedCategory] ?? []);
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 16),
@@ -192,7 +237,9 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                           leadingIcon: Icons.play_arrow,
                           variant: GlassButtonVariant.primary,
                           size: GlassButtonSize.small,
-                          onPressed: _tracks.isEmpty ? null : () => _playArtist(),
+                          onPressed: filteredTracks.isEmpty
+                              ? null
+                              : () => _playArtist(tracksToPlay: filteredTracks),
                         ),
                         const SizedBox(width: 12),
                         GlassPillButton(
@@ -200,9 +247,12 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                           label: context.t('common.shuffle'),
                           leadingIcon: Icons.shuffle,
                           size: GlassButtonSize.small,
-                          onPressed: _tracks.isEmpty
+                          onPressed: filteredTracks.isEmpty
                               ? null
-                              : () => _playArtist(shuffle: true),
+                              : () => _playArtist(
+                                    shuffle: true,
+                                    tracksToPlay: filteredTracks,
+                                  ),
                         ),
                         const SizedBox(width: 12),
                         GlassPillButton(
@@ -223,7 +273,45 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
+          // Release category chips (visible only when more than one category exists)
+          if (showCategoryChips) ...[
+            SingleChildScrollView(
+              key: const Key('artist_category_chips_scroll'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Row(
+                children: [
+                  GlassPillButton(
+                    key: const Key('artist_category_chip_all'),
+                    label:
+                        '${context.t('artist.category.all')} (${context.localizeDigitsText(_tracks.length.toString())})',
+                    variant: _selectedCategory == ReleaseCategory.all
+                        ? GlassButtonVariant.selected
+                        : GlassButtonVariant.normal,
+                    size: GlassButtonSize.small,
+                    onPressed: () =>
+                        setState(() => _selectedCategory = ReleaseCategory.all),
+                  ),
+                  for (final cat in nonAllCategoriesWithTracks) ...[
+                    const SizedBox(width: 8),
+                    GlassPillButton(
+                      key: Key('artist_category_chip_${cat.name}'),
+                      label:
+                          '${context.t(_categoryLabelKey(cat))} (${context.localizeDigitsText((classified[cat]?.length ?? 0).toString())})',
+                      variant: _selectedCategory == cat
+                          ? GlassButtonVariant.selected
+                          : GlassButtonVariant.normal,
+                      size: GlassButtonSize.small,
+                      onPressed: () =>
+                          setState(() => _selectedCategory = cat),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
 
           // Tracks list
           Expanded(
@@ -238,10 +326,10 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                       return ListView.builder(
                         key: const Key('artist_tracks_list'),
                         padding: const EdgeInsets.only(bottom: 120),
-                        itemCount: _tracks.length,
+                        itemCount: filteredTracks.length,
                         itemExtent: 48.0,
                         itemBuilder: (context, index) {
-                          final track = _tracks[index];
+                          final track = filteredTracks[index];
                           final isCurrent = activeSource != null &&
                               (activeSource.uri == track.path ||
                                   activeSource.uri == 'file://${track.path}');
@@ -259,7 +347,10 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                               child: InkWell(
                                 borderRadius:
                                     BorderRadius.circular(AppSpacing.r10),
-                                onTap: () => _playArtist(startIndex: index),
+                                onTap: () => _playArtist(
+                                  startIndex: index,
+                                  tracksToPlay: filteredTracks,
+                                ),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 16),

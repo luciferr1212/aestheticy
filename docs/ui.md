@@ -762,3 +762,47 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
   - Non-year sort modes reverse the album list.
   - Year sort mode reverses the year group sequence (oldest first when reversed) while keeping the `"Unknown year"` section pinned at the end, and preserving within-group alphabetical sorting by artist then title.
 
+---
+
+## 33. Phase 4, Prompt 5 — Seek Bar Restore, Lyrics Polish, Artist Categories, Dither Noise, Clickable Names, Wheel Volume
+
+### 33.1 Full Screen Seek Bar: Final Design (`lib/ui/now_playing/full_screen_view.dart`)
+- **Slender Bottom Anchor:** Restores the slim, minimalist aesthetic: a 3 dp visible line (white fill over faint translucent track, zero knob/thumb, zero time row) pinned directly to the absolute bottom edge of the screen (`bottom: 0`) without `SafeArea` padding. Position, height, and visual appearance are identical in all states (idle, hover, drag, playing, paused).
+- **Hit Test Strip:** A 28 dp tall transparent hit area flush with the bottom screen edge (`bottom: 0`). Clicking anywhere seeks to that horizontal fraction (RTL mirrored). Dragging scrubs with a 120 ms throttle and commits upon release.
+- **Overlay Tooltip:** While dragging only, an overlay timestamp tooltip floats directly above the user's cursor as an independent `Positioned` layer in the root page `Stack`, disappearing upon drag end without shifting or resizing the seek bar track.
+- **Auto-Hide Pause:** Hovering or scrubbing over the 28 dp strip prevents full-screen playback controls from auto-fading.
+
+### 33.2 Lyrics Unsynced Notice & Soft Word Fade (`lib/ui/lyrics/lyrics_view.dart`)
+- **Unsynced Notice:** For plain text lyrics, displays "Lyrics aren't synced" / "كلمات غير متزامنة" as a centered, muted caption at the top of the lyrics view. It appears exclusively when hovering over the lyrics view (200 ms `AnimatedOpacity`, 0 ms with `reduceMotion`) as an `IgnorePointer` overlay, strictly preserving underlying scroll offsets and layout metrics. Excluded from synced lyrics, Full Screen, and Mini Player. Exposed to screen readers via `Semantics`.
+- **Soft Word Fade (Feathered Edge):** Enhanced LRC per-word progress fills left-to-right (right-to-left in RTL) with a feathered edge (~0.6x line height wide) via `LinearGradient` stops around the active word fraction. Finished words remain at full solid text opacity; upcoming words stay at dim opacity. Completed words hold opacity without snapping or flickering. Falls back to a 200 ms opacity cross-fade when motion is reduced or tickers are inactive.
+
+### 33.3 Artist Page: Release Categories (`lib/features/library_view/release_kind.dart`, `lib/ui/library/artist_detail_view.dart`)
+- **Release Classifier:** A pure Dart classifier categorizing albums into `ReleaseKind` (`albums`, `singles`, `eps`, `compilations`, `appearsOn`) based solely on existing library models:
+  1. Album artist is "Various Artists" / "VA" or compilation flag set -> `Compilations`.
+  2. Artist is featured/track-level only (not album artist) -> `Appears on`.
+  3. Title ends with "- Single" / "(Single)" -> `Singles`. Ends with "- EP" / "(EP)" or last word "EP" -> `EPs`.
+  4. Owned track count & duration: 1-3 tracks under 20 min -> `Singles`; 4-6 tracks -> `EPs`; 7+ tracks (or 1-3 tracks >= 20 min) -> `Albums`.
+  5. Tracks without album -> `Singles`.
+- **Category Filter Chips:** Horizontal chip row above artist tracks showing category count with `localizeDigitsText`. Hidden if only one category exists. Tapping filters the lazy track list while preserving active sort direction. Resets to "All" whenever a different artist opens.
+
+### 33.4 Shared Dither Noise (`lib/ui/theme/dither_noise.dart`)
+- **Deterministic Noise Texture:** Generates a deterministic 128x128 RGBA noise tile in code with seeded random grayscale values and ~3.5% baked alpha (`ui.decodeImageFromPixels`), cached globally in `DitherNoise`.
+- **DitherOverlay Widget:** A static `IgnorePointer` + `RepaintBoundary` overlay repeating the noise tile across surfaces using `ImageShader` and `TileMode.repeated`.
+- **Gradient Banding Elimination:** Integrated across `FullScreenView`, `AmbientBackground`, `NowPlayingView`, and `MiniPlayerView` to eliminate dark gradient banding. Skipped entirely when `GlassQuality.off` is selected.
+
+### 33.5 Clickable Artist & Album Names (`lib/ui/now_playing/metadata_link.dart`)
+- **Interactive Metadata:** Visible artist and album labels across Bottom Bar, Now Playing, and Full Screen are interactive `MetadataLink`s with subtle 1 dp underline on hover, pointer cursor, and Enter/Space keyboard triggers.
+- **Collaborations / Multi-Artist Menu:** Detects delimiters (`,`, `;`, `/`, `&`, `feat.`, `ft.`, `featuring`) via `ArtistSplitter`. Tapping a multi-artist label displays a calm popup menu with translated artist choices; tapping one opens that artist's page. Single artists navigate directly.
+- **Full Screen Safety:** Calls `navigator.goBack()` prior to navigation so target pages open in the main application window.
+- **Empty / Missing Fallback:** Missing metadata shows unclickable fallback labels ("Unknown Artist" / "Unknown Album") without cursor or underline styles.
+
+### 33.6 Mouse Wheel Volume Across All Surfaces (`lib/ui/shell/volume_wheel_region.dart`)
+- **Unified Wheel Region:** `VolumeWheelRegion` wraps the bottom bar speaker button, bottom bar volume popup, Now Playing slider row, and `VolumeHudOverlay`.
+- **Stepping & Accumulation:** Discrete mouse wheel notches step volume by `+/-0.05` (`+/-5%`). Continuous trackpad deltas accumulate to 40 logical pixels before stepping `+/-0.05`. Clamped to `[0.0, 1.0]`. Direction flip or 300 ms pause resets the accumulator.
+- **HUD Feedback:** Triggers `VolumeHudController.show()` on changes and auto-hides after the standard timeout.
+
+### 33.7 Decisions & Known Limitations
+- **Decision (Slender 3 dp Full Screen Seek Bar)**: Replaces expanding hover seek bar with a fixed 3 dp hairline stuck to the bottom screen edge, paired with an independent drag-scrub tooltip overlay in the root Stack to eliminate vertical layout jumps.
+- **Decision (Dither Noise Memory Safety)**: Deterministic 128x128 RGBA image tile decoded once into `ui.Image` and cached for the process lifecycle; disposed with the app. Uses zero disk assets and zero native dependencies.
+- **Known Limitation (Partial Local Albums)**: If an album in the local library is partially downloaded/owned (e.g., only 1-2 tracks from a 12-track album), the classifier heuristics categorize it by owned track count and duration as a `Single` rather than an `Album`, as remote release metadata is not queried in offline-first mode.
+

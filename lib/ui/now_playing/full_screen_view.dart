@@ -26,7 +26,9 @@ import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import '../theme/dither_noise.dart';
 import 'cover_palette.dart';
+import 'metadata_link.dart';
 import 'seek_bar_helper.dart';
 
 /// Immersive full-screen playback view featuring drifting ambient color blobs,
@@ -90,6 +92,7 @@ class FullScreenViewState extends State<FullScreenView>
   bool _showControls = true;
   bool _isScrubberActive = false;
   bool _isAppResumed = true;
+  FullScreenSeekDragState? _dragTooltipState;
 
   /// Exposes whether the animation ticker is active.
   bool get isTickerActive => _ticker.isActive;
@@ -302,6 +305,9 @@ class FullScreenViewState extends State<FullScreenView>
                   ),
                 ),
               ),
+              const Positioned.fill(
+                child: DitherOverlay(),
+              ),
 
               // 2. Dark contrast scrim overlay
               Positioned.fill(
@@ -391,29 +397,65 @@ class FullScreenViewState extends State<FullScreenView>
                                     ],
                                   ),
                                   const SizedBox(height: 6),
-                                  Text(
-                                    artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
-                                    textDirection: textDirectionFor(artist),
-                                    style: AppTypography.title.copyWith(
-                                      fontSize: 20,
-                                      color: AppColors.textSecondary,
-                                    ),
+                                  Builder(
+                                    builder: (context) {
+                                      final canLink = hasTrack &&
+                                          rawArtist != null &&
+                                          rawArtist.trim().isNotEmpty;
+                                      return MetadataLink(
+                                        text: artist,
+                                        style: AppTypography.title.copyWith(
+                                          fontSize: 20,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                        reduceMotion: widget.settingsStore.settings.reduceMotion,
+                                        semanticLabel: canLink
+                                            ? context.t(
+                                                'common.goToArtist',
+                                                args: {'name': artist},
+                                              )
+                                            : null,
+                                        onTap: canLink
+                                            ? () => MetadataNavHelper.openArtist(
+                                                  context: context,
+                                                  navigator: widget.navigator,
+                                                  rawArtist: rawArtist,
+                                                  leaveFullScreenFirst: true,
+                                                )
+                                            : null,
+                                      );
+                                    },
                                   ),
                                   if (album.isNotEmpty) ...[
                                     const SizedBox(height: 4),
-                                    Text(
-                                      album,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.center,
-                                      textDirection: textDirectionFor(album),
-                                      style: AppTypography.bodyStrong.copyWith(
-                                        fontSize: 16,
-                                        color: AppColors.textMuted,
-                                      ),
+                                    Builder(
+                                      builder: (context) {
+                                        final canLink = hasTrack &&
+                                            album.trim().isNotEmpty;
+                                        return MetadataLink(
+                                          text: album,
+                                          style: AppTypography.bodyStrong.copyWith(
+                                            fontSize: 16,
+                                            color: AppColors.textMuted,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          reduceMotion: widget.settingsStore.settings.reduceMotion,
+                                          semanticLabel: canLink
+                                              ? context.t(
+                                                  'common.goToAlbum',
+                                                  args: {'name': album},
+                                                )
+                                              : null,
+                                          onTap: canLink
+                                              ? () => MetadataNavHelper.openAlbum(
+                                                    navigator: widget.navigator,
+                                                    albumTitle: album,
+                                                    leaveFullScreenFirst: true,
+                                                  )
+                                              : null,
+                                        );
+                                      },
                                     ),
                                   ],
                                 ],
@@ -505,20 +547,61 @@ class FullScreenViewState extends State<FullScreenView>
                 ),
               ),
 
-              // 6. Bottom seek bar spanning window width (fixed 36 dp box)
+              // 6. Bottom seek bar spanning window width (fixed 28 dp strip, track at bottom: 0)
               Positioned(
+                key: const ValueKey('fullscreen_seek_bar_slot'),
                 bottom: 0,
                 left: 0,
                 right: 0,
                 child: RepaintBoundary(
                   child: _SlenderProgressLine(
+                    key: const ValueKey('fullscreen_seek_bar_line'),
                     engine: widget.engine,
                     controller: widget.controller,
                     reduceMotion: widget.settingsStore.settings.reduceMotion,
                     onInteractionChanged: _onScrubberInteractionChanged,
+                    onDragStateChanged: (state) {
+                      if (mounted) {
+                        setState(() => _dragTooltipState = state);
+                      }
+                    },
                   ),
                 ),
               ),
+
+              // 7. Tooltip overlay while dragging (floats above pointer in page Stack)
+              if (_dragTooltipState != null)
+                Positioned(
+                  key: const ValueKey('fullscreen_seek_tooltip_slot'),
+                  left: (_dragTooltipState!.pointerDx - 32.0).clamp(
+                    8.0,
+                    math.max(8.0, MediaQuery.sizeOf(context).width - 72.0),
+                  ),
+                  bottom: 36.0,
+                  child: IgnorePointer(
+                    child: Container(
+                      key: const Key('fullscreen_seek_tooltip'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Text(
+                        context.formatDurationLocalized(
+                          _dragTooltipState!.position,
+                        ),
+                        style: AppTypography.micro.copyWith(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               if (widget.debugProbeBuilder != null)
                 Positioned(
                   left: 0,
@@ -629,18 +712,36 @@ class _BlobPainter extends CustomPainter {
   }
 }
 
+/// Represents the drag scrub state for the full-screen seek bar tooltip overlay.
+class FullScreenSeekDragState {
+  /// The local horizontal pointer offset.
+  final double pointerDx;
+
+  /// The targeted scrub duration.
+  final Duration position;
+
+  /// Creates a [FullScreenSeekDragState].
+  const FullScreenSeekDragState({
+    required this.pointerDx,
+    required this.position,
+  });
+}
+
 /// Interactive progress line spanning the bottom edge of the screen.
 class _SlenderProgressLine extends StatefulWidget {
   final AudioEngine engine;
   final PlaybackController? controller;
   final bool reduceMotion;
   final ValueChanged<bool>? onInteractionChanged;
+  final ValueChanged<FullScreenSeekDragState?>? onDragStateChanged;
 
   const _SlenderProgressLine({
+    super.key,
     required this.engine,
     this.controller,
     this.reduceMotion = false,
     this.onInteractionChanged,
+    this.onDragStateChanged,
   });
 
   @override
@@ -654,7 +755,6 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
   bool _isHovered = false;
   bool _isDragging = false;
   double? _dragFraction;
-  double _pointerDx = 0.0;
   Timer? _seekThrottleTimer;
   Duration? _pendingSeekTarget;
   Duration _activeTotalDuration = Duration.zero;
@@ -769,20 +869,25 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
       width: width,
       isRtl: isRtl,
     );
+    final pointerDx = details.localPosition.dx.clamp(0.0, width);
+    final target = total > Duration.zero
+        ? seekBarDurationForFraction(fraction: frac, totalDuration: total)
+        : Duration.zero;
+
     setState(() {
       _isDragging = true;
-      _pointerDx = details.localPosition.dx.clamp(0.0, width);
       _dragFraction = total > Duration.zero ? frac : null;
     });
-    if (!wasActive) {
-      widget.onInteractionChanged?.call(true);
-    }
+
     if (total > Duration.zero) {
-      final target = seekBarDurationForFraction(
-        fraction: frac,
-        totalDuration: total,
+      widget.onDragStateChanged?.call(
+        FullScreenSeekDragState(pointerDx: pointerDx, position: target),
       );
       _scheduleThrottledSeek(target, total);
+    }
+
+    if (!wasActive) {
+      widget.onInteractionChanged?.call(true);
     }
   }
 
@@ -797,14 +902,18 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
       width: width,
       isRtl: isRtl,
     );
+    final pointerDx = details.localPosition.dx.clamp(0.0, width);
+    final target = total > Duration.zero
+        ? seekBarDurationForFraction(fraction: frac, totalDuration: total)
+        : Duration.zero;
+
     setState(() {
-      _pointerDx = details.localPosition.dx.clamp(0.0, width);
       _dragFraction = total > Duration.zero ? frac : null;
     });
+
     if (total > Duration.zero) {
-      final target = seekBarDurationForFraction(
-        fraction: frac,
-        totalDuration: total,
+      widget.onDragStateChanged?.call(
+        FullScreenSeekDragState(pointerDx: pointerDx, position: target),
       );
       _scheduleThrottledSeek(target, total);
     }
@@ -830,6 +939,7 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
       _isDragging = false;
       _dragFraction = null;
     });
+    widget.onDragStateChanged?.call(null);
     final isActive = _isHovered || _isDragging;
     if (wasActive != isActive) {
       widget.onInteractionChanged?.call(isActive);
@@ -871,7 +981,6 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
                     totalDuration: total,
                   )
                 : pos;
-            final active = _isHovered || _isDragging;
 
             return Semantics(
               slider: true,
@@ -902,152 +1011,56 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final width = constraints.maxWidth;
-                  final thumbCenterX = ((isRtl
-                              ? (1.0 - displayFraction)
-                              : displayFraction) *
-                          width)
-                      .clamp(6.0, math.max(6.0, width - 6.0));
-                  final tooltipLeft =
-                      (_pointerDx - 32.0).clamp(8.0, math.max(8.0, width - 72.0)).toDouble();
-
-                  final animDuration = widget.reduceMotion
-                      ? Duration.zero
-                      : const Duration(milliseconds: 140);
 
                   return SizedBox(
-                    height: 36.0,
+                    height: 28.0,
                     width: double.infinity,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Positioned.fill(
-                          child: MouseRegion(
-                            cursor: total > Duration.zero
-                                ? SystemMouseCursors.click
-                                : MouseCursor.defer,
-                            onEnter: (_) => _setHover(true),
-                            onExit: (_) => _setHover(false),
-                            child: GestureDetector(
-                              key: const Key('fullscreen_seek_bar'),
-                              behavior: HitTestBehavior.opaque,
-                              onTapUp: (details) =>
-                                  _handleTapUp(details, width, isRtl, total),
-                              onHorizontalDragStart: (details) =>
-                                  _handleDragStart(details, width, isRtl, total),
-                              onHorizontalDragUpdate: (details) =>
-                                  _handleDragUpdate(details, width, isRtl, total),
-                              onHorizontalDragEnd: (_) =>
-                                  _finishDrag(total, commitSeek: true),
-                              onHorizontalDragCancel: () =>
-                                  _finishDrag(total, commitSeek: false),
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 16.0,
-                                    child: Container(
-                                      key: const Key('fullscreen_seek_track'),
-                                      height: 4.0,
-                                      color: AppColors.borderSubtle,
-                                      child: FractionallySizedBox(
-                                        alignment: isRtl
-                                            ? Alignment.centerRight
-                                            : Alignment.centerLeft,
-                                        widthFactor: displayFraction,
-                                        child: AnimatedContainer(
-                                          key: const Key('fullscreen_seek_fill'),
-                                          duration: animDuration,
-                                          curve: Curves.easeOutCubic,
-                                          color: active
-                                              ? AppColors.accent
-                                              : AppColors.accent
-                                                  .withValues(alpha: 0.72),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    left: thumbCenterX - 6.0,
-                                    bottom: 12.0,
-                                    child: IgnorePointer(
-                                      child: AnimatedScale(
-                                        key: const Key(
-                                          'fullscreen_seek_thumb_scale',
-                                        ),
-                                        scale: active ? 1.0 : 0.0,
-                                        duration: animDuration,
-                                        curve: Curves.easeOutCubic,
-                                        child: Container(
-                                          key: const Key('fullscreen_seek_thumb'),
-                                          width: 12.0,
-                                          height: 12.0,
-                                          decoration: const BoxDecoration(
-                                            color: AppColors.accent,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (active)
-                          Positioned(
-                            left: 16,
-                            right: 16,
-                            bottom: 38.0,
-                            child: IgnorePointer(
-                              child: Row(
-                                key: const Key('fullscreen_seek_times'),
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    context.formatDurationLocalized(displayPos),
-                                    style: AppTypography.micro
-                                        .copyWith(color: AppColors.textMuted),
-                                  ),
-                                  Text(
-                                    context.formatDurationLocalized(total),
-                                    style: AppTypography.micro
-                                        .copyWith(color: AppColors.textMuted),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        if (_isDragging && total > Duration.zero)
-                          Positioned(
-                            left: tooltipLeft,
-                            bottom: 62.0,
-                            child: IgnorePointer(
+                    child: MouseRegion(
+                      cursor: total > Duration.zero
+                          ? SystemMouseCursors.click
+                          : MouseCursor.defer,
+                      onEnter: (_) => _setHover(true),
+                      onExit: (_) => _setHover(false),
+                      child: GestureDetector(
+                        key: const Key('fullscreen_seek_bar'),
+                        behavior: HitTestBehavior.opaque,
+                        onTapUp: (details) =>
+                            _handleTapUp(details, width, isRtl, total),
+                        onHorizontalDragStart: (details) =>
+                            _handleDragStart(details, width, isRtl, total),
+                        onHorizontalDragUpdate: (details) =>
+                            _handleDragUpdate(details, width, isRtl, total),
+                        onHorizontalDragEnd: (_) =>
+                            _finishDrag(total, commitSeek: true),
+                        onHorizontalDragCancel: () =>
+                            _finishDrag(total, commitSeek: false),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
                               child: Container(
-                                key: const Key('fullscreen_seek_tooltip'),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surface,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: AppColors.border),
-                                ),
-                                child: Text(
-                                  context.formatDurationLocalized(displayPos),
-                                  style: AppTypography.micro.copyWith(
-                                    color: AppColors.text,
-                                    fontWeight: FontWeight.w600,
+                                key: const Key('fullscreen_seek_track'),
+                                height: 3.0,
+                                color: Colors.white.withValues(alpha: 0.24),
+                                child: FractionallySizedBox(
+                                  alignment: isRtl
+                                      ? Alignment.centerRight
+                                      : Alignment.centerLeft,
+                                  widthFactor: displayFraction,
+                                  child: Container(
+                                    key: const Key('fullscreen_seek_fill'),
+                                    height: 3.0,
+                                    color: Colors.white,
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
+                          ],
+                        ),
+                      ),
                     ),
                   );
                 },

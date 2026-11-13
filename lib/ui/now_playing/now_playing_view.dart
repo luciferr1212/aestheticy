@@ -23,10 +23,14 @@ import '../settings/app_shortcuts.dart';
 import '../settings/settings_scope.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
+import '../shell/volume_hud.dart';
+import '../shell/volume_wheel_region.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import '../theme/dither_noise.dart';
 import 'cover_palette.dart';
+import 'metadata_link.dart';
 import 'seek_bar_helper.dart';
 
 /// Full-window Now Playing screen with two-column responsive layout,
@@ -202,6 +206,11 @@ class _NowPlayingViewState extends State<NowPlayingView> {
               ),
             ),
 
+            // Dither noise overlay to prevent gradient banding
+            const Positioned.fill(
+              child: DitherOverlay(),
+            ),
+
             // 3. Main content
             Positioned.fill(
               child: SafeArea(
@@ -241,6 +250,9 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                           title: title,
                                           artist: artist,
                                           album: album,
+                                          rawArtist: rawArtist,
+                                          navigator: widget.navigator,
+                                          reduceMotion: widget.settingsStore.settings.reduceMotion,
                                           trackPath: current?.uri,
                                           onBuild: widget.onMetadataBuild,
                                         ),
@@ -729,6 +741,9 @@ class _MetadataArea extends StatelessWidget {
   final String title;
   final String artist;
   final String album;
+  final String? rawArtist;
+  final AppNavigator navigator;
+  final bool reduceMotion;
   final String? trackPath;
   final VoidCallback? onBuild;
 
@@ -736,6 +751,9 @@ class _MetadataArea extends StatelessWidget {
     required this.title,
     required this.artist,
     required this.album,
+    this.rawArtist,
+    required this.navigator,
+    this.reduceMotion = false,
     this.trackPath,
     this.onBuild,
   });
@@ -743,6 +761,9 @@ class _MetadataArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     onBuild?.call();
+
+    final canLinkArtist = rawArtist != null && rawArtist!.trim().isNotEmpty;
+    final canLinkAlbum = album.trim().isNotEmpty;
 
     return Column(
       children: [
@@ -768,29 +789,44 @@ class _MetadataArea extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 4),
-        Text(
-          artist,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          textDirection: textDirectionFor(artist),
+        MetadataLink(
+          text: artist,
           style: AppTypography.bodyStrong.copyWith(
             color: AppColors.textSecondary,
             fontSize: 16,
           ),
+          textAlign: TextAlign.center,
+          reduceMotion: reduceMotion,
+          semanticLabel: canLinkArtist
+              ? context.t('common.goToArtist', args: {'name': artist})
+              : null,
+          onTap: canLinkArtist
+              ? () => MetadataNavHelper.openArtist(
+                    context: context,
+                    navigator: navigator,
+                    rawArtist: rawArtist!,
+                  )
+              : null,
         ),
         if (album.isNotEmpty) ...[
           const SizedBox(height: 2),
-          Text(
-            album,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            textDirection: textDirectionFor(album),
+          MetadataLink(
+            text: album,
             style: AppTypography.caption.copyWith(
               color: AppColors.textMuted,
               fontSize: 14,
             ),
+            textAlign: TextAlign.center,
+            reduceMotion: reduceMotion,
+            semanticLabel: canLinkAlbum
+                ? context.t('common.goToAlbum', args: {'name': album})
+                : null,
+            onTap: canLinkAlbum
+                ? () => MetadataNavHelper.openAlbum(
+                      navigator: navigator,
+                      albumTitle: album,
+                    )
+                : null,
           ),
         ],
         if (trackPath != null) ...[
@@ -1134,49 +1170,63 @@ class _VolumeControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<double>(
-      stream: engine.volumeStream,
-      initialData: engine.currentVolume,
-      builder: (context, snapshot) {
-        final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
-        return SizedBox(
-          width: 140,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.volume_down,
-                size: 16,
-                color: AppColors.textMuted,
-              ),
-              Expanded(
-                child: SliderTheme(
-                  data: const SliderThemeData(
-                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 4.0),
-                    overlayShape: RoundSliderOverlayShape(overlayRadius: 8.0),
-                    trackHeight: 2.5,
-                    activeTrackColor: AppColors.accent,
-                    inactiveTrackColor: AppColors.border,
-                    thumbColor: AppColors.accent,
-                  ),
-                  child: Slider(
-                    value: vol,
-                    onChanged: (newVol) {
-                      engine.setVolume(newVol);
-                      SettingsScope.maybeOf(context)?.update((s) => s.copyWith(volume: newVol));
-                    },
+    final settingsStore = SettingsScope.maybeOf(context);
+    final hudCtrl = VolumeHudScope.maybeOf(context);
+
+    return VolumeWheelRegion(
+      engine: engine,
+      settingsStore: settingsStore,
+      hudController: hudCtrl,
+      behavior: HitTestBehavior.opaque,
+      child: StreamBuilder<double>(
+        stream: engine.volumeStream,
+        initialData: engine.currentVolume,
+        builder: (context, snapshot) {
+          final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
+          return SizedBox(
+            width: 140,
+            height: 32,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.volume_down,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: const SliderThemeData(
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 4.0),
+                      overlayShape: RoundSliderOverlayShape(overlayRadius: 8.0),
+                      trackHeight: 2.5,
+                      activeTrackColor: AppColors.accent,
+                      inactiveTrackColor: AppColors.border,
+                      thumbColor: AppColors.accent,
+                    ),
+                    child: Slider(
+                      value: vol,
+                      onChanged: (newVol) {
+                        setVolumeDirect(
+                          engine: engine,
+                          volume: newVol,
+                          settingsStore: settingsStore,
+                          hudController: hudCtrl,
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
-              const Icon(
-                Icons.volume_up,
-                size: 16,
-                color: AppColors.textMuted,
-              ),
-            ],
-          ),
-        );
-      },
+                const Icon(
+                  Icons.volume_up,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
