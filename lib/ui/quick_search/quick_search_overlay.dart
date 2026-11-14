@@ -377,7 +377,7 @@ class _QuickSearchOverlayState extends State<QuickSearchOverlay> {
                             children: [
                               // Text input row
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                                padding: const EdgeInsetsDirectional.fromSTEB(16, 12, 16, 12),
                                 child: Row(
                                   children: [
                                     const Icon(
@@ -524,7 +524,7 @@ class _QuickSearchOverlayState extends State<QuickSearchOverlay> {
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 16, 4),
       child: Text(
         title,
         style: AppTypography.micro.copyWith(

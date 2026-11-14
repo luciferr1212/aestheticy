@@ -105,12 +105,13 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
             children: [
               // Top page header
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+                padding: const EdgeInsetsDirectional.fromSTEB(24, 20, 24, 16),
                 child: Row(
                   children: [
                     GlassIconButton(
                       key: const Key('audio_panels_back_button'),
                       icon: Icons.arrow_back,
+                      matchTextDirection: true,
                       tooltip: context.t('shortcuts.back'),
                       semanticLabel: context.t('shortcuts.back'),
                       onPressed: () => widget.navigator.goBack(),
@@ -149,7 +150,7 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
 
                     if (isWide) {
                       return Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                        padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -168,7 +169,7 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
                     }
 
                     return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                      padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
                       child: Column(
                         children: [
                           SizedBox(
@@ -329,7 +330,7 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
         children: [
           for (final preset in kBuiltInEqPresets) ...[
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: _buildPresetChip(
                 context,
                 title: context.t(preset.nameKey),
@@ -340,7 +341,7 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
           ],
           for (final custom in eq.customPresets) ...[
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: _buildPresetChip(
                 context,
                 title: custom.name,

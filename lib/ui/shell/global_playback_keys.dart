@@ -47,6 +47,12 @@ class GlobalPlaybackKeysHandler {
 
   bool _isSpaceDown = false;
   bool _spaceChordUsed = false;
+  /// Handles navigation back (`Alt + Left`).
+  final VoidCallback? onNavigateBack;
+
+  /// Handles navigation forward (`Alt + Right`).
+  final VoidCallback? onNavigateForward;
+
   int _arrowHeldDirection = 0;
   Timer? _seekCooldownTimer;
   Timer? _volumeCooldownTimer;
@@ -63,6 +69,8 @@ class GlobalPlaybackKeysHandler {
     this.onEnterMiniPlayer,
     this.onShowShortcutsCheatSheet,
     this.isShortcutsCheatSheetOpen,
+    this.onNavigateBack,
+    this.onNavigateForward,
   });
 
   /// Clears held key state and cancels active repeat timers.
@@ -169,6 +177,25 @@ class GlobalPlaybackKeysHandler {
 
   /// Processes a desktop [KeyEvent] across all playback & overlay shortcuts.
   KeyEventResult handleKeyEvent(FocusNode node, KeyEvent event) {
+    // 0. Alt + Left / Alt + Right history navigation
+    final isAlt = isAltModifierPressed();
+
+    if (isAlt && (event is KeyDownEvent || event is KeyRepeatEvent)) {
+      if (!_isPopupOrDialogFocused() && !_isDeepWidgetConsumed(isArrow: true)) {
+        if (isArrowLeftKey(event)) {
+          if (onNavigateBack != null) {
+            onNavigateBack!.call();
+            return KeyEventResult.handled;
+          }
+        } else if (isArrowRightKey(event)) {
+          if (onNavigateForward != null) {
+            onNavigateForward!.call();
+            return KeyEventResult.handled;
+          }
+        }
+      }
+    }
+
     // 1. Esc (Back / Exit overlay or mini mode)
     if (event is KeyDownEvent && matchesShortcut(event, AppShortcutId.back)) {
       if (!_isPopupOrDialogFocused() &&

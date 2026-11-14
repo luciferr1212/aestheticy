@@ -58,6 +58,52 @@ class AudioSource {
   String toString() => 'AudioSource($uri)';
 }
 
+// ── Queue entry ─────────────────────────────────────────────────────────
+
+/// A single entry within a playback queue with unique identity and user-queued flag.
+class QueueEntry {
+  /// Unique incrementing ID for this entry within its queue.
+  final int id;
+
+  /// The audio source to play.
+  final AudioSource source;
+
+  /// Whether this entry was explicitly added by the user (Play next, Add to queue).
+  final bool isUserQueued;
+
+  /// Creates a [QueueEntry].
+  const QueueEntry({
+    required this.id,
+    required this.source,
+    this.isUserQueued = false,
+  });
+
+  /// Creates a copy of this entry with optional overrides.
+  QueueEntry copyWith({
+    int? id,
+    AudioSource? source,
+    bool? isUserQueued,
+  }) {
+    return QueueEntry(
+      id: id ?? this.id,
+      source: source ?? this.source,
+      isUserQueued: isUserQueued ?? this.isUserQueued,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is QueueEntry && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+
+  @override
+  String toString() =>
+      'QueueEntry(id: $id, uri: ${source.uri}, isUserQueued: $isUserQueued)';
+}
+
 // ── Errors ──────────────────────────────────────────────────────────────
 
 /// Classification of audio-engine errors.

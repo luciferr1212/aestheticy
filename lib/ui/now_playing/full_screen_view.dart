@@ -78,8 +78,16 @@ class FullScreenView extends StatefulWidget {
 
 /// Exposed state for testing ticker and lifecycle behaviors.
 class FullScreenViewState extends State<FullScreenView>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late final Ticker _ticker;
+  late final AnimationController _indicatorController;
+  bool _showIndicator = false;
+  bool _lastActionWasPlay = false;
+  final GlobalKey _seekBarKey = GlobalKey();
+  final GlobalKey _lyricsKey = GlobalKey();
+  final GlobalKey _topBarKey = GlobalKey();
+  final GlobalKey _controlsColumnKey = GlobalKey();
+  Offset? _lastDoubleTapPosition;
   final FocusNode _focusNode = FocusNode();
   late final LyricsController _lyricsController;
   bool _createdLyricsControllerLocally = false;
@@ -96,6 +104,12 @@ class FullScreenViewState extends State<FullScreenView>
 
   /// Exposes whether the animation ticker is active.
   bool get isTickerActive => _ticker.isActive;
+
+  /// Exposes the indicator animation controller for testing.
+  AnimationController get indicatorController => _indicatorController;
+
+  /// Exposes whether the indicator is currently visible.
+  bool get isIndicatorVisible => _showIndicator;
 
   @override
   void initState() {
@@ -126,6 +140,19 @@ class FullScreenViewState extends State<FullScreenView>
     _ticker = createTicker(_onTick);
 
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    _indicatorController = AnimationController(
+      vsync: this,
+      duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 600),
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          if (mounted) {
+            setState(() {
+              _showIndicator = false;
+            });
+          }
+        }
+      });
+
     if (!reduceMotion) {
       _ticker.start();
     }
@@ -152,6 +179,8 @@ class FullScreenViewState extends State<FullScreenView>
 
   void _syncTickerWithSettings() {
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    _indicatorController.duration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 600);
     if (reduceMotion) {
       if (_ticker.isActive) {
         _ticker.stop();
@@ -239,10 +268,81 @@ class FullScreenViewState extends State<FullScreenView>
     _controlsTimer?.cancel();
     _ticker.stop();
     _ticker.dispose();
+    _indicatorController.dispose();
     _phaseNotifier.dispose();
     _currentSub?.cancel();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  bool _isInteractiveArea(Offset globalPosition) {
+    bool hits(GlobalKey key) {
+      final ctx = key.currentContext;
+      if (ctx == null) return false;
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return false;
+      final origin = box.localToGlobal(Offset.zero);
+      final rect = origin & box.size;
+      return rect.contains(globalPosition);
+    }
+
+    // 1. Seek bar
+    if (hits(_seekBarKey)) return true;
+    final size = MediaQuery.sizeOf(context);
+    if (globalPosition.dy >= size.height - 32.0) return true;
+
+    // 2. Top bar controls
+    if (hits(_topBarKey)) return true;
+    if (globalPosition.dy <= MediaQuery.paddingOf(context).top + 64.0) return true;
+
+    // 3. Lyrics view
+    if (hits(_lyricsKey)) return true;
+
+    // 4. Metadata controls
+    if (hits(_controlsColumnKey)) return true;
+
+    return false;
+  }
+
+  void _onDoubleTapDown(TapDownDetails details) {
+    _lastDoubleTapPosition = details.globalPosition;
+  }
+
+  void _handleDoubleTap() {
+    _resetControlsTimer();
+    final pos = _lastDoubleTapPosition;
+    if (pos != null && _isInteractiveArea(pos)) {
+      return;
+    }
+
+    final isPlaying = widget.controller.currentState == PlaybackState.playing;
+    if (isPlaying) {
+      widget.controller.pause();
+      _lastActionWasPlay = false;
+    } else {
+      widget.controller.play();
+      _lastActionWasPlay = true;
+    }
+
+    final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    _indicatorController.duration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 600);
+
+    if (reduceMotion) {
+      if (mounted) {
+        setState(() {
+          _showIndicator = false;
+        });
+      }
+      _indicatorController.value = 1.0;
+    } else {
+      if (mounted) {
+        setState(() {
+          _showIndicator = true;
+        });
+      }
+      _indicatorController.forward(from: 0.0);
+    }
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -296,23 +396,29 @@ class FullScreenViewState extends State<FullScreenView>
             children: [
               // 1. Drifting color blobs (painted via RepaintBoundary without page setState)
               Positioned.fill(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    painter: _BlobPainter(
-                      palette: _palette,
-                      phaseListenable: _phaseNotifier,
+                child: IgnorePointer(
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _BlobPainter(
+                        palette: _palette,
+                        phaseListenable: _phaseNotifier,
+                      ),
                     ),
                   ),
                 ),
               ),
               const Positioned.fill(
-                child: DitherOverlay(),
+                child: IgnorePointer(
+                  child: DitherOverlay(),
+                ),
               ),
 
               // 2. Dark contrast scrim overlay
               Positioned.fill(
-                child: Container(
-                  color: const Color(0xB30F1115),
+                child: IgnorePointer(
+                  child: Container(
+                    color: const Color(0xB30F1115),
+                  ),
                 ),
               ),
 
@@ -321,30 +427,45 @@ class FullScreenViewState extends State<FullScreenView>
                 Positioned(
                   left: 80.0,
                   top: 140.0,
-                  child: RepaintBoundary(
-                    child: GlassSurface(
-                      density: GlassDensity.clear,
-                      borderRadius: 28,
-                      width: 320,
-                      height: 200,
-                      child: SizedBox.shrink(),
+                  child: IgnorePointer(
+                    child: RepaintBoundary(
+                      child: GlassSurface(
+                        density: GlassDensity.clear,
+                        borderRadius: 28,
+                        width: 320,
+                        height: 200,
+                        child: SizedBox.shrink(),
+                      ),
                     ),
                   ),
                 ),
                 Positioned(
                   right: 90.0,
                   bottom: 120.0,
-                  child: RepaintBoundary(
-                    child: GlassSurface(
-                      density: GlassDensity.clear,
-                      borderRadius: 28,
-                      width: 300,
-                      height: 180,
-                      child: SizedBox.shrink(),
+                  child: IgnorePointer(
+                    child: RepaintBoundary(
+                      child: GlassSurface(
+                        density: GlassDensity.clear,
+                        borderRadius: 28,
+                        width: 300,
+                        height: 180,
+                        child: SizedBox.shrink(),
+                      ),
                     ),
                   ),
                 ),
               ],
+
+              // Background double click detector for play/pause toggle
+              Positioned.fill(
+                child: GestureDetector(
+                  key: const Key('fullscreen_background_gesture_detector'),
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTapDown: _onDoubleTapDown,
+                  onDoubleTap: _handleDoubleTap,
+                  child: const SizedBox.expand(),
+                ),
+              ),
 
               // 4. Main directional layout
               Positioned.fill(
@@ -370,94 +491,102 @@ class FullScreenViewState extends State<FullScreenView>
                                 children: [
                                   _buildArtwork(coverKey, artworkSize),
                                   const SizedBox(height: 28),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          textDirection:
-                                              textDirectionFor(title),
-                                          style: AppTypography.title.copyWith(
-                                            fontSize: 32,
-                                            fontWeight: FontWeight.bold,
-                                            color: AppColors.text,
-                                          ),
+                                  KeyedSubtree(
+                                    key: _controlsColumnKey,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                title,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                                textDirection:
+                                                    textDirectionFor(title),
+                                                style: AppTypography.title.copyWith(
+                                                  fontSize: 32,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: AppColors.text,
+                                                ),
+                                              ),
+                                            ),
+                                            if (hasTrack) ...[
+                                              const SizedBox(width: 10),
+                                              _FullScreenFavoriteButton(
+                                                  path: current.uri),
+                                            ],
+                                          ],
                                         ),
-                                      ),
-                                      if (hasTrack) ...[
-                                        const SizedBox(width: 10),
-                                        _FullScreenFavoriteButton(
-                                            path: current.uri),
+                                        const SizedBox(height: 6),
+                                        Builder(
+                                          builder: (context) {
+                                            final canLink = hasTrack &&
+                                                rawArtist != null &&
+                                                rawArtist.trim().isNotEmpty;
+                                            return MetadataLink(
+                                              text: artist,
+                                              style: AppTypography.title.copyWith(
+                                                fontSize: 20,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                              reduceMotion: widget.settingsStore.settings.reduceMotion,
+                                              semanticLabel: canLink
+                                                  ? context.t(
+                                                      'common.goToArtist',
+                                                      args: {'name': artist},
+                                                    )
+                                                  : null,
+                                              onTap: canLink
+                                                  ? () => MetadataNavHelper.openArtist(
+                                                        context: context,
+                                                        navigator: widget.navigator,
+                                                        rawArtist: rawArtist,
+                                                        leaveFullScreenFirst: true,
+                                                      )
+                                                  : null,
+                                            );
+                                          },
+                                        ),
+                                        if (album.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Builder(
+                                            builder: (context) {
+                                              final canLink = hasTrack &&
+                                                  album.trim().isNotEmpty;
+                                              return MetadataLink(
+                                                text: album,
+                                                style: AppTypography.bodyStrong.copyWith(
+                                                  fontSize: 16,
+                                                  color: AppColors.textMuted,
+                                                ),
+                                                textAlign: TextAlign.center,
+                                                reduceMotion: widget.settingsStore.settings.reduceMotion,
+                                                semanticLabel: canLink
+                                                    ? context.t(
+                                                        'common.goToAlbum',
+                                                        args: {'name': album},
+                                                      )
+                                                    : null,
+                                                onTap: canLink
+                                                    ? () => MetadataNavHelper.openAlbum(
+                                                          navigator: widget.navigator,
+                                                          albumTitle: album,
+                                                          leaveFullScreenFirst: true,
+                                                        )
+                                                    : null,
+                                              );
+                                            },
+                                          ),
+                                        ],
                                       ],
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Builder(
-                                    builder: (context) {
-                                      final canLink = hasTrack &&
-                                          rawArtist != null &&
-                                          rawArtist.trim().isNotEmpty;
-                                      return MetadataLink(
-                                        text: artist,
-                                        style: AppTypography.title.copyWith(
-                                          fontSize: 20,
-                                          color: AppColors.textSecondary,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                        reduceMotion: widget.settingsStore.settings.reduceMotion,
-                                        semanticLabel: canLink
-                                            ? context.t(
-                                                'common.goToArtist',
-                                                args: {'name': artist},
-                                              )
-                                            : null,
-                                        onTap: canLink
-                                            ? () => MetadataNavHelper.openArtist(
-                                                  context: context,
-                                                  navigator: widget.navigator,
-                                                  rawArtist: rawArtist,
-                                                  leaveFullScreenFirst: true,
-                                                )
-                                            : null,
-                                      );
-                                    },
-                                  ),
-                                  if (album.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Builder(
-                                      builder: (context) {
-                                        final canLink = hasTrack &&
-                                            album.trim().isNotEmpty;
-                                        return MetadataLink(
-                                          text: album,
-                                          style: AppTypography.bodyStrong.copyWith(
-                                            fontSize: 16,
-                                            color: AppColors.textMuted,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                          reduceMotion: widget.settingsStore.settings.reduceMotion,
-                                          semanticLabel: canLink
-                                              ? context.t(
-                                                  'common.goToAlbum',
-                                                  args: {'name': album},
-                                                )
-                                              : null,
-                                          onTap: canLink
-                                              ? () => MetadataNavHelper.openAlbum(
-                                                    navigator: widget.navigator,
-                                                    albumTitle: album,
-                                                    leaveFullScreenFirst: true,
-                                                  )
-                                              : null,
-                                        );
-                                      },
                                     ),
-                                  ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -465,13 +594,16 @@ class FullScreenViewState extends State<FullScreenView>
                               const SizedBox(width: 48),
                               Expanded(
                                 flex: 5,
-                                child: LyricsView(
-                                  controller: _lyricsController,
-                                  playbackController: widget.controller,
-                                  settingsStore: widget.settingsStore,
-                                  navigator: widget.navigator,
-                                  showHeader: false,
-                                  isFullScreen: true,
+                                child: KeyedSubtree(
+                                  key: _lyricsKey,
+                                  child: LyricsView(
+                                    controller: _lyricsController,
+                                    playbackController: widget.controller,
+                                    settingsStore: widget.settingsStore,
+                                    navigator: widget.navigator,
+                                    showHeader: false,
+                                    isFullScreen: true,
+                                  ),
                                 ),
                               ),
                             ],
@@ -489,6 +621,7 @@ class FullScreenViewState extends State<FullScreenView>
                 left: 0,
                 right: 0,
                 child: SafeArea(
+                  key: _topBarKey,
                   child: AnimatedOpacity(
                     opacity: _showControls ? 1.0 : 0.0,
                     duration: const Duration(milliseconds: 200),
@@ -554,6 +687,7 @@ class FullScreenViewState extends State<FullScreenView>
                 left: 0,
                 right: 0,
                 child: RepaintBoundary(
+                  key: _seekBarKey,
                   child: _SlenderProgressLine(
                     key: const ValueKey('fullscreen_seek_bar_line'),
                     engine: widget.engine,
@@ -598,6 +732,52 @@ class FullScreenViewState extends State<FullScreenView>
                           color: AppColors.text,
                           fontWeight: FontWeight.w600,
                         ),
+                      ),
+                    ),
+                  ),
+                ),
+              // 8. Confirmation indicator on double-click toggle
+              if (_showIndicator)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Center(
+                      child: AnimatedBuilder(
+                        animation: _indicatorController,
+                        builder: (context, _) {
+                          final t = _indicatorController.value;
+                          final double opacity;
+                          if (t <= 0.2) {
+                            opacity = (t / 0.2).clamp(0.0, 1.0);
+                          } else {
+                            opacity = ((1.0 - t) / 0.8).clamp(0.0, 1.0);
+                          }
+
+                          return Opacity(
+                            opacity: opacity,
+                            child: Container(
+                              key: const Key('fullscreen_play_pause_indicator'),
+                              width: 96,
+                              height: 96,
+                              decoration: BoxDecoration(
+                                color: const Color(0x33000000),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0x26FFFFFF),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  _lastActionWasPlay
+                                      ? Icons.play_arrow
+                                      : Icons.pause,
+                                  size: 56,
+                                  color: AppColors.text,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ),

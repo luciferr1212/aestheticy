@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
@@ -179,6 +180,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       onEnterMiniPlayer: widget.miniPlayerController?.enter,
       onShowShortcutsCheatSheet: _openShortcutsCheatSheet,
       isShortcutsCheatSheetOpen: () => _shortcutsDialogOpen,
+      onNavigateBack: () {
+        if (widget.navigator.canGoBack) {
+          widget.navigator.goBack();
+        }
+      },
+      onNavigateForward: () {
+        if (widget.navigator.canGoForward) {
+          widget.navigator.goForward();
+        }
+      },
     );
   }
 
@@ -581,7 +592,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                     duration: reduceMotion
                                         ? Duration.zero
                                         : const Duration(milliseconds: 100),
-                                    child: _buildContent(currentDestination),
+                                    child: _ViewStateRestorer(
+                                      key: ValueKey('view_state_${widget.navigator.currentEntry.id}'),
+                                      entry: widget.navigator.currentEntry,
+                                      navigator: widget.navigator,
+                                      child: _buildContent(currentDestination),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -612,20 +628,122 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
     }
 
-    return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        shortcutById(AppShortcutId.quickSearch).activator: _toggleQuickSearch,
+    return Listener(
+      onPointerDown: (event) {
+        if ((event.buttons & kBackMouseButton) != 0) {
+          if (widget.navigator.canGoBack) {
+            widget.navigator.goBack();
+          }
+        } else if ((event.buttons & kForwardMouseButton) != 0) {
+          if (widget.navigator.canGoForward) {
+            widget.navigator.goForward();
+          }
+        }
       },
-      child: Focus(
-        autofocus: true,
-        onKeyEvent: _playbackKeysHandler.handleKeyEvent,
-        onFocusChange: (hasFocus) {
-          if (!hasFocus) _playbackKeysHandler.reset();
+      child: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          shortcutById(AppShortcutId.quickSearch).activator: _toggleQuickSearch,
         },
-        child: UserCollectionsScope(
-          collections: _userCollections,
-          child: rootScaffold,
+        child: Focus(
+          autofocus: true,
+          onKeyEvent: _playbackKeysHandler.handleKeyEvent,
+          onFocusChange: (hasFocus) {
+            if (!hasFocus) _playbackKeysHandler.reset();
+          },
+          child: UserCollectionsScope(
+            collections: _userCollections,
+            child: rootScaffold,
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _ViewStateRestorer extends StatefulWidget {
+  final NavEntry entry;
+  final AppNavigator navigator;
+  final Widget child;
+
+  const _ViewStateRestorer({
+    super.key,
+    required this.entry,
+    required this.navigator,
+    required this.child,
+  });
+
+  @override
+  State<_ViewStateRestorer> createState() => _ViewStateRestorerState();
+}
+
+class _ViewStateRestorerState extends State<_ViewStateRestorer> {
+  late ScrollController _scrollController;
+  bool _needsRestore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final savedOffset =
+        (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
+    _scrollController = ScrollController(initialScrollOffset: savedOffset);
+    _needsRestore = savedOffset > 0;
+    widget.navigator.onCaptureViewState = _captureOffset;
+  }
+
+  void _captureOffset(Map<String, Object?> state) {
+    if (_scrollController.hasClients) {
+      state['scrollOffset'] = _scrollController.offset;
+    }
+  }
+
+  @override
+  void didUpdateWidget(_ViewStateRestorer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entry.id != widget.entry.id) {
+      final savedOffset =
+          (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
+      _needsRestore = savedOffset > 0;
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(savedOffset);
+      }
+    }
+    widget.navigator.onCaptureViewState = _captureOffset;
+  }
+
+  @override
+  void dispose() {
+    if (_scrollController.hasClients) {
+      widget.entry.viewState['scrollOffset'] = _scrollController.offset;
+    }
+    if (widget.navigator.onCaptureViewState == _captureOffset) {
+      widget.navigator.onCaptureViewState = null;
+    }
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PrimaryScrollController(
+      controller: _scrollController,
+      automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notif) {
+          if (notif.depth == 0) {
+            if (_needsRestore && notif.metrics.maxScrollExtent > 0) {
+              final savedOffset =
+                  (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
+              if (savedOffset > 0 && _scrollController.hasClients) {
+                _scrollController.jumpTo(savedOffset.clamp(0.0, notif.metrics.maxScrollExtent));
+              }
+              _needsRestore = false;
+            } else {
+              widget.entry.viewState['scrollOffset'] = notif.metrics.pixels;
+            }
+          }
+          return false;
+        },
+        child: widget.child,
       ),
     );
   }

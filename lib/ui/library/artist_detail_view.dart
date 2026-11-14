@@ -169,6 +169,7 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
               GlassIconButton(
                 key: const Key('artist_detail_back_button'),
                 icon: Icons.arrow_back,
+                matchTextDirection: true,
                 tooltip: context.t('common.back'),
                 semanticLabel: context.t('common.back'),
                 size: GlassButtonSize.small,

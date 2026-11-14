@@ -168,6 +168,7 @@ class _PlaylistDetailViewState extends State<PlaylistDetailView> {
               GlassIconButton(
                 key: const Key('playlist_detail_back_button'),
                 icon: Icons.arrow_back,
+                matchTextDirection: true,
                 tooltip: context.t('common.back'),
                 semanticLabel: context.t('common.back'),
                 size: GlassButtonSize.small,

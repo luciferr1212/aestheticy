@@ -369,10 +369,13 @@ class _LyricsViewState extends State<LyricsView>
 
     _handlingSeek = true;
     try {
-      widget.controller.updatePosition(position);
+      widget.controller.updatePosition(position, forceNotify: true);
     } finally {
       _handlingSeek = false;
     }
+
+    _activeWordNotifier.value = widget.controller.currentWordIndex;
+    _wordProgressNotifier.value = widget.controller.wordProgress;
 
     final doc = widget.controller.document;
     if (doc != null && doc.kind == LyricsKind.synced && doc.lines.isNotEmpty) {
@@ -839,8 +842,6 @@ class _LyricsViewState extends State<LyricsView>
       timingLabel = '';
     }
 
-    final isRtl = Directionality.of(context) == TextDirection.rtl;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: LayoutBuilder(
@@ -856,7 +857,8 @@ class _LyricsViewState extends State<LyricsView>
             children: [
               if (widget.navigator != null)
                 GlassPillButton(
-                  leadingIcon: isRtl ? Icons.chevron_right : Icons.chevron_left,
+                  leadingIcon: Icons.chevron_left,
+                  matchTextDirection: true,
                   label: context.t('common.back'),
                   tooltip: context.t('common.back'),
                   semanticLabel: context.t('common.back'),
@@ -1284,8 +1286,11 @@ class _LyricsViewState extends State<LyricsView>
                   _cancelAutoFollowPause();
                   _inFlightTargetLine = null;
                   _lastScrolledLine = index;
-                  widget.playbackController
-                      .seek(Duration(milliseconds: line.startMs));
+                  final targetPos = Duration(milliseconds: line.startMs);
+                  widget.playbackController.seek(targetPos);
+                  widget.controller.updatePosition(targetPos, forceNotify: true);
+                  _activeWordNotifier.value = widget.controller.currentWordIndex;
+                  _wordProgressNotifier.value = widget.controller.wordProgress;
                   _scrollToLine(index, force: true);
                 },
               ),

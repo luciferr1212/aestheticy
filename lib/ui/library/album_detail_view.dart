@@ -100,6 +100,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
               GlassIconButton(
                 key: const Key('album_detail_back_button'),
                 icon: Icons.arrow_back,
+                matchTextDirection: true,
                 tooltip: context.t('common.back'),
                 semanticLabel: context.t('common.back'),
                 size: GlassButtonSize.small,

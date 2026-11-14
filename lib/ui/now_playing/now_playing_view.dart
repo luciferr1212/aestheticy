@@ -297,13 +297,12 @@ class _NowPlayingViewState extends State<NowPlayingView> {
   }
 
   Widget _buildTopBar(BuildContext context) {
-    final isRtl = Directionality.of(context) == TextDirection.rtl;
-
     return Row(
       children: [
         // Back to Library button
         GlassPillButton(
-          leadingIcon: isRtl ? Icons.chevron_right : Icons.chevron_left,
+          leadingIcon: Icons.chevron_left,
+          matchTextDirection: true,
           label: context.t('nav.library'),
           tooltip: context.t('nav.library'),
           semanticLabel: context.t('nav.library'),
@@ -461,8 +460,8 @@ class _NowPlayingViewState extends State<NowPlayingView> {
             variant: variant,
             onPressed: _cycleRepeat,
           ),
-          Positioned(
-            right: 4,
+          PositionedDirectional(
+            end: 4,
             top: 4,
             child: Container(
               padding: const EdgeInsets.all(2),

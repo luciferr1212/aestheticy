@@ -126,7 +126,7 @@ class LyricsController extends ChangeNotifier {
 
     // Follow seeks
     _subs.add(playbackController.seekStream.listen((pos) {
-      updatePosition(pos);
+      updatePosition(pos, forceNotify: true);
     }));
 
     // Follow settings changes (lyrics source re-resolve)

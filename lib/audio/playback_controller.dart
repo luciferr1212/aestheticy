@@ -37,7 +37,7 @@ class PlaybackController {
   static const Duration kStopFadeOutDuration = Duration(milliseconds: 100);
 
   /// Hard upper bound for stop/shutdown fade-out so exit stays responsive.
-  static const Duration kStopMaxFadeOutDuration = Duration(milliseconds: 145);
+  static const Duration kStopMaxFadeOutDuration = Duration(milliseconds: 130);
 
   /// The underlying audio engine (real or fake).
   final AudioEngine engine;
@@ -203,7 +203,8 @@ class PlaybackController {
 
   /// The current playback position, or the armed resume position when nothing is loaded.
   Duration get currentPosition {
-    if (_currentState == PlaybackState.idle && _armedResumePosition != null) {
+    if ((_currentState == PlaybackState.idle || _currentState == PlaybackState.paused) &&
+        _armedResumePosition != null) {
       return _armedResumePosition!;
     }
     return engine.currentPosition;
@@ -301,6 +302,9 @@ class PlaybackController {
 
   /// Replaces the queue with [sources], starts playback at [startIndex],
   /// resets preload state, and preloads the next track for gapless transitions.
+  ///
+  /// When [kKeepUserQueueOnNewContext] is true, any upcoming user-queued tracks
+  /// survive the context switch and are placed directly after the newly started track.
   Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) {
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
@@ -311,7 +315,32 @@ class PlaybackController {
       return _enqueueTransition(() => _stopInternal(gen, clearResume: false));
     }
 
-    queue.replaceAll(sources, startIndex: startIndex);
+    final survivingUserEntries = <QueueEntry>[];
+    if (kKeepUserQueueOnNewContext && !queue.isEmpty && queue.currentIndex >= 0) {
+      for (var i = queue.currentIndex + 1; i < queue.length; i++) {
+        final entry = queue.entries[i];
+        if (entry.isUserQueued) {
+          survivingUserEntries.add(entry);
+        }
+      }
+    }
+
+    if (survivingUserEntries.isEmpty) {
+      queue.replaceAll(sources, startIndex: startIndex);
+    } else {
+      final validStartIndex = startIndex.clamp(0, sources.length - 1);
+      final newEntries = <QueueEntry>[];
+      for (var i = 0; i < validStartIndex; i++) {
+        newEntries.add(queue.createEntry(sources[i], isUserQueued: false));
+      }
+      newEntries.add(queue.createEntry(sources[validStartIndex], isUserQueued: false));
+      newEntries.addAll(survivingUserEntries);
+      for (var i = validStartIndex + 1; i < sources.length; i++) {
+        newEntries.add(queue.createEntry(sources[i], isUserQueued: false));
+      }
+      queue.replaceAllEntries(newEntries, startIndex: validStartIndex);
+    }
+
     notifyQueueChanged();
     final source = queue.current;
     if (source == null) {
@@ -352,30 +381,13 @@ class PlaybackController {
       return;
     }
 
-    if (queue.isShuffled) {
-      final currentIdx = queue.currentIndex;
-      for (final s in sources) {
-        queue.add(s);
-      }
-      for (var i = 0; i < sources.length; i++) {
-        final s = sources[i];
-        final from = queue.items.lastIndexOf(s);
-        if (from != -1) {
-          queue.move(from, currentIdx + 1 + i);
-        }
-      }
-    } else {
-      final targetIndex = queue.currentIndex + 1;
-      for (var i = 0; i < sources.length; i++) {
-        queue.insert(targetIndex + i, sources[i]);
-      }
-    }
-
+    queue.playNext(sources);
     notifyQueueChanged();
     unawaited(_preloadNext());
   }
 
-  /// Appends [sources] to the end of the playback queue.
+  /// Appends [sources] to the playback queue after the current track and after any
+  /// upcoming user-queued tracks.
   ///
   /// If the queue is currently empty, behaves like [playQueue] starting at index 0.
   Future<void> addToQueue(List<AudioSource> sources) async {
@@ -385,24 +397,7 @@ class PlaybackController {
       return;
     }
 
-    if (queue.isShuffled) {
-      for (final s in sources) {
-        queue.add(s);
-      }
-      final baseTarget = queue.length - sources.length;
-      for (var i = 0; i < sources.length; i++) {
-        final s = sources[i];
-        final from = queue.items.indexOf(s);
-        if (from != -1) {
-          queue.move(from, baseTarget + i);
-        }
-      }
-    } else {
-      for (final s in sources) {
-        queue.add(s);
-      }
-    }
-
+    queue.addToQueue(sources);
     notifyQueueChanged();
     unawaited(_preloadNext());
   }

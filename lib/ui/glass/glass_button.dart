@@ -58,6 +58,9 @@ class GlassIconButton extends StatefulWidget {
   /// Button size preset.
   final GlassButtonSize size;
 
+  /// Whether to mirror the icon in right-to-left layouts.
+  final bool matchTextDirection;
+
   /// Creates a [GlassIconButton].
   const GlassIconButton({
     super.key,
@@ -67,6 +70,7 @@ class GlassIconButton extends StatefulWidget {
     this.onPressed,
     this.variant = GlassButtonVariant.normal,
     this.size = GlassButtonSize.medium,
+    this.matchTextDirection = false,
   });
 
   @override
@@ -140,6 +144,17 @@ class _GlassIconButtonState extends State<GlassIconButton> {
     final fill = _resolveFillColor(quality);
     final border = _resolveBorder();
     final iconColor = _resolveIconColor();
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final shouldFlip = widget.matchTextDirection && isRtl;
+
+    Widget iconWidget = Icon(
+      widget.icon,
+      size: widget.size.iconSize,
+      color: iconColor,
+    );
+    if (shouldFlip) {
+      iconWidget = Transform.flip(flipX: true, child: iconWidget);
+    }
 
     Widget button = FocusableActionDetector(
       enabled: isEnabled,
@@ -176,11 +191,7 @@ class _GlassIconButtonState extends State<GlassIconButton> {
             border: border,
           ),
           alignment: Alignment.center,
-          child: Icon(
-            widget.icon,
-            size: widget.size.iconSize,
-            color: iconColor,
-          ),
+          child: iconWidget,
         ),
       ),
     );
@@ -224,6 +235,9 @@ class GlassPillButton extends StatefulWidget {
   /// Optional accessibility semantic label (defaults to [label]).
   final String? semanticLabel;
 
+  /// Whether to mirror the leading icon in right-to-left layouts.
+  final bool matchTextDirection;
+
   /// Creates a [GlassPillButton].
   const GlassPillButton({
     super.key,
@@ -234,6 +248,7 @@ class GlassPillButton extends StatefulWidget {
     this.size = GlassButtonSize.medium,
     this.tooltip,
     this.semanticLabel,
+    this.matchTextDirection = false,
   });
 
   @override
@@ -317,6 +332,21 @@ class _GlassPillButtonState extends State<GlassPillButton> {
       GlassButtonSize.large => AppTypography.bodyStrong.copyWith(color: contentColor),
     };
 
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final shouldFlip = widget.matchTextDirection && isRtl;
+
+    Widget? leadingWidget;
+    if (widget.leadingIcon != null) {
+      leadingWidget = Icon(
+        widget.leadingIcon,
+        size: widget.size.iconSize,
+        color: contentColor,
+      );
+      if (shouldFlip) {
+        leadingWidget = Transform.flip(flipX: true, child: leadingWidget);
+      }
+    }
+
     Widget button = FocusableActionDetector(
       enabled: isEnabled,
       onShowHoverHighlight: (v) {
@@ -356,12 +386,8 @@ class _GlassPillButtonState extends State<GlassPillButton> {
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (widget.leadingIcon != null) ...[
-                Icon(
-                  widget.leadingIcon,
-                  size: widget.size.iconSize,
-                  color: contentColor,
-                ),
+              if (leadingWidget != null) ...[
+                leadingWidget,
                 const SizedBox(width: AppSpacing.s8),
               ],
               Flexible(

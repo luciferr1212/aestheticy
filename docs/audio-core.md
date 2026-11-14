@@ -174,3 +174,34 @@ All queue indices across `PlaybackQueue` and `PlaybackController` operate strict
 
 ### Known Limitations
 - Software fade ramps, pause-safe libmpv loading, and clean shutdown pauses require end-to-end audio verification on a Windows GitHub Actions build artifact (native C++/Windows runtime is not built locally).
+
+---
+
+## Queue Engine: Entry Identity & User-Queue Semantics (Phase 4, Prompt 6)
+
+### 1. Entry Identity (`QueueEntry`)
+- **Model:** Every item in `PlaybackQueue` is wrapped in `QueueEntry { int id, AudioSource source, bool isUserQueued }`.
+- **Unique Monotonic IDs:** Every inserted entry receives a unique, incrementing integer `id`. Identical tracks with matching URIs occurring multiple times are completely distinguished by their unique entry `id`.
+- **No Source Equality Lookups:** All internal lookups, cursor tracks, and deletions operate strictly by active order index or entry `id`. No `indexOf` or `lastIndexOf` on `AudioSource` is used anywhere in the queue or playback controller.
+- **Backwards Compatibility:** All existing index-based public APIs (`items`, `length`, `current`, `currentIndex`, `add`, `insert`, `remove`, `move`, `jumpTo`, `replaceAll`, `clearUpcoming`, `setShuffle`) are fully preserved, with the addition of `entries` (unmodifiable list of `QueueEntry` in active playback order) and `currentEntry`.
+
+### 2. User-Queue Semantics
+- **`addToQueue(sources)`:** Appends sources as user-queued entries (`isUserQueued = true`) after the current entry and after the last existing upcoming user-queued entry (the end of the user block), preserving insertion order. If queue is empty or nothing is playing, behaves like `playQueue`. Duplicates are supported without conflict.
+- **`playNext(sources)`:** Inserts sources as new user-queued entries immediately after the current playing entry (the start of the user block), keeping their given order among themselves. Successive `playNext` calls place new tracks in front of earlier ones.
+
+### 3. Shuffle Invariants
+- When shuffle is enabled, upcoming user-queued entries always play first directly following the current entry in their exact relative order. Remaining context entries are shuffled.
+- Toggling shuffle on or off preserves upcoming user entries in place directly after the current entry without disturbing their relative order. The current track remains current.
+
+### 4. New Context Behavior (`kKeepUserQueueOnNewContext`)
+- When user starts playback from a list (e.g. playing an album track, play all, shuffle all), upcoming user-queued entries survive and are placed right after the newly started track, while old context entries are replaced (`kKeepUserQueueOnNewContext = true`).
+- Setting `kKeepUserQueueOnNewContext = false` reverts to legacy behavior (replacing the entire queue).
+
+### 5. Session Persistence
+- `SavedSession` stores a per-track `isUserQueued` boolean flag in `session.json`.
+- `SessionSaver` persists the flag and `SessionRestorer` restores entries with their flags intact, defaulting absent flags to `false` for backwards tolerance.
+
+### 6. Decisions
+- **Decision (QueueEntry Monotonic Integer IDs)**: Added unique per-queue monotonic integer IDs to `QueueEntry` instead of relying on `AudioSource` URI equality, resolving track cursor jumping and deletion collisions when duplicate tracks exist in the queue.
+- **Decision (kKeepUserQueueOnNewContext = true)**: Made upcoming user-queued items survive new album/playlist playback by default, matching modern music player conventions (Apple Music, Spotify), with a single named constant toggle.
+

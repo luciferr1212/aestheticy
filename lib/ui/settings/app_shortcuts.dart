@@ -11,6 +11,9 @@ enum AppShortcutScope {
 
   /// Active only in Full Screen or Mini Player views.
   fullScreenAndMini,
+
+  /// Active only when the Queue view is focused.
+  queue,
 }
 
 /// Identifiers for all supported shortcuts in Aestheticy.
@@ -59,6 +62,12 @@ enum AppShortcutId {
 
   /// Overlay shortcut: decrease volume by 5% with Down arrow in Full Screen or Mini Player.
   overlayVolumeDown,
+
+  /// Move selected track up in queue (Alt + Up).
+  queueMoveUp,
+
+  /// Move selected track down in queue (Alt + Down).
+  queueMoveDown,
 
   /// Global shortcut: open the keyboard shortcuts cheat sheet (? / Shift + /).
   shortcutsHelp,
@@ -283,6 +292,20 @@ const List<AppShortcutItem> kAppShortcuts = [
     activator: SingleActivator(LogicalKeyboardKey.slash, control: true),
     scope: AppShortcutScope.global,
   ),
+  AppShortcutItem(
+    id: AppShortcutId.queueMoveUp,
+    keyCombination: 'Alt + Up',
+    descriptionKey: 'shortcuts.queueMoveUp',
+    activator: SingleActivator(LogicalKeyboardKey.arrowUp, alt: true),
+    scope: AppShortcutScope.queue,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.queueMoveDown,
+    keyCombination: 'Alt + Down',
+    descriptionKey: 'shortcuts.queueMoveDown',
+    activator: SingleActivator(LogicalKeyboardKey.arrowDown, alt: true),
+    scope: AppShortcutScope.queue,
+  ),
 ];
 
 /// Looks up an [AppShortcutItem] by its [id].
@@ -296,6 +319,7 @@ String shortcutScopeLabelKey(AppShortcutScope scope) {
     AppShortcutScope.global => 'shortcuts.scopeGlobal',
     AppShortcutScope.nowPlaying => 'shortcuts.scopeNowPlaying',
     AppShortcutScope.fullScreenAndMini => 'shortcuts.scopeFullScreenAndMini',
+    AppShortcutScope.queue => 'shortcuts.scopeQueue',
   };
 }
 
@@ -381,4 +405,11 @@ bool isEnterKey(KeyEvent event) {
 /// Checks whether a [KeyEvent] represents the Delete key.
 bool isDeleteKey(KeyEvent event) {
   return event.logicalKey == LogicalKeyboardKey.delete;
+}
+
+/// Checks whether an Alt modifier key is pressed.
+bool isAltModifierPressed() {
+  return HardwareKeyboard.instance.isAltPressed ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.altLeft) ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.altRight);
 }

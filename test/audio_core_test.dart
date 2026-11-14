@@ -1128,7 +1128,7 @@ void main() {
         expect(engine.state, PlaybackState.playing);
       });
 
-      test('addToQueue appends to the end of the queue', () async {
+      test('addToQueue inserts after the current track and user block', () async {
         queue.add(_src('a'));
         queue.add(_src('b'));
         await controller.play();
@@ -1141,9 +1141,9 @@ void main() {
         expect(queueChanged, isTrue);
         expect(queue.items.map((s) => s.uri).toList(), [
           'file:///a.flac',
-          'file:///b.flac',
           'file:///end1.flac',
           'file:///end2.flac',
+          'file:///b.flac',
         ]);
       });
     });

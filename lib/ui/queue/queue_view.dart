@@ -23,8 +23,8 @@ import '../theme/app_typography.dart';
 
 /// Full-page interactive playback queue view.
 ///
-/// Features active playback order, history / current / upcoming visual groups,
-/// drag reordering, track jumping, track deletion, clear actions, and playlist export.
+/// Features active playback order, distinct entry identity, user-queue sections,
+/// animated drag reordering, track jumping, track deletion, clear actions, and playlist export.
 class QueueView extends StatefulWidget {
   /// The audio playback controller coordinating queue and engine.
   final PlaybackController controller;
@@ -61,20 +61,14 @@ class _QueueViewState extends State<QueueView> {
   int _selectedIndex = -1;
   bool _userScrolled = false;
 
-  int _nextKeyId = 0;
-  final List<int> _keyIds = [];
-
   @override
   void initState() {
     super.initState();
-    _syncKeyIds();
     _selectedIndex = widget.controller.queue.currentIndex;
 
     _queueSub = widget.controller.queueChangeStream.listen((_) {
       if (mounted) {
-        setState(() {
-          _syncKeyIds();
-        });
+        setState(() {});
       }
     });
 
@@ -105,17 +99,6 @@ class _QueueViewState extends State<QueueView> {
     super.dispose();
   }
 
-  void _syncKeyIds() {
-    final len = widget.controller.queue.length;
-    if (_keyIds.length < len) {
-      while (_keyIds.length < len) {
-        _keyIds.add(_nextKeyId++);
-      }
-    } else if (_keyIds.length > len) {
-      _keyIds.length = len;
-    }
-  }
-
   void _scrollToIndex(int index, {required bool smooth}) {
     if (!_scrollController.hasClients || index < 0) return;
     const itemExtent = 56.0;
@@ -133,18 +116,18 @@ class _QueueViewState extends State<QueueView> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    final focusCtx = primaryFocus?.context;
+    final isTextFieldFocused = focusCtx != null &&
+        (focusCtx.widget is EditableText ||
+            focusCtx.findAncestorWidgetOfExactType<EditableText>() != null);
+
+    if (isTextFieldFocused) return KeyEventResult.ignored;
 
     if (isDeleteKey(event)) {
-      final primaryFocus = FocusManager.instance.primaryFocus;
-      final focusCtx = primaryFocus?.context;
-      final isTextFieldFocused = focusCtx != null &&
-          (focusCtx.widget is EditableText ||
-              focusCtx.findAncestorWidgetOfExactType<EditableText>() != null);
-
-      if (!isTextFieldFocused &&
-          _selectedIndex >= 0 &&
-          _selectedIndex < widget.controller.queue.length) {
+      if (_selectedIndex >= 0 && _selectedIndex < widget.controller.queue.length) {
         final toRemove = _selectedIndex;
         widget.controller.removeFromQueue(toRemove);
         setState(() {
@@ -158,14 +141,57 @@ class _QueueViewState extends State<QueueView> {
       }
     }
 
+    // Alt+Up and Alt+Down shortcuts to move selected upcoming row
+    final isAlt = isAltModifierPressed();
+
+    if (isAlt && isArrowUpKey(event)) {
+      final curIdx = widget.controller.queue.currentIndex;
+      if (_selectedIndex > curIdx + 1 && _selectedIndex < widget.controller.queue.length) {
+        final from = _selectedIndex;
+        final to = _selectedIndex - 1;
+        widget.controller.moveInQueue(from, to);
+        setState(() {
+          _selectedIndex = to;
+        });
+        return KeyEventResult.handled;
+      }
+    } else if (isAlt && isArrowDownKey(event)) {
+      final curIdx = widget.controller.queue.currentIndex;
+      if (_selectedIndex > curIdx && _selectedIndex < widget.controller.queue.length - 1) {
+        final from = _selectedIndex;
+        final to = _selectedIndex + 1;
+        widget.controller.moveInQueue(from, to);
+        setState(() {
+          _selectedIndex = to;
+        });
+        return KeyEventResult.handled;
+      }
+    } else if (!isAlt && isArrowDownKey(event)) {
+      if (_selectedIndex < widget.controller.queue.length - 1) {
+        setState(() {
+          _selectedIndex++;
+        });
+        _scrollToIndex(_selectedIndex, smooth: true);
+        return KeyEventResult.handled;
+      }
+    } else if (!isAlt && isArrowUpKey(event)) {
+      if (_selectedIndex > 0) {
+        setState(() {
+          _selectedIndex--;
+        });
+        _scrollToIndex(_selectedIndex, smooth: true);
+        return KeyEventResult.handled;
+      }
+    }
+
     return KeyEventResult.ignored;
   }
 
-  Duration _calculateUpcomingDuration(List<AudioSource> items, int currentIndex) {
+  Duration _calculateUpcomingDuration(List<QueueEntry> entries, int currentIndex) {
     var totalMs = 0;
-    if (currentIndex >= 0 && currentIndex < items.length) {
-      for (var i = currentIndex + 1; i < items.length; i++) {
-        final ms = int.tryParse(items[i].extras?['durationMs'] ?? '');
+    if (currentIndex >= 0 && currentIndex < entries.length) {
+      for (var i = currentIndex + 1; i < entries.length; i++) {
+        final ms = int.tryParse(entries[i].source.extras?['durationMs'] ?? '');
         if (ms != null && ms > 0) totalMs += ms;
       }
     }
@@ -256,8 +282,50 @@ class _QueueViewState extends State<QueueView> {
 
               try {
                 final pl = await collections.createPlaylist(trimmed);
+                final currentItems = widget.controller.queue.items;
+                final paths = <String>[];
+                var skippedCount = 0;
+
+                for (final item in currentItems) {
+                  final p = item.uri;
+                  if (!p.startsWith('http://') && !p.startsWith('https://')) {
+                    paths.add(p);
+                  } else {
+                    skippedCount++;
+                  }
+                }
+
+                if (paths.isNotEmpty) {
+                  await collections.addToPlaylist(pl.id, paths);
+                }
+
                 if (innerCtx.mounted) {
                   Navigator.of(innerCtx).pop(pl);
+                  if (mounted) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    messenger.clearSnackBars();
+                    final msg = skippedCount > 0
+                        ? context.t(
+                            'queue.playlistSavedWithSkipped',
+                            args: {
+                              'name': pl.name,
+                              'skipped': context.localizeDigitsText(skippedCount.toString()),
+                            },
+                          )
+                        : context.t('queue.playlistSaved', args: {'name': pl.name});
+                    final actionLabel = context.t('queue.viewPlaylist');
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(msg),
+                        action: SnackBarAction(
+                          label: actionLabel,
+                          onPressed: () {
+                            widget.navigator.openPlaylistDetail(pl.id, playlist: pl);
+                          },
+                        ),
+                      ),
+                    );
+                  }
                 }
               } catch (e) {
                 setDialogState(() => errorMessage = e.toString());
@@ -276,22 +344,28 @@ class _QueueViewState extends State<QueueView> {
               ),
               content: SizedBox(
                 width: 360,
-                child: TextField(
-                  key: const Key('save_queue_playlist_text_field'),
-                  controller: textCtrl,
-                  autofocus: true,
-                  style: AppTypography.body.copyWith(color: AppColors.text),
-                  decoration: InputDecoration(
-                    hintText: innerCtx.t('queue.savePlaylistHint'),
-                    errorText: errorMessage,
-                    isDense: true,
-                  ),
-                  onChanged: (_) {
-                    if (errorMessage != null) {
-                      setDialogState(() => errorMessage = null);
-                    }
-                  },
-                  onSubmitted: (_) => validateAndSubmit(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      key: const Key('save_queue_playlist_text_field'),
+                      controller: textCtrl,
+                      autofocus: true,
+                      style: AppTypography.body.copyWith(color: AppColors.text),
+                      decoration: InputDecoration(
+                        hintText: innerCtx.t('queue.savePlaylistHint'),
+                        errorText: errorMessage,
+                        isDense: true,
+                      ),
+                      onChanged: (_) {
+                        if (errorMessage != null) {
+                          setDialogState(() => errorMessage = null);
+                        }
+                      },
+                      onSubmitted: (_) => validateAndSubmit(),
+                    ),
+                  ],
                 ),
               ),
               actions: [
@@ -303,7 +377,7 @@ class _QueueViewState extends State<QueueView> {
                 ElevatedButton(
                   key: const Key('save_queue_playlist_submit_button'),
                   onPressed: validateAndSubmit,
-                  child: Text(innerCtx.t('common.create')),
+                  child: Text(innerCtx.t('common.save')),
                 ),
               ],
             );
@@ -313,116 +387,135 @@ class _QueueViewState extends State<QueueView> {
     );
 
     if (created != null && mounted) {
-      final items = widget.controller.queue.items;
-      final validPaths = <String>[];
-      var skippedCount = 0;
-      for (final item in items) {
-        final uri = item.uri.trim();
-        if (uri.isNotEmpty && !uri.startsWith('http://') && !uri.startsWith('https://')) {
-          validPaths.add(uri);
-        } else {
-          skippedCount++;
-        }
-      }
+      setState(() {});
+    }
+  }
 
-      if (validPaths.isNotEmpty) {
-        await collections.addToPlaylist(created.id, validPaths);
-      }
-
-      if (mounted) {
-        final message = skippedCount > 0
-            ? context.t('queue.playlistSavedWithSkipped', args: {
-                'name': created.name,
-                'skipped': context.formatCountLocalized(skippedCount),
-              })
-            : context.t('queue.playlistSaved', args: {'name': created.name});
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            action: SnackBarAction(
-              label: context.t('queue.viewPlaylist'),
-              onPressed: () => widget.navigator.openPlaylistDetail(created.id, playlist: created),
+  Widget _buildProxyDecorator(Widget child, int index, Animation<double> animation) {
+    final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, _) {
+        final animValue = reduceMotion
+            ? 1.0
+            : CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              ).value;
+        final scale = reduceMotion ? 1.0 : (1.0 + 0.025 * animValue);
+        final opacity = reduceMotion ? 1.0 : (0.85 + 0.15 * animValue);
+        return Transform.scale(
+          scale: scale,
+          child: Opacity(
+            opacity: opacity,
+            child: Material(
+              color: Colors.transparent,
+              elevation: 0,
+              child: child,
             ),
           ),
         );
-      }
-    }
+      },
+      child: child,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final items = widget.controller.queue.items;
+    final entries = widget.controller.queue.entries;
     final currentIndex = widget.controller.queue.currentIndex;
-    final hasUpcoming = currentIndex >= 0 && currentIndex < items.length - 1;
-    final upcomingDuration = _calculateUpcomingDuration(items, currentIndex);
+    final currentEntry = widget.controller.queue.currentEntry;
+    final hasUpcoming = currentIndex >= 0 && currentIndex < entries.length - 1;
+    final upcomingDuration = _calculateUpcomingDuration(entries, currentIndex);
+
+    // Identify upcoming groups for section headers
+    var hasUpcomingUserQueued = false;
+    var hasUpcomingContext = false;
+    int? firstUpcomingUserQueuedIndex;
+    int? firstUpcomingContextIndex;
+
+    if (currentIndex >= 0) {
+      for (var i = currentIndex + 1; i < entries.length; i++) {
+        if (entries[i].isUserQueued) {
+          hasUpcomingUserQueued = true;
+          firstUpcomingUserQueuedIndex ??= i;
+        } else {
+          hasUpcomingContext = true;
+          firstUpcomingContextIndex ??= i;
+        }
+      }
+    }
+
+    final showUpcomingHeaders = hasUpcomingUserQueued && hasUpcomingContext;
 
     return Focus(
       focusNode: _focusNode,
       autofocus: true,
       onKeyEvent: _handleKeyEvent,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header row
+            // Header bar
             Wrap(
               alignment: WrapAlignment.spaceBetween,
               crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 12,
               runSpacing: 12,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       context.t('queue.title'),
-                      style: AppTypography.display.copyWith(color: AppColors.text),
+                      style: AppTypography.display,
                     ),
-                    const SizedBox(width: 12),
-                    Text(
-                      context.t('queue.itemCount', args: {
-                        'count': context.formatCountLocalized(items.length),
-                      }),
-                      style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          context.t('queue.itemCount', args: {
+                            'count': context.localizeDigitsText(entries.length.toString()),
+                          }),
+                          style: AppTypography.body.copyWith(color: AppColors.textSecondary),
+                        ),
+                        if (hasUpcoming && upcomingDuration > Duration.zero) ...[
+                          Text(
+                            ' • ',
+                            style: AppTypography.body.copyWith(color: AppColors.textMuted),
+                          ),
+                          Text(
+                            context.t('queue.upcomingDuration', args: {
+                              'duration': context.formatDurationLocalized(upcomingDuration),
+                            }),
+                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ],
                     ),
-                    if (upcomingDuration > Duration.zero) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        '•',
-                        style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        context.t('queue.upcomingDuration', args: {
-                          'duration': context.formatDurationLocalized(upcomingDuration),
-                        }),
-                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                      ),
-                    ],
                   ],
                 ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     GlassPillButton(
                       key: const Key('queue_clear_upcoming_button'),
                       label: context.t('queue.clearUpcoming'),
                       onPressed: hasUpcoming ? () => widget.controller.clearUpcoming() : null,
                     ),
-                    const SizedBox(width: 8),
                     GlassPillButton(
                       key: const Key('queue_clear_all_button'),
                       label: context.t('queue.clearAll'),
-                      onPressed: items.isNotEmpty ? _showClearAllDialog : null,
+                      onPressed: entries.isNotEmpty ? _showClearAllDialog : null,
                     ),
-                    const SizedBox(width: 8),
                     GlassPillButton(
                       key: const Key('queue_save_playlist_button'),
                       variant: GlassButtonVariant.primary,
                       label: context.t('queue.saveAsPlaylist'),
-                      onPressed: items.isNotEmpty ? _showSavePlaylistDialog : null,
+                      onPressed: entries.isNotEmpty ? _showSavePlaylistDialog : null,
                     ),
                   ],
                 ),
@@ -432,7 +525,7 @@ class _QueueViewState extends State<QueueView> {
 
             // Content body
             Expanded(
-              child: items.isEmpty
+              child: entries.isEmpty
                   ? _buildEmptyState(context)
                   : NotificationListener<ScrollUpdateNotification>(
                       onNotification: (notif) {
@@ -443,34 +536,84 @@ class _QueueViewState extends State<QueueView> {
                       },
                       child: ReorderableListView.builder(
                         scrollController: _scrollController,
-                        itemExtent: 56.0,
                         buildDefaultDragHandles: false,
+                        proxyDecorator: _buildProxyDecorator,
                         onReorderItem: (oldIndex, newIndex) {
-                          if (oldIndex < _keyIds.length && newIndex < _keyIds.length) {
-                            final k = _keyIds.removeAt(oldIndex);
-                            _keyIds.insert(newIndex, k);
-                          }
                           widget.controller.moveInQueue(oldIndex, newIndex);
                         },
-                        itemCount: items.length,
+                        itemCount: entries.length,
                         itemBuilder: (context, index) {
-                          final source = items[index];
-                          final keyId = index < _keyIds.length ? _keyIds[index] : index;
-                          return _QueueRow(
-                            key: ValueKey('queue_row_$keyId'),
+                          final entry = entries[index];
+                          final showUserHeader =
+                              showUpcomingHeaders && index == firstUpcomingUserQueuedIndex;
+                          final showContextHeader =
+                              showUpcomingHeaders && index == firstUpcomingContextIndex;
+
+                          String? headerLabel;
+                          Key? headerKey;
+                          if (showUserHeader) {
+                            headerLabel = context.t('queue.nextInQueue');
+                            headerKey = const Key('queue_section_next_in_queue');
+                          } else if (showContextHeader) {
+                            final album = currentEntry?.source.extras?['album'];
+                            if (album != null && album.trim().isNotEmpty) {
+                              headerLabel = context.t(
+                                'queue.nextFromContext',
+                                args: {'context': album.trim()},
+                              );
+                            } else {
+                              headerLabel = context.t('queue.upNext');
+                            }
+                            headerKey = const Key('queue_section_next_from_context');
+                          }
+
+                          final rowWidget = _QueueRow(
+                            key: ValueKey('queue_row_${entry.id}'),
                             index: index,
-                            source: source,
+                            entry: entry,
                             currentIndex: currentIndex,
+                            currentEntry: currentEntry,
                             isSelected: _selectedIndex == index,
                             controller: widget.controller,
                             navigator: widget.navigator,
                             userCollections: widget.userCollections,
-                            totalCount: items.length,
+                            totalCount: entries.length,
                             onSelect: () {
                               setState(() => _selectedIndex = index);
                               _focusNode.requestFocus();
                             },
                           );
+
+                          if (headerLabel != null) {
+                            return Container(
+                              key: ValueKey('queue_row_container_${entry.id}'),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      start: 8,
+                                      top: 14,
+                                      bottom: 6,
+                                      end: 8,
+                                    ),
+                                    child: Text(
+                                      headerLabel,
+                                      key: headerKey,
+                                      style: AppTypography.caption.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  rowWidget,
+                                ],
+                              ),
+                            );
+                          }
+
+                          return rowWidget;
                         },
                       ),
                     ),
@@ -503,10 +646,11 @@ class _QueueViewState extends State<QueueView> {
   }
 }
 
-class _QueueRow extends StatelessWidget {
+class _QueueRow extends StatefulWidget {
   final int index;
-  final AudioSource source;
+  final QueueEntry entry;
   final int currentIndex;
+  final QueueEntry? currentEntry;
   final bool isSelected;
   final PlaybackController controller;
   final AppNavigator navigator;
@@ -517,8 +661,9 @@ class _QueueRow extends StatelessWidget {
   const _QueueRow({
     super.key,
     required this.index,
-    required this.source,
+    required this.entry,
     required this.currentIndex,
+    required this.currentEntry,
     required this.isSelected,
     required this.controller,
     required this.navigator,
@@ -528,10 +673,19 @@ class _QueueRow extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final isHistory = currentIndex >= 0 && index < currentIndex;
-    final isCurrent = currentIndex >= 0 && index == currentIndex;
+  State<_QueueRow> createState() => _QueueRowState();
+}
 
+class _QueueRowState extends State<_QueueRow> {
+  final MenuController _menuController = MenuController();
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isHistory = widget.currentIndex >= 0 && widget.index < widget.currentIndex;
+    final isCurrent = widget.currentEntry != null && widget.entry.id == widget.currentEntry!.id;
+
+    final source = widget.entry.source;
     final extras = source.extras;
     final title = extras?['title'] ?? context.t('library.unknownTitle');
     final rawArtist = extras?['artist'];
@@ -546,118 +700,132 @@ class _QueueRow extends StatelessWidget {
         : '—';
     final coverKey = extras?['coverKey'];
 
-    return Opacity(
-      opacity: isHistory ? 0.50 : 1.0,
-      child: Container(
-        height: 56.0,
-        margin: const EdgeInsets.symmetric(vertical: 2),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.accentFill
-              : (isCurrent ? AppColors.fillControl : Colors.transparent),
-          borderRadius: BorderRadius.circular(AppSpacing.r10),
-          border: Border.all(
-            color: isSelected
-                ? AppColors.accent
-                : (isCurrent ? AppColors.accent.withValues(alpha: 0.3) : Colors.transparent),
-          ),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppSpacing.r10),
-            onTap: () {
-              onSelect();
-              controller.playTrack(index);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                children: [
-                  // Drag handle
-                  ReorderableDragStartListener(
-                    index: index,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(Icons.drag_indicator, size: 18, color: AppColors.textMuted),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onSecondaryTapUp: (details) {
+          widget.onSelect();
+          if (!_menuController.isOpen) {
+            _menuController.open(position: details.localPosition);
+          }
+        },
+        child: Opacity(
+          opacity: isHistory ? 0.50 : 1.0,
+          child: Container(
+            height: 56.0,
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            decoration: BoxDecoration(
+              color: widget.isSelected
+                  ? AppColors.accentFill
+                  : (isCurrent ? AppColors.fillControl : Colors.transparent),
+              borderRadius: BorderRadius.circular(AppSpacing.r10),
+              border: Border.all(
+                color: widget.isSelected
+                    ? AppColors.accent
+                    : (isCurrent ? AppColors.accent.withValues(alpha: 0.3) : Colors.transparent),
+              ),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppSpacing.r10),
+                onTap: () {
+                  widget.onSelect();
+                  widget.controller.playTrack(widget.index);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      // Drag handle
+                      ReorderableDragStartListener(
+                        index: widget.index,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(Icons.drag_indicator, size: 18, color: AppColors.textMuted),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
 
-                  // Cover thumbnail (36x36)
-                  _buildCover(coverKey),
-                  const SizedBox(width: 12),
+                      // Cover thumbnail (36x36)
+                      _buildCover(coverKey),
+                      const SizedBox(width: 12),
 
-                  // Current playing/paused indicator
-                  if (isCurrent)
-                    _PlayingIndicator(controller: controller),
+                      // Current playing/paused indicator
+                      if (isCurrent)
+                        _PlayingIndicator(controller: widget.controller),
 
-                  // Title & Artist
-                  Expanded(
-                    flex: 4,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
+                      // Title & Artist
+                      Expanded(
+                        flex: 4,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textDirection: textDirectionFor(title),
+                              style: isCurrent
+                                  ? AppTypography.bodyStrong.copyWith(color: AppColors.accent)
+                                  : AppTypography.bodyStrong.copyWith(color: AppColors.text),
+                            ),
+                            Text(
+                              artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textDirection: textDirectionFor(artist),
+                              style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Album
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          album,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          textDirection: textDirectionFor(title),
-                          style: isCurrent
-                              ? AppTypography.bodyStrong.copyWith(color: AppColors.accent)
-                              : AppTypography.bodyStrong.copyWith(color: AppColors.text),
+                          textDirection: textDirectionFor(album),
+                          style: AppTypography.caption.copyWith(color: AppColors.textMuted),
                         ),
-                        Text(
-                          artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textDirection: textDirectionFor(artist),
-                          style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Duration
+                      SizedBox(
+                        width: 48,
+                        child: Text(
+                          durationText,
+                          textAlign: TextAlign.end,
+                          style: AppTypography.caption.copyWith(color: AppColors.textMuted),
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
+                      ),
+                      const SizedBox(width: 8),
 
-                  // Album
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      album,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textDirection: textDirectionFor(album),
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
+                      // Favorite button
+                      _QueueFavoriteButton(path: source.uri),
+                      const SizedBox(width: 4),
 
-                  // Duration
-                  SizedBox(
-                    width: 48,
-                    child: Text(
-                      durationText,
-                      textAlign: TextAlign.end,
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                    ),
+                      // More actions menu
+                      _QueueRowMenu(
+                        menuController: _menuController,
+                        isHovered: _isHovered,
+                        index: widget.index,
+                        source: source,
+                        controller: widget.controller,
+                        navigator: widget.navigator,
+                        userCollections: widget.userCollections,
+                        totalCount: widget.totalCount,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-
-                  // Favorite button
-                  _QueueFavoriteButton(path: source.uri),
-                  const SizedBox(width: 4),
-
-                  // More actions menu
-                  _QueueRowMenu(
-                    index: index,
-                    source: source,
-                    controller: controller,
-                    navigator: navigator,
-                    userCollections: userCollections,
-                    totalCount: totalCount,
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -750,6 +918,8 @@ class _QueueFavoriteButton extends StatelessWidget {
 }
 
 class _QueueRowMenu extends StatelessWidget {
+  final MenuController menuController;
+  final bool isHovered;
   final int index;
   final AudioSource source;
   final PlaybackController controller;
@@ -758,6 +928,8 @@ class _QueueRowMenu extends StatelessWidget {
   final int totalCount;
 
   const _QueueRowMenu({
+    required this.menuController,
+    required this.isHovered,
     required this.index,
     required this.source,
     required this.controller,
@@ -773,18 +945,24 @@ class _QueueRowMenu extends StatelessWidget {
     final album = extras?['album'] ?? '';
     final rawArtist = extras?['artist'];
     final path = source.uri;
+    final curIdx = controller.queue.currentIndex;
 
     return MenuAnchor(
-      builder: (context, controller, child) {
+      controller: menuController,
+      builder: (context, ctrl, child) {
         return IconButton(
           key: Key('queue_row_menu_$index'),
-          icon: const Icon(Icons.more_horiz, size: 18, color: AppColors.textMuted),
+          icon: Icon(
+            Icons.more_horiz,
+            size: 18,
+            color: isHovered || ctrl.isOpen ? AppColors.text : AppColors.textMuted,
+          ),
           splashRadius: 14,
           onPressed: () {
-            if (controller.isOpen) {
-              controller.close();
+            if (ctrl.isOpen) {
+              ctrl.close();
             } else {
-              controller.open();
+              ctrl.open();
             }
           },
         );
@@ -798,7 +976,35 @@ class _QueueRowMenu extends StatelessWidget {
           child: Text(context.t('queue.playNext')),
         ),
 
-        // 2. Remove
+        // 2. Add to queue (adds ANOTHER copy at the end of the user block)
+        MenuItemButton(
+          key: const Key('queue_menu_add_to_queue'),
+          leadingIcon: const Icon(Icons.queue, size: 16),
+          onPressed: () => controller.addToQueue([source]),
+          child: Text(context.t('queue.addToQueue')),
+        ),
+
+        // 3. Move to top of Up next
+        MenuItemButton(
+          key: const Key('queue_menu_move_to_top'),
+          leadingIcon: const Icon(Icons.vertical_align_top, size: 16),
+          onPressed: (curIdx >= 0 && index != curIdx + 1)
+              ? () => controller.moveInQueue(index, curIdx + 1)
+              : null,
+          child: Text(context.t('queue.moveToTop')),
+        ),
+
+        // 4. Move to bottom
+        MenuItemButton(
+          key: const Key('queue_menu_move_to_bottom'),
+          leadingIcon: const Icon(Icons.vertical_align_bottom, size: 16),
+          onPressed: index < totalCount - 1
+              ? () => controller.moveInQueue(index, totalCount - 1)
+              : null,
+          child: Text(context.t('queue.moveToBottom')),
+        ),
+
+        // 5. Remove
         MenuItemButton(
           key: const Key('queue_menu_remove'),
           leadingIcon: const Icon(Icons.delete_outline, size: 16),
@@ -806,7 +1012,7 @@ class _QueueRowMenu extends StatelessWidget {
           child: Text(context.t('queue.remove')),
         ),
 
-        // 3. Add to playlist
+        // 6. Add to playlist
         if (collections != null && path.isNotEmpty)
           SubmenuButton(
             key: const Key('queue_menu_add_to_playlist'),
@@ -839,7 +1045,7 @@ class _QueueRowMenu extends StatelessWidget {
             child: Text(context.t('menu.addToPlaylist')),
           ),
 
-        // 4. Move up
+        // 7. Move up
         MenuItemButton(
           key: const Key('queue_menu_move_up'),
           leadingIcon: const Icon(Icons.arrow_upward, size: 16),
@@ -847,7 +1053,7 @@ class _QueueRowMenu extends StatelessWidget {
           child: Text(context.t('queue.moveUp')),
         ),
 
-        // 5. Move down
+        // 8. Move down
         MenuItemButton(
           key: const Key('queue_menu_move_down'),
           leadingIcon: const Icon(Icons.arrow_downward, size: 16),
@@ -856,7 +1062,7 @@ class _QueueRowMenu extends StatelessWidget {
           child: Text(context.t('queue.moveDown')),
         ),
 
-        // 6. Go to album
+        // 9. Go to album
         if (album.isNotEmpty)
           MenuItemButton(
             key: const Key('queue_menu_go_to_album'),
@@ -868,7 +1074,7 @@ class _QueueRowMenu extends StatelessWidget {
             child: Text(context.t('queue.goToAlbum')),
           ),
 
-        // 7. Go to artist
+        // 10. Go to artist
         if (rawArtist != null && rawArtist.isNotEmpty)
           MenuItemButton(
             key: const Key('queue_menu_go_to_artist'),

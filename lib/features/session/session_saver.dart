@@ -137,8 +137,12 @@ class SessionSaver {
       }
     }
 
-    final queueItems = controller.queue.items.map((src) {
-      return SavedSessionItem(uri: src.uri, extras: src.extras);
+    final queueItems = controller.queue.entries.map((entry) {
+      return SavedSessionItem(
+        uri: entry.source.uri,
+        extras: entry.source.extras,
+        isUserQueued: entry.isUserQueued,
+      );
     }).toList();
 
     return SavedSession(

@@ -178,6 +178,7 @@ class _SettingsViewState extends State<SettingsView> {
                           GlassIconButton(
                             key: const Key('settings_back_button'),
                             icon: Icons.arrow_back,
+                            matchTextDirection: true,
                             tooltip: context.t('common.back'),
                             semanticLabel: context.t('common.back'),
                             onPressed: () => widget.navigator.goBack(),

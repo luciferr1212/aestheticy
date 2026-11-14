@@ -424,6 +424,7 @@ void main() {
         AppShortcutScope.global => 'Global',
         AppShortcutScope.nowPlaying => 'Now playing',
         AppShortcutScope.fullScreenAndMini => 'Full screen & Mini',
+        AppShortcutScope.queue => 'Queue',
       };
       expect(find.text(expectedScope), findsWidgets);
     }

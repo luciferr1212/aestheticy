@@ -56,154 +56,218 @@ enum AppDestination {
   queue,
 }
 
-/// Navigation state coordinator managing active destination and detail selection.
-class AppNavigator extends ChangeNotifier {
-  AppDestination _current = AppDestination.albums;
-  AppDestination _previousList = AppDestination.albums;
-  AppDestination _audioPanelsPrevious = AppDestination.albums;
+/// Represents a distinct entry in the navigation history stack.
+class NavEntry {
+  /// Unique identifier for this history entry.
+  final String id;
 
-  // Stored state for returning from nowPlaying or fullScreen
-  AppDestination _savedDestination = AppDestination.albums;
-  String? _savedAlbumId;
-  AlbumSummary? _savedAlbum;
-  String? _savedArtistId;
-  ArtistSummary? _savedArtist;
-  int? _savedPlaylistId;
-  PlaylistSummary? _savedPlaylist;
-  bool _fullScreenCameFromNowPlaying = false;
-  bool _queueCameFromNowPlaying = false;
+  /// The screen destination.
+  final AppDestination destination;
 
-  String? _selectedAlbumId;
-  AlbumSummary? _selectedAlbum;
-
-  String? _selectedArtistId;
-  ArtistSummary? _selectedArtist;
-
-  int? _selectedPlaylistId;
-  PlaylistSummary? _selectedPlaylist;
-
-  /// Creates an [AppNavigator] defaulting to [AppDestination.albums].
-  AppNavigator({AppDestination initialDestination = AppDestination.albums})
-      : _current = initialDestination;
-
-  /// Current active destination.
-  AppDestination get current => _current;
-
-  /// Current active destination alias.
-  AppDestination get currentDestination => _current;
-
-  /// Selected album ID when [current] is [AppDestination.albumDetail].
-  String? get selectedAlbumId => _selectedAlbumId;
+  /// Selected album ID when destination is [AppDestination.albumDetail].
+  final String? albumId;
 
   /// Selected album model when available.
-  AlbumSummary? get selectedAlbum => _selectedAlbum;
+  final AlbumSummary? album;
 
-  /// Selected artist ID when [current] is [AppDestination.artistDetail].
-  String? get selectedArtistId => _selectedArtistId;
+  /// Selected artist ID when destination is [AppDestination.artistDetail].
+  final String? artistId;
 
   /// Selected artist model when available.
-  ArtistSummary? get selectedArtist => _selectedArtist;
+  final ArtistSummary? artist;
 
-  /// Selected playlist ID when [current] is [AppDestination.playlistDetail].
-  int? get selectedPlaylistId => _selectedPlaylistId;
+  /// Selected playlist ID when destination is [AppDestination.playlistDetail].
+  final int? playlistId;
 
   /// Selected playlist model when available.
-  PlaylistSummary? get selectedPlaylist => _selectedPlaylist;
+  final PlaylistSummary? playlist;
 
-  /// Navigates to [destination].
-  void navigateTo(AppDestination destination) {
-    if (_current == destination) return;
+  /// Preserved view state (e.g. scroll offset) across navigation.
+  final Map<String, Object?> viewState;
 
-    if (destination == AppDestination.audioPanels) {
-      _audioPanelsPrevious = _current;
+  /// Creates a new [NavEntry].
+  NavEntry({
+    required this.id,
+    required this.destination,
+    this.albumId,
+    this.album,
+    this.artistId,
+    this.artist,
+    this.playlistId,
+    this.playlist,
+    Map<String, Object?>? viewState,
+  }) : viewState = viewState ?? <String, Object?>{};
+
+  /// Checks if this entry matches destination and all detail arguments.
+  bool matches({
+    required AppDestination destination,
+    String? albumId,
+    String? artistId,
+    int? playlistId,
+  }) {
+    if (this.destination != destination) return false;
+    if (destination == AppDestination.albumDetail && this.albumId != albumId) return false;
+    if (destination == AppDestination.artistDetail && this.artistId != artistId) return false;
+    if (destination == AppDestination.playlistDetail && this.playlistId != playlistId) return false;
+    return true;
+  }
+}
+
+/// Navigation state coordinator managing active destination and history stack.
+class AppNavigator extends ChangeNotifier {
+  static const int kMaxHistory = 50;
+
+  final List<NavEntry> _history = [];
+  int _historyIndex = 0;
+  int _idSeq = 0;
+
+  /// Optional callback invoked to capture active view state before navigating.
+  void Function(Map<String, Object?>)? onCaptureViewState;
+
+  /// Creates an [AppNavigator] defaulting to [AppDestination.albums].
+  AppNavigator({AppDestination initialDestination = AppDestination.albums}) {
+    _history.add(
+      NavEntry(
+        id: 'nav_${_idSeq++}',
+        destination: initialDestination,
+      ),
+    );
+    _historyIndex = 0;
+  }
+
+  /// Current active navigation entry.
+  NavEntry get currentEntry => _history[_historyIndex];
+
+  /// Current active destination.
+  AppDestination get current => currentEntry.destination;
+
+  /// Current active destination alias.
+  AppDestination get currentDestination => current;
+
+  /// Selected album ID when [current] is [AppDestination.albumDetail].
+  String? get selectedAlbumId => currentEntry.albumId;
+
+  /// Selected album model when available.
+  AlbumSummary? get selectedAlbum => currentEntry.album;
+
+  /// Selected artist ID when [current] is [AppDestination.artistDetail].
+  String? get selectedArtistId => currentEntry.artistId;
+
+  /// Selected artist model when available.
+  ArtistSummary? get selectedArtist => currentEntry.artist;
+
+  /// Selected playlist ID when [current] is [AppDestination.playlistDetail].
+  int? get selectedPlaylistId => currentEntry.playlistId;
+
+  /// Selected playlist model when available.
+  PlaylistSummary? get selectedPlaylist => currentEntry.playlist;
+
+  /// Whether navigating back is possible.
+  bool get canGoBack => _historyIndex > 0;
+
+  /// Whether navigating forward is possible.
+  bool get canGoForward => _historyIndex < _history.length - 1;
+
+  /// Unmodifiable view of the history stack.
+  List<NavEntry> get history => List.unmodifiable(_history);
+
+  /// Current index within the history stack.
+  int get historyIndex => _historyIndex;
+
+  void _captureViewState() {
+    try {
+      onCaptureViewState?.call(currentEntry.viewState);
+    } catch (_) {}
+  }
+
+  void _pushEntry(NavEntry entry) {
+    // 1. Pushing an entry equal to the current one does nothing
+    if (currentEntry.matches(
+      destination: entry.destination,
+      albumId: entry.albumId,
+      artistId: entry.artistId,
+      playlistId: entry.playlistId,
+    )) {
+      return;
     }
 
-    if (destination == AppDestination.nowPlaying) {
-      if (_current != AppDestination.fullScreen &&
-          _current != AppDestination.lyrics &&
-          _current != AppDestination.queue) {
-        _saveCurrentState();
+    // 2. If new destination equals previous entry (toggle back), treat as goBack
+    if (_historyIndex > 0) {
+      final prev = _history[_historyIndex - 1];
+      if (prev.matches(
+        destination: entry.destination,
+        albumId: entry.albumId,
+        artistId: entry.artistId,
+        playlistId: entry.playlistId,
+      )) {
+        goBack();
+        return;
       }
-    } else if (destination == AppDestination.lyrics) {
-      if (_current != AppDestination.fullScreen &&
-          _current != AppDestination.nowPlaying &&
-          _current != AppDestination.queue) {
-        _saveCurrentState();
-      }
-    } else if (destination == AppDestination.queue) {
-      if (_current == AppDestination.nowPlaying) {
-        _queueCameFromNowPlaying = true;
-      } else {
-        _queueCameFromNowPlaying = false;
-        if (_current != AppDestination.fullScreen && _current != AppDestination.lyrics) {
-          _saveCurrentState();
-        }
-      }
-    } else if (destination == AppDestination.fullScreen) {
-      if (_current == AppDestination.nowPlaying) {
-        _fullScreenCameFromNowPlaying = true;
-      } else {
-        _fullScreenCameFromNowPlaying = false;
-        _saveCurrentState();
-      }
-    } else {
-      _fullScreenCameFromNowPlaying = false;
     }
 
-    if (_isListDestination(_current)) {
-      _previousList = _current;
+    _captureViewState();
+
+    // Drop forward entries
+    if (_historyIndex < _history.length - 1) {
+      _history.removeRange(_historyIndex + 1, _history.length);
     }
 
-    _current = destination;
-    if (destination != AppDestination.albumDetail &&
-        destination != AppDestination.nowPlaying &&
-        destination != AppDestination.lyrics &&
-        destination != AppDestination.queue &&
-        destination != AppDestination.fullScreen &&
-        destination != AppDestination.audioPanels) {
-      _selectedAlbumId = null;
-      _selectedAlbum = null;
+    _history.add(entry);
+    _historyIndex = _history.length - 1;
+
+    // Cap at 50 entries
+    if (_history.length > kMaxHistory) {
+      _history.removeAt(0);
+      _historyIndex--;
     }
-    if (destination != AppDestination.artistDetail &&
-        destination != AppDestination.nowPlaying &&
-        destination != AppDestination.lyrics &&
-        destination != AppDestination.queue &&
-        destination != AppDestination.fullScreen &&
-        destination != AppDestination.audioPanels) {
-      _selectedArtistId = null;
-      _selectedArtist = null;
-    }
-    if (destination != AppDestination.playlistDetail &&
-        destination != AppDestination.nowPlaying &&
-        destination != AppDestination.lyrics &&
-        destination != AppDestination.queue &&
-        destination != AppDestination.fullScreen &&
-        destination != AppDestination.audioPanels) {
-      _selectedPlaylistId = null;
-      _selectedPlaylist = null;
-    }
+
     notifyListeners();
   }
 
-  void _saveCurrentState() {
-    _savedDestination = _current;
-    _savedAlbumId = _selectedAlbumId;
-    _savedAlbum = _selectedAlbum;
-    _savedArtistId = _selectedArtistId;
-    _savedArtist = _selectedArtist;
-    _savedPlaylistId = _selectedPlaylistId;
-    _savedPlaylist = _selectedPlaylist;
+  /// Navigates to [destination].
+  void navigateTo(AppDestination destination) {
+    _pushEntry(
+      NavEntry(
+        id: 'nav_${_idSeq++}',
+        destination: destination,
+      ),
+    );
   }
 
-  void _restoreSavedState() {
-    _current = _savedDestination;
-    _selectedAlbumId = _savedAlbumId;
-    _selectedAlbum = _savedAlbum;
-    _selectedArtistId = _savedArtistId;
-    _selectedArtist = _savedArtist;
-    _selectedPlaylistId = _savedPlaylistId;
-    _selectedPlaylist = _savedPlaylist;
-    _fullScreenCameFromNowPlaying = false;
+  /// Navigates to the detail screen for the given [albumId] and [album].
+  void openAlbumDetail(String albumId, {AlbumSummary? album}) {
+    _pushEntry(
+      NavEntry(
+        id: 'nav_${_idSeq++}',
+        destination: AppDestination.albumDetail,
+        albumId: albumId,
+        album: album,
+      ),
+    );
+  }
+
+  /// Navigates to the detail screen for the given [artistId] and [artist].
+  void openArtistDetail(String artistId, {ArtistSummary? artist}) {
+    _pushEntry(
+      NavEntry(
+        id: 'nav_${_idSeq++}',
+        destination: AppDestination.artistDetail,
+        artistId: artistId,
+        artist: artist,
+      ),
+    );
+  }
+
+  /// Navigates to the detail screen for the given [id] and [playlist].
+  void openPlaylistDetail(int id, {PlaylistSummary? playlist}) {
+    _pushEntry(
+      NavEntry(
+        id: 'nav_${_idSeq++}',
+        destination: AppDestination.playlistDetail,
+        playlistId: id,
+        playlist: playlist,
+      ),
+    );
   }
 
   /// Opens the synchronized lyrics view.
@@ -220,7 +284,7 @@ class AppNavigator extends ChangeNotifier {
 
   /// Toggles between [AppDestination.fullScreen] and the previous view.
   void toggleFullScreen() {
-    if (_current == AppDestination.fullScreen) {
+    if (current == AppDestination.fullScreen) {
       goBack();
     } else {
       openFullScreen();
@@ -236,114 +300,31 @@ class AppNavigator extends ChangeNotifier {
   /// Opens the Recently Played view.
   void openRecentlyPlayed() => navigateTo(AppDestination.recentlyPlayed);
 
-  /// Navigates to the detail screen for the given [id] and [playlist].
-  void openPlaylistDetail(int id, {PlaylistSummary? playlist}) {
-    if (_isListDestination(_current)) {
-      _previousList = _current;
-    }
-    _selectedPlaylistId = id;
-    _selectedPlaylist = playlist;
-    _current = AppDestination.playlistDetail;
-    notifyListeners();
-  }
-
-  /// Navigates to the detail screen for the given [albumId] and [album].
-  void openAlbumDetail(String albumId, {AlbumSummary? album}) {
-    if (_isListDestination(_current)) {
-      _previousList = _current;
-    }
-    _selectedAlbumId = albumId;
-    _selectedAlbum = album;
-    _current = AppDestination.albumDetail;
-    notifyListeners();
-  }
-
-  /// Navigates to the detail screen for the given [artistId] and [artist].
-  void openArtistDetail(String artistId, {ArtistSummary? artist}) {
-    if (_isListDestination(_current)) {
-      _previousList = _current;
-    }
-    _selectedArtistId = artistId;
-    _selectedArtist = artist;
-    _current = AppDestination.artistDetail;
-    notifyListeners();
-  }
-
   /// Opens the application Settings screen.
   void openSettings() => navigateTo(AppDestination.settings);
 
   /// Opens the Equalizer and Signal Path panels screen.
   void openAudioPanels() => navigateTo(AppDestination.audioPanels);
 
-  /// Navigates back from detail or immersive screens.
+  /// Navigates back to the previous entry.
   ///
-  /// Returns `true` if handled, `false` otherwise.
+  /// Returns `true` if popped, `false` if at root.
   bool goBack() {
-    if (_current == AppDestination.audioPanels) {
-      _current = _audioPanelsPrevious;
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.fullScreen) {
-      if (_fullScreenCameFromNowPlaying) {
-        _current = AppDestination.nowPlaying;
-      } else {
-        _restoreSavedState();
-      }
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.nowPlaying) {
-      _restoreSavedState();
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.lyrics) {
-      _restoreSavedState();
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.queue) {
-      if (_queueCameFromNowPlaying) {
-        _current = AppDestination.nowPlaying;
-      } else {
-        _restoreSavedState();
-      }
-      _queueCameFromNowPlaying = false;
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.playlistDetail) {
-      _current = AppDestination.playlists;
-      _selectedPlaylistId = null;
-      _selectedPlaylist = null;
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.albumDetail) {
-      _current = _previousList == AppDestination.artists
-          ? AppDestination.artists
-          : AppDestination.albums;
-      _selectedAlbumId = null;
-      _selectedAlbum = null;
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.artistDetail) {
-      _current = AppDestination.artists;
-      _selectedArtistId = null;
-      _selectedArtist = null;
-      notifyListeners();
-      return true;
-    } else if (_current == AppDestination.audioLab ||
-        _current == AppDestination.folders ||
-        _current == AppDestination.settings) {
-      _current = _previousList;
-      notifyListeners();
-      return true;
-    }
-    return false;
+    if (!canGoBack) return false;
+    _captureViewState();
+    _historyIndex--;
+    notifyListeners();
+    return true;
   }
 
-  static bool _isListDestination(AppDestination destination) {
-    return destination == AppDestination.albums ||
-        destination == AppDestination.artists ||
-        destination == AppDestination.tracks ||
-        destination == AppDestination.playlists ||
-        destination == AppDestination.favorites ||
-        destination == AppDestination.recentlyPlayed;
+  /// Navigates forward to the next entry.
+  ///
+  /// Returns `true` if moved forward, `false` otherwise.
+  bool goForward() {
+    if (!canGoForward) return false;
+    _captureViewState();
+    _historyIndex++;
+    notifyListeners();
+    return true;
   }
 }

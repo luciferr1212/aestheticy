@@ -71,6 +71,7 @@ Future<SessionRestoreResult> restoreSession({
   // Batched async existence checks (process in chunks of 50 to keep UI isolate responsive)
   const batchSize = 50;
   final survivingSources = <AudioSource>[];
+  final survivingFlags = <bool>[];
   var droppedCount = 0;
   int? survivingCurrentIndex;
 
@@ -95,6 +96,7 @@ Future<SessionRestoreResult> restoreSession({
           survivingCurrentIndex = survivingSources.length;
         }
         survivingSources.add(batch[j].toAudioSource());
+        survivingFlags.add(batch[j].isUserQueued);
       } else {
         droppedCount++;
       }
@@ -131,7 +133,11 @@ Future<SessionRestoreResult> restoreSession({
   final targetPositionMs = originalItemSurvived ? saved.positionMs : 0;
 
   // Rebuild the queue with PlaybackQueue.replaceAll(startIndex) without opening engine or playing
-  controller.queue.replaceAll(survivingSources, startIndex: targetIndex);
+  controller.queue.replaceAll(
+    survivingSources,
+    startIndex: targetIndex,
+    userQueuedFlags: survivingFlags,
+  );
   controller.queue.repeatMode = saved.repeatModeEnum;
   if (saved.shuffle != controller.queue.isShuffled) {
     controller.queue.setShuffle(saved.shuffle);

@@ -5,10 +5,12 @@ import 'package:aestheticy/audio/playback_queue.dart';
 class SavedSessionItem {
   final String uri;
   final Map<String, String>? extras;
+  final bool isUserQueued;
 
   const SavedSessionItem({
     required this.uri,
     this.extras,
+    this.isUserQueued = false,
   });
 
   AudioSource toAudioSource() => AudioSource(uri, extras: extras);
@@ -16,11 +18,13 @@ class SavedSessionItem {
   Map<String, Object?> toJson() => {
         'uri': uri,
         if (extras != null) 'extras': extras,
+        if (isUserQueued) 'isUserQueued': true,
       };
 
   factory SavedSessionItem.fromJson(Map<String, Object?>? json) {
     if (json == null) return const SavedSessionItem(uri: '');
     final uri = json['uri'] as String? ?? '';
+    final isUserQueued = json['isUserQueued'] == true;
     final rawExtras = json['extras'];
     Map<String, String>? extras;
     if (rawExtras is Map) {
@@ -28,7 +32,11 @@ class SavedSessionItem {
         (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
       );
     }
-    return SavedSessionItem(uri: uri, extras: extras);
+    return SavedSessionItem(
+      uri: uri,
+      extras: extras,
+      isUserQueued: isUserQueued,
+    );
   }
 
   @override
@@ -36,10 +44,11 @@ class SavedSessionItem {
       identical(this, other) ||
       other is SavedSessionItem &&
           runtimeType == other.runtimeType &&
-          uri == other.uri;
+          uri == other.uri &&
+          isUserQueued == other.isUserQueued;
 
   @override
-  int get hashCode => uri.hashCode;
+  int get hashCode => Object.hash(uri, isUserQueued);
 }
 
 /// Immutable model representing a snapshot of the playback queue and state.

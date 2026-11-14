@@ -806,3 +806,34 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
 - **Decision (Dither Noise Memory Safety)**: Deterministic 128x128 RGBA image tile decoded once into `ui.Image` and cached for the process lifecycle; disposed with the app. Uses zero disk assets and zero native dependencies.
 - **Known Limitation (Partial Local Albums)**: If an album in the local library is partially downloaded/owned (e.g., only 1-2 tracks from a 12-track album), the classifier heuristics categorize it by owned track count and duration as a `Single` rather than an `Album`, as remote release metadata is not queried in offline-first mode.
 
+---
+
+## 34. Phase 4, Prompt 6 — Queue Sections & Drag Animation, Real Navigation History Stack, Full Screen Double Click, RTL Guards
+
+### 34.1 Queue View: Sections, Animated Reorder & Row Actions (`lib/ui/queue/queue_view.dart`)
+- **Sections:** Groups tracks into History (dimmed), Now Playing, "Next in queue" (user-queued upcoming tracks), and "Next from <context or Up next>" (context-queued tracks). Section headers display only when both upcoming groups exist simultaneously.
+- **Unique Entry Keys:** Rows are keyed by `ValueKey('queue_row_${entry.id}')` rather than URI strings, ensuring multiple occurrences of the same track have distinct render state and only the currently active entry is marked as playing.
+- **Drag & Settling Animation:** Dragging lifts the row with opacity and scale over 140 ms, neighboring rows slide out over 200 ms (`Curves.easeOutCubic`), and dropped rows settle over 200 ms (0 ms with `reduceMotion`). Drops across section boundaries retain entry `isUserQueued` flags without unprovoked changes.
+- **Row Menu & Keyboard Shortcuts:** Each row provides right-click and hover action menus: Play next, Add to queue, Move to top of Up next, Move to bottom, Remove, Go to artist, and Go to album. Keyboard shortcuts `Alt+Up` and `Alt+Down` move the selected upcoming item one position up or down.
+
+### 34.2 Navigation: Real History Stack (`lib/ui/shell/app_navigator.dart`, `app_shell.dart`)
+- **50-Entry Stack:** Replaced internal boolean flags with a linear history of `NavEntry { id, destination, album, artist, playlist, viewState }` capped at 50 entries.
+- **Suppression:** Pushing an entry equal to current is ignored; pushing an entry matching the immediate previous entry performs `goBack()` rather than duplicating history.
+- **Scroll Offset Preservation:** `_ViewStateRestorer` in `AppShell` automatically captures and restores scroll offsets for all 9 list views (`Albums`, `Artists`, `Tracks`, `AlbumDetail`, `ArtistDetail`, `Playlists`, `PlaylistDetail`, `Favorites`, `RecentlyPlayed`) when navigating back and forward.
+- **Keyboard & Mouse Navigation:** `Alt+Left` and `Alt+Right` trigger `goBack()` and `goForward()`. Hardware mouse buttons 4 and 5 (back/forward) navigate through history.
+
+### 34.3 Full Screen Double Click Play/Pause (`lib/ui/now_playing/full_screen_view.dart`)
+- **Empty Area Double Click:** Double clicking empty or non-interactive areas of `FullScreenView` toggles playback state between play and pause. Single clicks perform no action.
+- **Confirmation Indicator:** Displays a calm ~600 ms center icon fade (120 ms fade-in, 480 ms fade-out) showing a 56 dp play or pause icon over a soft glass pill. The widget is completely unmounted from the tree upon animation completion. Sets duration to zero when `reduceMotion` is enabled.
+- **Interaction Absorption:** Interactive elements (seek bar, buttons, metadata links, lyric lines) absorb double clicks without toggling playback or showing the indicator.
+
+### 34.4 RTL Guards & Directional Standards (`test/ui/rtl_guard_test.dart`)
+- **Directional Icons:** Directional icons (back, forward, chevron pointing to next item) use `matchTextDirection: true` or `Icons.auto_mirrored`. Media transport controls (play, pause, skip_next, skip_previous) stay physical according to desktop player conventions.
+- **RTL Guard Test:** Validates that `lib/ui/` contains zero unmirrored directional icons, zero unapproved physical layout tokens outside the documented allowlist (`kAllowedPhysicalTokens`), and asserts all 9 list-like views render cleanly in RTL at 1280x800 without RenderFlex overflows.
+
+### 34.5 Decisions
+- **Decision (ViewStateRestorer via Global Keys & ScrollControllers)**: Scroll preservation stores explicit `pixels` in `NavEntry.viewState` keyed by `nav.currentEntry.id`, avoiding full page destruction while guaranteeing deterministic offset recovery on back/forward navigation.
+- **Decision (Hit Rect Disambiguation for Double Click)**: Rather than adding delayed `onDoubleTap` handlers directly to interactive children (which would introduce a 300 ms delay on single taps), `FullScreenView` determines whether double clicks occurred on interactive controls via bounding rect checks against registered keys (`_seekBarKey`, `_topBarKey`, `_lyricsKey`, `_controlsColumnKey`).
+- **Decision (Transform.flip for RTL Icons)**: `GlassIconButton` and `GlassPillButton` use `Transform.flip(flipX: true)` when `matchTextDirection` is true and text direction is RTL, avoiding non-const `IconData` constructor warnings while maintaining perfect RTL mirroring.
+
+
