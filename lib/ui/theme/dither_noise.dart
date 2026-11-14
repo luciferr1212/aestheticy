@@ -9,7 +9,10 @@ import '../glass/glass_quality.dart';
 import '../glass/glass_scope.dart';
 import '../settings/settings_scope.dart';
 
-/// Generates deterministic grayscale RGBA noise bytes with alpha baked in (~3.5% noise).
+/// Generates deterministic grayscale premultiplied RGBA noise bytes (~3% average opacity).
+///
+/// In premultiplied RGBA, color channels must never exceed alpha.
+/// Alpha is capped at 10 (max ~3.9% opacity), with an average alpha under 6 of 255.
 Uint8List generateDitherNoiseBytes({
   int width = 128,
   int height = 128,
@@ -19,11 +22,14 @@ Uint8List generateDitherNoiseBytes({
   final totalBytes = width * height * 4;
   final bytes = Uint8List(totalBytes);
   for (var i = 0; i < totalBytes; i += 4) {
-    final v = random.nextInt(256);
-    bytes[i] = v; // Red
-    bytes[i + 1] = v; // Green
-    bytes[i + 2] = v; // Blue
-    bytes[i + 3] = 9; // Alpha (~3.5% opacity: 9 / 255 = 0.0353)
+    // Valid premultiplied alpha: max alpha <= 10, average under 6
+    final a = random.nextInt(11); // 0..10 (average ~5.0)
+    // Premultiplied grayscale: 0 <= v <= a (white when v == a, black when v == 0)
+    final v = a == 0 ? 0 : random.nextInt(a + 1);
+    bytes[i] = v; // Red <= a
+    bytes[i + 1] = v; // Green <= a
+    bytes[i + 2] = v; // Blue <= a
+    bytes[i + 3] = a; // Alpha <= 10
   }
   return bytes;
 }

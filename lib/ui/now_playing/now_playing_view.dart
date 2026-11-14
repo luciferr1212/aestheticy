@@ -199,16 +199,16 @@ class _NowPlayingViewState extends State<NowPlayingView> {
               ),
             ),
 
+            // Dither noise overlay to prevent gradient banding (directly above gradient background)
+            const Positioned.fill(
+              child: DitherOverlay(),
+            ),
+
             // 2. Dark scrim ensuring text contrast >= 4.5:1
             Positioned.fill(
               child: Container(
                 color: const Color(0xB30F1115),
               ),
-            ),
-
-            // Dither noise overlay to prevent gradient banding
-            const Positioned.fill(
-              child: DitherOverlay(),
             ),
 
             // 3. Main content

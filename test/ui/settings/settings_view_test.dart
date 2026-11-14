@@ -1011,4 +1011,59 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
+
+  for (final quality in [GlassQuality.full, GlassQuality.light]) {
+    testWidgets(
+      'HOTFIX 5H (d): Settings with glass quality ${quality.name} shows its sections and has no widget with a bright opaque fill covering them',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+
+        settingsStore.update((s) => s.copyWith(glassQuality: quality));
+
+        await tester.pumpWidget(
+          _buildTestSettingsApp(
+            engine: engine,
+            repository: repository,
+            settingsStore: settingsStore,
+            navigator: navigator,
+            audioSettingsApplier: audioSettingsApplier,
+            artistNameStore: artistNameStore,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 1. Find section titles
+        expect(find.text('Language and profile'), findsOneWidget);
+        expect(find.text('Appearance'), findsOneWidget);
+
+        // 2. Check no widget with a bright opaque fill covering sections
+        final settingsViewFinder = find.byType(SettingsView);
+        expect(settingsViewFinder, findsOneWidget);
+
+        final containers = tester.widgetList<Container>(
+          find.descendant(of: settingsViewFinder, matching: find.byType(Container)),
+        );
+        for (final container in containers) {
+          final decoration = container.decoration;
+          if (decoration is BoxDecoration && decoration.color != null) {
+            final color = decoration.color!;
+            final isBrightOpaque = color.a > 0.95 &&
+                (color.r > 0.7 && color.g > 0.7 && color.b > 0.7);
+            expect(
+              isBrightOpaque,
+              isFalse,
+              reason: 'Found unexpected bright opaque fill $color covering Settings',
+            );
+          }
+        }
+
+        // 3. Section title is hit-testable and visible
+        expect(find.text('Language and profile').hitTestable(), findsOneWidget);
+
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+  }
 }
