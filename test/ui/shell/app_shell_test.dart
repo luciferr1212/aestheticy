@@ -645,5 +645,62 @@ void main() {
 
       expect(scanService.isScanning, isFalse);
     });
+
+    testWidgets(
+      'Navigation transition expands content to fill available space (no loose-size child)',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await repository.addFolder('C:\\Music');
+        await tester.pumpWidget(createTestShell());
+        await tester.pumpAndSettle();
+
+        // Navigate to artists
+        navigator.navigateTo(AppDestination.artists);
+        // Pump halfway through transition
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final switcherFinder = find.byWidgetPredicate(
+          (w) =>
+              w is AnimatedSwitcher &&
+              w.duration == const Duration(milliseconds: 100),
+        );
+        expect(switcherFinder, findsOneWidget);
+        final switcherSize = tester.getSize(switcherFinder);
+
+        // The transition Stack inside AnimatedSwitcher has fit: StackFit.expand
+        final stackFinder = find.descendant(
+          of: switcherFinder,
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is Stack &&
+                w.fit == StackFit.expand &&
+                w.alignment == AlignmentDirectional.topStart,
+          ),
+        );
+        expect(stackFinder, findsWidgets);
+        final stackWidget = tester.widget<Stack>(stackFinder.first);
+        expect(stackWidget.fit, equals(StackFit.expand));
+        expect(stackWidget.alignment, equals(AlignmentDirectional.topStart));
+
+        final stackElement = stackFinder.evaluate().first;
+        stackElement.visitChildren((childElement) {
+          final box = childElement.findRenderObject() as RenderBox?;
+          if (box != null && box.hasSize) {
+            expect(box.size.width, equals(switcherSize.width));
+            expect(box.size.height, equals(switcherSize.height));
+          }
+        });
+
+        await tester.pumpAndSettle();
+      },
+    );
   });
 }

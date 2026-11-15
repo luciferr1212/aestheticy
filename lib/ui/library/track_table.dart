@@ -602,8 +602,15 @@ class TrackCoverThumbnail extends StatelessWidget {
       image = Image.file(
         file,
         fit: BoxFit.cover,
+        width: 36,
+        height: 36,
+        gaplessPlayback: true,
         cacheWidth: 72,
         cacheHeight: 72,
+        frameBuilder: (context, child, frame, wasSync) {
+          if (wasSync || frame != null) return child;
+          return _placeholder();
+        },
         errorBuilder: (_, _, _) => _placeholder(),
       );
     } else {
@@ -622,7 +629,12 @@ class TrackCoverThumbnail extends StatelessWidget {
 
   Widget _placeholder() {
     return Container(
-      color: const Color(0xFF22212C),
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: const Color(0xFF22212C),
+        borderRadius: BorderRadius.circular(6),
+      ),
       child: const Center(
         child: Icon(Icons.music_note, size: 18, color: Colors.white24),
       ),

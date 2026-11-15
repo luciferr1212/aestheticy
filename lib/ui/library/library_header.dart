@@ -54,6 +54,9 @@ class LibraryHeader extends StatefulWidget {
   /// Optional callback to toggle sort direction.
   final VoidCallback? onSortDirectionToggle;
 
+  /// Whether to render the toolbar controls row. Defaults to true.
+  final bool showControls;
+
   /// Creates a [LibraryHeader].
   const LibraryHeader({
     super.key,
@@ -63,14 +66,17 @@ class LibraryHeader extends StatefulWidget {
     required this.itemCountLabel,
     required this.onSearchChanged,
     this.searchQuery = '',
-    required this.sortOptions,
-    required this.currentSort,
-    required this.onSortChanged,
+    this.sortOptions = const [],
+    this.currentSort = '',
+    this.onSortChanged = _emptySortChanged,
     this.viewMode,
     this.onViewModeChanged,
     this.isSortReversed = false,
     this.onSortDirectionToggle,
+    this.showControls = true,
   });
+
+  static void _emptySortChanged(String _) {}
 
   @override
   State<LibraryHeader> createState() => _LibraryHeaderState();
@@ -187,11 +193,26 @@ class _LibraryHeaderState extends State<LibraryHeader> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    widget.title,
-                    style: AppTypography.display.copyWith(
-                      letterSpacing: -0.5,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: AppTypography.display.copyWith(
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      if (!widget.showControls) ...[
+                        const SizedBox(width: 10),
+                        Text(
+                          '${widget.itemCount} ${widget.itemCountLabel}',
+                          style: AppTypography.caption.copyWith(
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),
@@ -263,98 +284,100 @@ class _LibraryHeaderState extends State<LibraryHeader> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        if (widget.showControls) ...[
+          const SizedBox(height: 16),
 
-        // Toolbar row: Sort chip, Item count, and optional View-mode toggle
-        Row(
-          children: [
-            // Sort chip
-            Builder(
-              builder: (sortCtx) {
-                return GlassPillButton(
-                  key: const Key('sort_button'),
-                  label: '${context.t('common.sort')}: ${context.t('sort.${widget.currentSort}')}',
-                  leadingIcon: Icons.sort,
-                  size: GlassButtonSize.small,
-                  onPressed: () {
-                    final box = sortCtx.findRenderObject() as RenderBox?;
-                    final pos = box?.localToGlobal(Offset.zero) ?? Offset.zero;
-                    _showSortMenu(context, pos + Offset(0, box?.size.height ?? 32));
-                  },
-                );
-              },
-            ),
-            if (widget.onSortDirectionToggle != null) ...[
-              const SizedBox(width: 4),
-              IconButton(
-                key: const Key('albums_sort_direction'),
-                icon: AnimatedRotation(
-                  turns: widget.isSortReversed ? 0.5 : 0.0,
-                  duration: widget.settingsStore.settings.reduceMotion
-                      ? Duration.zero
-                      : const Duration(milliseconds: 140),
-                  curve: Curves.easeInOut,
-                  child: const Icon(Icons.arrow_upward, size: 18),
-                ),
-                tooltip: widget.isSortReversed
-                    ? context.t('albums.sortDescending')
-                    : context.t('albums.sortAscending'),
-                onPressed: widget.onSortDirectionToggle,
-                splashRadius: 18,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          // Toolbar row: Sort chip, Item count, and optional View-mode toggle
+          Row(
+            children: [
+              // Sort chip
+              Builder(
+                builder: (sortCtx) {
+                  return GlassPillButton(
+                    key: const Key('sort_button'),
+                    label: '${context.t('common.sort')}: ${context.t('sort.${widget.currentSort}')}',
+                    leadingIcon: Icons.sort,
+                    size: GlassButtonSize.small,
+                    onPressed: () {
+                      final box = sortCtx.findRenderObject() as RenderBox?;
+                      final pos = box?.localToGlobal(Offset.zero) ?? Offset.zero;
+                      _showSortMenu(context, pos + Offset(0, box?.size.height ?? 32));
+                    },
+                  );
+                },
               ),
+              if (widget.onSortDirectionToggle != null) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  key: const Key('albums_sort_direction'),
+                  icon: AnimatedRotation(
+                    turns: widget.isSortReversed ? 0.5 : 0.0,
+                    duration: widget.settingsStore.settings.reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 140),
+                    curve: Curves.easeInOut,
+                    child: const Icon(Icons.arrow_upward, size: 18),
+                  ),
+                  tooltip: widget.isSortReversed
+                      ? context.t('albums.sortDescending')
+                      : context.t('albums.sortAscending'),
+                  onPressed: widget.onSortDirectionToggle,
+                  splashRadius: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+              const SizedBox(width: 16),
+
+              // Item count label
+              Text(
+                '${widget.itemCount} ${widget.itemCountLabel}',
+                style: AppTypography.caption.copyWith(
+                  color: AppColors.textMuted,
+                ),
+              ),
+
+              const Spacer(),
+
+              // Optional view-mode toggle for Albums
+              if (widget.viewMode != null && widget.onViewModeChanged != null)
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.fillControl,
+                    borderRadius: BorderRadius.circular(AppSpacing.r10),
+                    border: Border.all(color: AppColors.borderSubtle),
+                  ),
+                  padding: const EdgeInsets.all(2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ViewModeIconButton(
+                        key: const Key('view_mode_square'),
+                        icon: Icons.grid_view_rounded,
+                        tooltip: context.t('view.square'),
+                        isSelected: widget.viewMode == 'square',
+                        onPressed: () => widget.onViewModeChanged!('square'),
+                      ),
+                      _ViewModeIconButton(
+                        key: const Key('view_mode_wide'),
+                        icon: Icons.view_agenda_outlined,
+                        tooltip: context.t('view.wide'),
+                        isSelected: widget.viewMode == 'wide',
+                        onPressed: () => widget.onViewModeChanged!('wide'),
+                      ),
+                      _ViewModeIconButton(
+                        key: const Key('view_mode_list'),
+                        icon: Icons.view_headline_rounded,
+                        tooltip: context.t('view.list'),
+                        isSelected: widget.viewMode == 'list',
+                        onPressed: () => widget.onViewModeChanged!('list'),
+                      ),
+                    ],
+                  ),
+                ),
             ],
-            const SizedBox(width: 16),
-
-            // Item count label
-            Text(
-              '${widget.itemCount} ${widget.itemCountLabel}',
-              style: AppTypography.caption.copyWith(
-                color: AppColors.textMuted,
-              ),
-            ),
-
-            const Spacer(),
-
-            // Optional view-mode toggle for Albums
-            if (widget.viewMode != null && widget.onViewModeChanged != null)
-              Container(
-                decoration: BoxDecoration(
-                  color: AppColors.fillControl,
-                  borderRadius: BorderRadius.circular(AppSpacing.r10),
-                  border: Border.all(color: AppColors.borderSubtle),
-                ),
-                padding: const EdgeInsets.all(2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _ViewModeIconButton(
-                      key: const Key('view_mode_square'),
-                      icon: Icons.grid_view_rounded,
-                      tooltip: context.t('view.square'),
-                      isSelected: widget.viewMode == 'square',
-                      onPressed: () => widget.onViewModeChanged!('square'),
-                    ),
-                    _ViewModeIconButton(
-                      key: const Key('view_mode_wide'),
-                      icon: Icons.view_agenda_outlined,
-                      tooltip: context.t('view.wide'),
-                      isSelected: widget.viewMode == 'wide',
-                      onPressed: () => widget.onViewModeChanged!('wide'),
-                    ),
-                    _ViewModeIconButton(
-                      key: const Key('view_mode_list'),
-                      icon: Icons.view_headline_rounded,
-                      tooltip: context.t('view.list'),
-                      isSelected: widget.viewMode == 'list',
-                      onPressed: () => widget.onViewModeChanged!('list'),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ],
     );
   }

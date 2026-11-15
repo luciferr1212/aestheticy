@@ -16,6 +16,8 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 
 /// Calm deterministic gradients for artist avatar placeholders.
 const List<List<Color>> _avatarGradients = [
@@ -55,6 +57,9 @@ class ArtistDetailView extends StatefulWidget {
   /// The application navigation coordinator.
   final AppNavigator navigator;
 
+  /// Optional play count source for sorting tracks by most played.
+  final TrackPlayCountSource? playCountSource;
+
   /// Creates an [ArtistDetailView].
   const ArtistDetailView({
     super.key,
@@ -63,6 +68,7 @@ class ArtistDetailView extends StatefulWidget {
     required this.controller,
     required this.settingsStore,
     required this.navigator,
+    this.playCountSource,
   });
 
   @override
@@ -71,6 +77,7 @@ class ArtistDetailView extends StatefulWidget {
 
 class _ArtistDetailViewState extends State<ArtistDetailView> {
   List<Track> _tracks = [];
+  Map<String, int> _playCounts = {};
   bool _isLoading = true;
   ReleaseCategory _selectedCategory = ReleaseCategory.all;
 
@@ -96,12 +103,48 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
       widget.artist.name,
       artistKey: widget.artist.key,
     );
+    final source = widget.playCountSource ?? RepositoryPlayCountSource(widget.repository);
+    final playCounts = await source.getPlayCounts();
     if (mounted) {
       setState(() {
         _tracks = tracks;
+        _playCounts = playCounts;
         _isLoading = false;
       });
     }
+  }
+
+  List<Track> _sortArtistTracks(List<Track> list, String sortKey, bool reversed) {
+    final sorted = List<Track>.from(list);
+    sorted.sort((a, b) {
+      int cmp;
+      switch (sortKey) {
+        case 'album':
+          cmp = compareLocaleAware(a.album ?? '', b.album ?? '');
+          if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+        case 'mostPlayed':
+          final aCount = _playCounts[a.path] ?? 0;
+          final bCount = _playCounts[b.path] ?? 0;
+          cmp = bCount.compareTo(aCount);
+          if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+        case 'recentlyAdded':
+          cmp = b.addedAt.compareTo(a.addedAt);
+          if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+        case 'duration':
+          cmp = a.durationMs.compareTo(b.durationMs);
+          if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+        case 'title':
+        default:
+          cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+      }
+      return reversed ? -cmp : cmp;
+    });
+    return sorted;
   }
 
   Future<void> _playArtist({
@@ -154,9 +197,16 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
       ReleaseCategory.appearsOn,
     ].where((c) => (classified[c]?.isNotEmpty ?? false)).toList();
     final showCategoryChips = nonAllCategoriesWithTracks.length > 1;
-    final filteredTracks = _selectedCategory == ReleaseCategory.all
+    final settings = widget.settingsStore.settings;
+    final reduceMotion = settings.reduceMotion;
+    final rawFiltered = _selectedCategory == ReleaseCategory.all
         ? _tracks
         : (classified[_selectedCategory] ?? []);
+    final filteredTracks = _sortArtistTracks(
+      rawFiltered,
+      settings.artistDetailTrackSort,
+      settings.artistDetailTrackSortReversed,
+    );
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 16),
@@ -313,6 +363,24 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
               ),
             ),
           ],
+
+          LibraryViewControls(
+            sortOptions: const ['title', 'album', 'mostPlayed', 'recentlyAdded', 'duration'],
+            currentSort: settings.artistDetailTrackSort,
+            onSortChanged: (newSort) {
+              widget.settingsStore.update(
+                (s) => s.copyWith(artistDetailTrackSort: newSort),
+              );
+            },
+            sortDirection: SortDirection.fromReversed(settings.artistDetailTrackSortReversed),
+            onSortDirectionChanged: (newDir) {
+              widget.settingsStore.update(
+                (s) => s.copyWith(artistDetailTrackSortReversed: newDir.isReversed),
+              );
+            },
+            reduceMotion: reduceMotion,
+          ),
+          const SizedBox(height: 12),
 
           // Tracks list
           Expanded(

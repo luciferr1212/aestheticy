@@ -12,6 +12,8 @@ import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 import 'track_table.dart';
 
 /// Screen displaying recently played tracks (up to 200) based on play events.
@@ -70,10 +72,42 @@ class _RecentlyPlayedViewState extends State<RecentlyPlayedView> {
     await widget.controller.playQueue(sources, startIndex: safeIndex);
   }
 
+  List<Track> _sortRecent(List<Track> list, String sortKey, bool reversed) {
+    if (sortKey == 'playedAt') {
+      return reversed ? list.reversed.toList() : List<Track>.from(list);
+    }
+    final sorted = List<Track>.from(list);
+    sorted.sort((a, b) {
+      int cmp;
+      switch (sortKey) {
+        case 'title':
+          cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+        case 'artist':
+          cmp = compareLocaleAware(a.artist ?? '', b.artist ?? '');
+          break;
+        case 'duration':
+          cmp = a.durationMs.compareTo(b.durationMs);
+          break;
+        default:
+          cmp = 0;
+          break;
+      }
+      return reversed ? -cmp : cmp;
+    });
+    return sorted;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = widget.settingsStore.settings.reduceMotion;
-    final rows = _tracks.map((t) => TrackTableRow.fromTrack(t)).toList();
+    final settings = widget.settingsStore.settings;
+    final reduceMotion = settings.reduceMotion;
+    final sortedTracks = _sortRecent(
+      _tracks,
+      settings.recentlyPlayedSort,
+      settings.recentlyPlayedSortReversed,
+    );
+    final rows = sortedTracks.map((t) => TrackTableRow.fromTrack(t)).toList();
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 24),
@@ -107,11 +141,25 @@ class _RecentlyPlayedViewState extends State<RecentlyPlayedView> {
                 leadingIcon: Icons.play_arrow,
                 variant: GlassButtonVariant.primary,
                 size: GlassButtonSize.medium,
-                onPressed: _tracks.isEmpty ? null : () => _playTracks(),
+                onPressed: sortedTracks.isEmpty ? null : () => _playTracks(),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+
+          LibraryViewControls(
+            sortOptions: const ['playedAt', 'title', 'artist', 'duration'],
+            currentSort: settings.recentlyPlayedSort,
+            onSortChanged: (newSort) {
+              widget.settingsStore.update((s) => s.copyWith(recentlyPlayedSort: newSort));
+            },
+            sortDirection: SortDirection.fromReversed(settings.recentlyPlayedSortReversed),
+            onSortDirectionChanged: (newDir) {
+              widget.settingsStore.update((s) => s.copyWith(recentlyPlayedSortReversed: newDir.isReversed));
+            },
+            reduceMotion: reduceMotion,
+          ),
+          const SizedBox(height: 16),
 
           // TrackTable
           Expanded(

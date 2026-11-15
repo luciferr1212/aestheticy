@@ -1,30 +1,43 @@
 import 'package:flutter/widgets.dart';
 
+import '../glass/glass_quality.dart';
+import '../glass/glass_scope.dart';
+import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/dither_noise.dart';
 
 /// Calm, static ambient background rendered with radial gradients on a dark base.
 ///
-/// Isolated inside a single [RepaintBoundary] and painted with a single [CustomPainter].
+/// Adapts live to active [GlassQuality] tier:
+/// * [GlassQuality.full]: static radial gradient + dither noise overlay.
+/// * [GlassQuality.light]: cheap static radial gradient, no dither.
+/// * [GlassQuality.off]: flat opaque surface, no gradients, no dither, no blur.
 class AmbientBackground extends StatelessWidget {
+  /// Optional settings store for direct quality inspection in tests or shell.
+  final SettingsStore? settingsStore;
+
   /// Creates an [AmbientBackground].
-  const AmbientBackground({super.key});
+  const AmbientBackground({super.key, this.settingsStore});
 
   @override
   Widget build(BuildContext context) {
+    final quality = GlassScope.qualityOf(context);
+    final effectiveQuality = settingsStore?.settings.glassQuality ?? quality;
+
+    if (effectiveQuality == GlassQuality.off) {
+      return const ColoredBox(color: AppColors.base);
+    }
+
     return const Stack(
+      fit: StackFit.expand,
       children: [
-        Positioned.fill(
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _AmbientBackgroundPainter(),
-              size: Size.infinite,
-            ),
+        RepaintBoundary(
+          child: CustomPaint(
+            painter: _AmbientBackgroundPainter(),
+            size: Size.infinite,
           ),
         ),
-        Positioned.fill(
-          child: DitherOverlay(),
-        ),
+        DitherOverlay(),
       ],
     );
   }

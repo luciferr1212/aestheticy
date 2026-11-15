@@ -9,6 +9,8 @@ import '../../features/lyrics/lyrics_controller.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
+import '../glass/glass_quality.dart';
+import '../glass/glass_scope.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../lyrics/lyrics_view.dart';
@@ -350,53 +352,59 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
               SizedBox(height: showLyrics ? 2 : 4),
 
               // Seek bar (existing widget)
-              NowPlayingSeekBar(
-                key: const Key('mini_player_seek_bar'),
-                engine: widget.playbackController.engine,
-                controller: widget.playbackController,
+              Directionality(
+                textDirection: TextDirection.ltr,
+                child: NowPlayingSeekBar(
+                  key: const Key('mini_player_seek_bar'),
+                  engine: widget.playbackController.engine,
+                  controller: widget.playbackController,
+                ),
               ),
               const SizedBox(height: 2),
 
               // Transport buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  GlassIconButton(
-                    key: const Key('mini_player_prev_button'),
-                    icon: Icons.skip_previous,
-                    tooltip: context.t('common.previous'),
-                    semanticLabel: context.t('common.previous'),
-                    size: GlassButtonSize.small,
-                    onPressed: hasTrack
-                        ? widget.playbackController.skipPrevious
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  GlassIconButton(
-                    key: const Key('mini_player_play_pause_button'),
-                    icon: isPlaying ? Icons.pause : Icons.play_arrow,
-                    tooltip: isPlaying
-                        ? context.t('common.pause')
-                        : context.t('common.play'),
-                    semanticLabel: isPlaying
-                        ? context.t('common.pause')
-                        : context.t('common.play'),
-                    size: GlassButtonSize.medium,
-                    onPressed: hasTrack
-                        ? widget.playbackController.togglePlayPause
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  GlassIconButton(
-                    key: const Key('mini_player_next_button'),
-                    icon: Icons.skip_next,
-                    tooltip: context.t('common.next'),
-                    semanticLabel: context.t('common.next'),
-                    size: GlassButtonSize.small,
-                    onPressed:
-                        hasTrack ? widget.playbackController.skipNext : null,
-                  ),
-                ],
+              Directionality(
+                textDirection: TextDirection.ltr,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GlassIconButton(
+                      key: const Key('mini_player_prev_button'),
+                      icon: Icons.skip_previous,
+                      tooltip: context.t('common.previous'),
+                      semanticLabel: context.t('common.previous'),
+                      size: GlassButtonSize.small,
+                      onPressed: hasTrack
+                          ? widget.playbackController.skipPrevious
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    GlassIconButton(
+                      key: const Key('mini_player_play_pause_button'),
+                      icon: isPlaying ? Icons.pause : Icons.play_arrow,
+                      tooltip: isPlaying
+                          ? context.t('common.pause')
+                          : context.t('common.play'),
+                      semanticLabel: isPlaying
+                          ? context.t('common.pause')
+                          : context.t('common.play'),
+                      size: GlassButtonSize.medium,
+                      onPressed: hasTrack
+                          ? widget.playbackController.togglePlayPause
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    GlassIconButton(
+                      key: const Key('mini_player_next_button'),
+                      icon: Icons.skip_next,
+                      tooltip: context.t('common.next'),
+                      semanticLabel: context.t('common.next'),
+                      size: GlassButtonSize.small,
+                      onPressed:
+                          hasTrack ? widget.playbackController.skipNext : null,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -551,50 +559,56 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
           if (!showLyrics) const Spacer() else const SizedBox(height: 6),
 
           // Seek bar
-          NowPlayingSeekBar(
-            key: const Key('mini_player_seek_bar'),
-            engine: widget.playbackController.engine,
-            controller: widget.playbackController,
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: NowPlayingSeekBar(
+              key: const Key('mini_player_seek_bar'),
+              engine: widget.playbackController.engine,
+              controller: widget.playbackController,
+            ),
           ),
           SizedBox(height: showLyrics ? 4 : 8),
 
           // Transport controls
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GlassIconButton(
-                key: const Key('mini_player_prev_button'),
-                icon: Icons.skip_previous,
-                tooltip: context.t('common.previous'),
-                semanticLabel: context.t('common.previous'),
-                size: GlassButtonSize.small,
-                onPressed:
-                    hasTrack ? widget.playbackController.skipPrevious : null,
-              ),
-              const SizedBox(width: 16),
-              GlassIconButton(
-                key: const Key('mini_player_play_pause_button'),
-                icon: isPlaying ? Icons.pause : Icons.play_arrow,
-                tooltip: isPlaying
-                    ? context.t('common.pause')
-                    : context.t('common.play'),
-                semanticLabel: isPlaying
-                    ? context.t('common.pause')
-                    : context.t('common.play'),
-                size: showLyrics ? GlassButtonSize.medium : GlassButtonSize.large,
-                onPressed:
-                    hasTrack ? widget.playbackController.togglePlayPause : null,
-              ),
-              const SizedBox(width: 16),
-              GlassIconButton(
-                key: const Key('mini_player_next_button'),
-                icon: Icons.skip_next,
-                tooltip: context.t('common.next'),
-                semanticLabel: context.t('common.next'),
-                size: GlassButtonSize.small,
-                onPressed: hasTrack ? widget.playbackController.skipNext : null,
-              ),
-            ],
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GlassIconButton(
+                  key: const Key('mini_player_prev_button'),
+                  icon: Icons.skip_previous,
+                  tooltip: context.t('common.previous'),
+                  semanticLabel: context.t('common.previous'),
+                  size: GlassButtonSize.small,
+                  onPressed:
+                      hasTrack ? widget.playbackController.skipPrevious : null,
+                ),
+                const SizedBox(width: 16),
+                GlassIconButton(
+                  key: const Key('mini_player_play_pause_button'),
+                  icon: isPlaying ? Icons.pause : Icons.play_arrow,
+                  tooltip: isPlaying
+                      ? context.t('common.pause')
+                      : context.t('common.play'),
+                  semanticLabel: isPlaying
+                      ? context.t('common.pause')
+                      : context.t('common.play'),
+                  size: showLyrics ? GlassButtonSize.medium : GlassButtonSize.large,
+                  onPressed:
+                      hasTrack ? widget.playbackController.togglePlayPause : null,
+                ),
+                const SizedBox(width: 16),
+                GlassIconButton(
+                  key: const Key('mini_player_next_button'),
+                  icon: Icons.skip_next,
+                  tooltip: context.t('common.next'),
+                  semanticLabel: context.t('common.next'),
+                  size: GlassButtonSize.small,
+                  onPressed: hasTrack ? widget.playbackController.skipNext : null,
+                ),
+              ],
+            ),
           ),
           if (showLyrics) ...[
             const SizedBox(height: 8),
@@ -653,6 +667,10 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
               final isPinned = settings.miniPlayerAlwaysOnTop;
               final showLyrics = settings.miniPlayerShowLyrics;
               final reduceMotion = settings.reduceMotion;
+              final storeQuality = settings.glassQuality;
+              final quality = (storeQuality != GlassQuality.full)
+                  ? storeQuality
+                  : GlassScope.qualityOf(context);
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -664,23 +682,36 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
                     padding: EdgeInsets.zero,
                     child: Stack(
                       children: [
-                        Positioned.fill(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  _palette.secondary.withValues(alpha: 0.35),
-                                  AppColors.surface,
-                                ],
+                        if (quality == GlassQuality.off)
+                          Positioned.fill(
+                            child: Container(
+                              color: AppColors.surface,
+                            ),
+                          )
+                        else ...[
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    _palette.secondary.withValues(
+                                      alpha: quality == GlassQuality.full
+                                          ? 0.35
+                                          : 0.20,
+                                    ),
+                                    AppColors.surface,
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const Positioned.fill(
-                          child: DitherOverlay(),
-                        ),
+                          if (quality == GlassQuality.full)
+                            const Positioned.fill(
+                              child: DitherOverlay(),
+                            ),
+                        ],
                         Positioned.fill(
                           child: isWide
                               ? _buildWideLayout(

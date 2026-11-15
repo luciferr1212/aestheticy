@@ -311,7 +311,8 @@ class SqliteLibraryRepository implements LibraryRepository {
           'Unknown Artist'
         ) AS artist_name,
         COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
-        COUNT(DISTINCT t.id) AS track_count
+        COUNT(DISTINCT t.id) AS track_count,
+        MAX(t.added_at) AS latest_added_at
       FROM track_artists ta
       JOIN tracks t ON t.id = ta.track_id
       GROUP BY ta.artist_key
@@ -331,11 +332,15 @@ class SqliteLibraryRepository implements LibraryRepository {
     final rows = _db.select(sql.toString(), params);
 
     return rows.map((row) {
+      final addedAtVal = row['latest_added_at'] as int?;
       return ArtistSummary(
         key: row['artist_key'] as String,
         name: (row['artist_name'] as String?) ?? 'Unknown Artist',
         albumCount: row['album_count'] as int,
         trackCount: row['track_count'] as int,
+        addedAt: addedAtVal != null
+            ? DateTime.fromMillisecondsSinceEpoch(addedAtVal)
+            : null,
       );
     }).toList();
   }

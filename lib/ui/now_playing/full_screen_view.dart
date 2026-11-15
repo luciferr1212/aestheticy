@@ -16,6 +16,8 @@ import '../../features/lyrics/lyrics_repository.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
+import '../glass/glass_quality.dart';
+import '../glass/glass_scope.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
@@ -80,9 +82,6 @@ class FullScreenView extends StatefulWidget {
 class FullScreenViewState extends State<FullScreenView>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late final Ticker _ticker;
-  late final AnimationController _indicatorController;
-  bool _showIndicator = false;
-  bool _lastActionWasPlay = false;
   final GlobalKey _seekBarKey = GlobalKey();
   final GlobalKey _lyricsKey = GlobalKey();
   final GlobalKey _topBarKey = GlobalKey();
@@ -104,12 +103,6 @@ class FullScreenViewState extends State<FullScreenView>
 
   /// Exposes whether the animation ticker is active.
   bool get isTickerActive => _ticker.isActive;
-
-  /// Exposes the indicator animation controller for testing.
-  AnimationController get indicatorController => _indicatorController;
-
-  /// Exposes whether the indicator is currently visible.
-  bool get isIndicatorVisible => _showIndicator;
 
   @override
   void initState() {
@@ -140,19 +133,6 @@ class FullScreenViewState extends State<FullScreenView>
     _ticker = createTicker(_onTick);
 
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
-    _indicatorController = AnimationController(
-      vsync: this,
-      duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 600),
-    )..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          if (mounted) {
-            setState(() {
-              _showIndicator = false;
-            });
-          }
-        }
-      });
-
     if (!reduceMotion) {
       _ticker.start();
     }
@@ -179,8 +159,6 @@ class FullScreenViewState extends State<FullScreenView>
 
   void _syncTickerWithSettings() {
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
-    _indicatorController.duration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 600);
     if (reduceMotion) {
       if (_ticker.isActive) {
         _ticker.stop();
@@ -268,7 +246,6 @@ class FullScreenViewState extends State<FullScreenView>
     _controlsTimer?.cancel();
     _ticker.stop();
     _ticker.dispose();
-    _indicatorController.dispose();
     _phaseNotifier.dispose();
     _currentSub?.cancel();
     _focusNode.dispose();
@@ -318,30 +295,8 @@ class FullScreenViewState extends State<FullScreenView>
     final isPlaying = widget.controller.currentState == PlaybackState.playing;
     if (isPlaying) {
       widget.controller.pause();
-      _lastActionWasPlay = false;
     } else {
       widget.controller.play();
-      _lastActionWasPlay = true;
-    }
-
-    final reduceMotion = widget.settingsStore.settings.reduceMotion;
-    _indicatorController.duration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 600);
-
-    if (reduceMotion) {
-      if (mounted) {
-        setState(() {
-          _showIndicator = false;
-        });
-      }
-      _indicatorController.value = 1.0;
-    } else {
-      if (mounted) {
-        setState(() {
-          _showIndicator = true;
-        });
-      }
-      _indicatorController.forward(from: 0.0);
     }
   }
 
@@ -383,6 +338,11 @@ class FullScreenViewState extends State<FullScreenView>
     final settings = widget.settingsStore.settings;
     final showGlassShapes = settings.fullScreenGlassShapes;
 
+    final storeQuality = widget.settingsStore.settings.glassQuality;
+    final quality = (storeQuality != GlassQuality.full)
+        ? storeQuality
+        : GlassScope.qualityOf(context);
+
     return Focus(
       focusNode: _focusNode,
       autofocus: true,
@@ -394,24 +354,38 @@ class FullScreenViewState extends State<FullScreenView>
           backgroundColor: AppColors.base,
           body: Stack(
             children: [
-              // 1. Drifting color blobs (painted via RepaintBoundary without page setState)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _BlobPainter(
-                        palette: _palette,
-                        phaseListenable: _phaseNotifier,
+              // 1. Drifting color blobs (controlled by GlassQuality tier)
+              if (quality == GlassQuality.full) ...[
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _BlobPainter(
+                          palette: _palette,
+                          phaseListenable: _phaseNotifier,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const Positioned.fill(
-                child: IgnorePointer(
-                  child: DitherOverlay(),
+                const Positioned.fill(
+                  child: IgnorePointer(
+                    child: DitherOverlay(),
+                  ),
                 ),
-              ),
+              ] else if (quality == GlassQuality.light) ...[
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _StaticBlobPainter(
+                          palette: _palette,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
 
               // 2. Dark contrast scrim overlay
               Positioned.fill(
@@ -686,19 +660,22 @@ class FullScreenViewState extends State<FullScreenView>
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: RepaintBoundary(
-                  key: _seekBarKey,
-                  child: _SlenderProgressLine(
-                    key: const ValueKey('fullscreen_seek_bar_line'),
-                    engine: widget.engine,
-                    controller: widget.controller,
-                    reduceMotion: widget.settingsStore.settings.reduceMotion,
-                    onInteractionChanged: _onScrubberInteractionChanged,
-                    onDragStateChanged: (state) {
-                      if (mounted) {
-                        setState(() => _dragTooltipState = state);
-                      }
-                    },
+                child: Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: RepaintBoundary(
+                    key: _seekBarKey,
+                    child: _SlenderProgressLine(
+                      key: const ValueKey('fullscreen_seek_bar_line'),
+                      engine: widget.engine,
+                      controller: widget.controller,
+                      reduceMotion: widget.settingsStore.settings.reduceMotion,
+                      onInteractionChanged: _onScrubberInteractionChanged,
+                      onDragStateChanged: (state) {
+                        if (mounted) {
+                          setState(() => _dragTooltipState = state);
+                        }
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -732,52 +709,6 @@ class FullScreenViewState extends State<FullScreenView>
                           color: AppColors.text,
                           fontWeight: FontWeight.w600,
                         ),
-                      ),
-                    ),
-                  ),
-                ),
-              // 8. Confirmation indicator on double-click toggle
-              if (_showIndicator)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Center(
-                      child: AnimatedBuilder(
-                        animation: _indicatorController,
-                        builder: (context, _) {
-                          final t = _indicatorController.value;
-                          final double opacity;
-                          if (t <= 0.2) {
-                            opacity = (t / 0.2).clamp(0.0, 1.0);
-                          } else {
-                            opacity = ((1.0 - t) / 0.8).clamp(0.0, 1.0);
-                          }
-
-                          return Opacity(
-                            opacity: opacity,
-                            child: Container(
-                              key: const Key('fullscreen_play_pause_indicator'),
-                              width: 96,
-                              height: 96,
-                              decoration: BoxDecoration(
-                                color: const Color(0x33000000),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: const Color(0x26FFFFFF),
-                                  width: 1,
-                                ),
-                              ),
-                              child: Center(
-                                child: Icon(
-                                  _lastActionWasPlay
-                                      ? Icons.play_arrow
-                                      : Icons.pause,
-                                  size: 56,
-                                  color: AppColors.text,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
                       ),
                     ),
                   ),
@@ -890,6 +821,41 @@ class _BlobPainter extends CustomPainter {
     return oldDelegate.palette != palette ||
         oldDelegate.phaseListenable != phaseListenable;
   }
+}
+
+/// Static cheap gradient blob painter for [GlassQuality.light] with zero per-frame animation.
+class _StaticBlobPainter extends CustomPainter {
+  final CoverPalette palette;
+
+  const _StaticBlobPainter({required this.palette});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    if (w <= 0 || h <= 0) return;
+
+    final paint1 = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          palette.primary.withValues(alpha: 0.20),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: Offset(w * 0.35, h * 0.4), radius: w * 0.35));
+    canvas.drawCircle(Offset(w * 0.35, h * 0.4), w * 0.35, paint1);
+
+    final paint2 = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          palette.secondary.withValues(alpha: 0.20),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: Offset(w * 0.65, h * 0.6), radius: w * 0.38));
+    canvas.drawCircle(Offset(w * 0.65, h * 0.6), w * 0.38, paint2);
+  }
+
+  @override
+  bool shouldRepaint(_StaticBlobPainter oldDelegate) => oldDelegate.palette != palette;
 }
 
 /// Represents the drag scrub state for the full-screen seek bar tooltip overlay.

@@ -16,6 +16,8 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 import 'track_actions_menu.dart';
 
 /// Screen displaying all user-created playlists with grid cards, creation,
@@ -55,6 +57,137 @@ class PlaylistsView extends StatelessWidget {
     this.onImportM3u,
   });
 
+  List<PlaylistSummary> _sortPlaylists(
+    List<PlaylistSummary> list,
+    String sortKey,
+    bool reversed,
+  ) {
+    final sorted = List<PlaylistSummary>.from(list);
+    sorted.sort((a, b) {
+      int cmp;
+      switch (sortKey) {
+        case 'trackCount':
+          cmp = b.trackCount.compareTo(a.trackCount);
+          if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
+          break;
+        case 'recentlyAdded':
+          cmp = b.createdAt.compareTo(a.createdAt);
+          if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
+          break;
+        case 'name':
+        default:
+          cmp = compareLocaleAware(a.name, b.name);
+          break;
+      }
+      return reversed ? -cmp : cmp;
+    });
+    return sorted;
+  }
+
+  Widget _buildShapeContent(
+    BuildContext context,
+    List<PlaylistSummary> playlists,
+    String shape,
+    Future<void> Function(BuildContext, PlaylistSummary) doExport,
+  ) {
+    if (shape == 'list') {
+      return ListView.builder(
+        key: const Key('playlists_list_view'),
+        padding: const EdgeInsets.only(bottom: 120),
+        itemCount: playlists.length,
+        itemBuilder: (context, index) {
+          final playlist = playlists[index];
+          return _PlaylistListRow(
+            key: Key('playlist_list_row_${playlist.id}'),
+            playlist: playlist,
+            onTap: () => navigator.openPlaylistDetail(
+              playlist.id,
+              playlist: playlist,
+            ),
+            onRename: () => showRenamePlaylistDialog(
+              context,
+              collections: collections,
+              playlist: playlist,
+            ),
+            onDelete: () => showDeletePlaylistDialog(
+              context,
+              collections: collections,
+              playlist: playlist,
+            ),
+            onExport: () => doExport(context, playlist),
+          );
+        },
+      );
+    }
+
+    if (shape == 'wide') {
+      return ListView.builder(
+        key: const Key('playlists_wide_view'),
+        padding: const EdgeInsets.only(bottom: 120),
+        itemCount: playlists.length,
+        itemBuilder: (context, index) {
+          final playlist = playlists[index];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _PlaylistWideCard(
+              key: Key('playlist_wide_card_${playlist.id}'),
+              playlist: playlist,
+              onTap: () => navigator.openPlaylistDetail(
+                playlist.id,
+                playlist: playlist,
+              ),
+              onRename: () => showRenamePlaylistDialog(
+                context,
+                collections: collections,
+                playlist: playlist,
+              ),
+              onDelete: () => showDeletePlaylistDialog(
+                context,
+                collections: collections,
+                playlist: playlist,
+              ),
+              onExport: () => doExport(context, playlist),
+            ),
+          );
+        },
+      );
+    }
+
+    return GridView.builder(
+      key: const Key('playlists_grid_view'),
+      padding: const EdgeInsets.only(bottom: 120),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 220,
+        mainAxisSpacing: 20,
+        crossAxisSpacing: 20,
+        childAspectRatio: 0.78,
+      ),
+      itemCount: playlists.length,
+      itemBuilder: (context, index) {
+        final playlist = playlists[index];
+        return _PlaylistCard(
+          key: Key('playlist_card_${playlist.id}'),
+          playlist: playlist,
+          onTap: () => navigator.openPlaylistDetail(
+            playlist.id,
+            playlist: playlist,
+          ),
+          onRename: () => showRenamePlaylistDialog(
+            context,
+            collections: collections,
+            playlist: playlist,
+          ),
+          onDelete: () => showDeletePlaylistDialog(
+            context,
+            collections: collections,
+            playlist: playlist,
+          ),
+          onExport: () => doExport(context, playlist),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final doImport = onImportM3u ??
@@ -73,7 +206,15 @@ class PlaylistsView extends StatelessWidget {
     return ListenableBuilder(
       listenable: collections,
       builder: (context, _) {
-        final playlists = collections.playlists;
+        final rawPlaylists = collections.playlists;
+        final settings = settingsStore.settings;
+        final playlists = _sortPlaylists(
+          rawPlaylists,
+          settings.playlistsSort,
+          settings.playlistsSortReversed,
+        );
+        final currentShape = settings.playlistsViewMode;
+        final reduceMotion = settings.reduceMotion;
 
         return Padding(
           padding:
@@ -112,9 +253,28 @@ class PlaylistsView extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
 
-              // Playlist Grid or Empty State
+              LibraryViewControls(
+                allowedShapes: const ['square', 'wide', 'list'],
+                currentShape: currentShape,
+                onShapeChanged: (newShape) {
+                  settingsStore.update((s) => s.copyWith(playlistsViewMode: newShape));
+                },
+                sortOptions: const ['name', 'trackCount', 'recentlyAdded'],
+                currentSort: settings.playlistsSort,
+                onSortChanged: (newSort) {
+                  settingsStore.update((s) => s.copyWith(playlistsSort: newSort));
+                },
+                sortDirection: SortDirection.fromReversed(settings.playlistsSortReversed),
+                onSortDirectionChanged: (newDir) {
+                  settingsStore.update((s) => s.copyWith(playlistsSortReversed: newDir.isReversed));
+                },
+                reduceMotion: reduceMotion,
+              ),
+              const SizedBox(height: 16),
+
+              // Playlist Content or Empty State
               Expanded(
                 child: playlists.isEmpty
                     ? Center(
@@ -166,45 +326,187 @@ class PlaylistsView extends StatelessWidget {
                           ],
                         ),
                       )
-                    : GridView.builder(
-                        key: const Key('playlists_grid_view'),
-                        padding: const EdgeInsets.only(bottom: 120),
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 220,
-                          mainAxisSpacing: 20,
-                          crossAxisSpacing: 20,
-                          childAspectRatio: 0.78,
+                    : AnimatedSwitcher(
+                        duration: reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeOut,
+                        child: KeyedSubtree(
+                          key: ValueKey('playlists_view_mode_$currentShape'),
+                          child: _buildShapeContent(
+                            context,
+                            playlists,
+                            currentShape,
+                            doExport,
+                          ),
                         ),
-                        itemCount: playlists.length,
-                        itemBuilder: (context, index) {
-                          final playlist = playlists[index];
-                          return _PlaylistCard(
-                            key: Key('playlist_card_${playlist.id}'),
-                            playlist: playlist,
-                            onTap: () => navigator.openPlaylistDetail(
-                              playlist.id,
-                              playlist: playlist,
-                            ),
-                            onRename: () => showRenamePlaylistDialog(
-                              context,
-                              collections: collections,
-                              playlist: playlist,
-                            ),
-                            onDelete: () => showDeletePlaylistDialog(
-                              context,
-                              collections: collections,
-                              playlist: playlist,
-                            ),
-                            onExport: () => doExport(context, playlist),
-                          );
-                        },
                       ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _PlaylistWideCard extends StatelessWidget {
+  final PlaylistSummary playlist;
+  final VoidCallback onTap;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+  final VoidCallback? onExport;
+
+  const _PlaylistWideCard({
+    super.key,
+    required this.playlist,
+    required this.onTap,
+    required this.onRename,
+    required this.onDelete,
+    this.onExport,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppSpacing.r12),
+      onTap: onTap,
+      child: Container(
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.fillGlass,
+          borderRadius: BorderRadius.circular(AppSpacing.r12),
+          border: Border.all(color: AppColors.borderSubtle),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppSpacing.r10),
+                child: _buildCover(playlist.coverKey),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    playlist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textDirection: textDirectionFor(playlist.name),
+                    style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
+                  ),
+                  const SizedBox(height: 4),
+                  Builder(
+                    builder: (context) {
+                      final countStr = context.t('playlist.trackCount', args: {
+                        'count': context.formatCountLocalized(playlist.trackCount),
+                      });
+                      final durStr = playlist.totalDurationMs > 0
+                          ? ' • ${context.formatDurationLocalized(Duration(milliseconds: playlist.totalDurationMs))}'
+                          : '';
+                      return Text(
+                        '$countStr$durStr',
+                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            _PlaylistCardMenuButton(
+              playlist: playlist,
+              onRename: onRename,
+              onDelete: onDelete,
+              onExport: onExport,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaylistListRow extends StatelessWidget {
+  final PlaylistSummary playlist;
+  final VoidCallback onTap;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+  final VoidCallback? onExport;
+
+  const _PlaylistListRow({
+    super.key,
+    required this.playlist,
+    required this.onTap,
+    required this.onRename,
+    required this.onDelete,
+    this.onExport,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppSpacing.r10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppSpacing.r10),
+                child: _buildCover(playlist.coverKey),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    playlist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textDirection: textDirectionFor(playlist.name),
+                    style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
+                  ),
+                  const SizedBox(height: 2),
+                  Builder(
+                    builder: (context) {
+                      final countStr = context.t('playlist.trackCount', args: {
+                        'count': context.formatCountLocalized(playlist.trackCount),
+                      });
+                      final durStr = playlist.totalDurationMs > 0
+                          ? ' • ${context.formatDurationLocalized(Duration(milliseconds: playlist.totalDurationMs))}'
+                          : '';
+                      return Text(
+                        '$countStr$durStr',
+                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            _PlaylistCardMenuButton(
+              playlist: playlist,
+              onRename: onRename,
+              onDelete: onDelete,
+              onExport: onExport,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -296,33 +598,33 @@ class _PlaylistCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildCover(String? coverKey) {
-    if (coverKey != null && CoverCache.hasCover(coverKey)) {
-      final file = File(CoverCache.pathFor(coverKey));
-      return Image.file(
-        file,
-        fit: BoxFit.cover,
-        cacheWidth: 320,
-        cacheHeight: 320,
-        errorBuilder: (_, _, _) => _placeholder(),
-      );
-    }
-    return _placeholder();
-  }
-
-  Widget _placeholder() {
-    return Container(
-      color: const Color(0xFF22212C),
-      child: const Center(
-        child: Icon(
-          Icons.queue_music,
-          size: 48,
-          color: Colors.white24,
-        ),
-      ),
+Widget _buildCover(String? coverKey) {
+  if (coverKey != null && CoverCache.hasCover(coverKey)) {
+    final file = File(CoverCache.pathFor(coverKey));
+    return Image.file(
+      file,
+      fit: BoxFit.cover,
+      cacheWidth: 320,
+      cacheHeight: 320,
+      errorBuilder: (_, _, _) => _placeholder(),
     );
   }
+  return _placeholder();
+}
+
+Widget _placeholder() {
+  return Container(
+    color: const Color(0xFF22212C),
+    child: const Center(
+      child: Icon(
+        Icons.queue_music,
+        size: 48,
+        color: Colors.white24,
+      ),
+    ),
+  );
 }
 
 class _PlaylistCardMenuButton extends StatelessWidget {

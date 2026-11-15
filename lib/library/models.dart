@@ -295,12 +295,16 @@ class ArtistSummary {
   /// Total number of tracks by this artist.
   final int trackCount;
 
+  /// Optional latest track addedAt timestamp for sorting by recently added.
+  final DateTime? addedAt;
+
   /// Creates an immutable [ArtistSummary] instance.
   const ArtistSummary({
     String? key,
     required this.name,
     required this.albumCount,
     required this.trackCount,
+    this.addedAt,
   }) : key = key ?? name;
 
   @override
@@ -311,15 +315,20 @@ class ArtistSummary {
           key == other.key &&
           name == other.name &&
           albumCount == other.albumCount &&
-          trackCount == other.trackCount;
+          trackCount == other.trackCount &&
+          addedAt == other.addedAt;
 
   @override
   int get hashCode =>
-      key.hashCode ^ name.hashCode ^ albumCount.hashCode ^ trackCount.hashCode;
+      key.hashCode ^
+      name.hashCode ^
+      albumCount.hashCode ^
+      trackCount.hashCode ^
+      addedAt.hashCode;
 
   @override
   String toString() =>
-      'ArtistSummary(key: $key, name: $name, albumCount: $albumCount, trackCount: $trackCount)';
+      'ArtistSummary(key: $key, name: $name, albumCount: $albumCount, trackCount: $trackCount, addedAt: $addedAt)';
 }
 
 /// An artist alias mapping an alternative spelling or name to a canonical artist.

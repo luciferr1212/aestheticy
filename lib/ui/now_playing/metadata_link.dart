@@ -91,14 +91,17 @@ class _MetadataLinkState extends State<MetadataLink> {
     }
 
     final active = _isHovered || _isFocused;
-    final underlineColor = active
-        ? (widget.style.color?.withValues(alpha: 0.6) ??
-            AppColors.textSecondary.withValues(alpha: 0.6))
-        : Colors.transparent;
+    final baseColor = widget.style.color ?? AppColors.textSecondary;
+    final activeColor =
+        Color.lerp(baseColor, AppColors.accent, 0.35) ?? AppColors.accent;
+    final effectiveColor = active ? activeColor : baseColor;
 
     final linkStyle = widget.style.copyWith(
-      decoration: TextDecoration.underline,
-      decorationColor: underlineColor,
+      color: effectiveColor,
+      decoration: active ? TextDecoration.underline : TextDecoration.none,
+      decorationColor:
+          active ? effectiveColor.withValues(alpha: 0.6) : null,
+      decorationThickness: active ? 1.0 : null,
     );
 
     return Focus(

@@ -74,6 +74,16 @@ void main() {
         final mouseRegion = tester.widget<MouseRegion>(mouseRegionFinder);
         expect(mouseRegion.cursor, equals(SystemMouseCursors.click));
 
+        // At rest: NO text decoration at all (no underline, not even transparent)
+        final restTextStyle = tester.widget<AnimatedDefaultTextStyle>(
+          find.descendant(
+            of: find.byType(MetadataLink),
+            matching: find.byType(AnimatedDefaultTextStyle),
+          ),
+        );
+        expect(restTextStyle.style.decoration, equals(TextDecoration.none));
+        final restSize = tester.getSize(find.text('Daft Punk'));
+
         // Hover test
         final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await gesture.addPointer(location: tester.getCenter(find.text('Daft Punk')));
@@ -87,6 +97,14 @@ void main() {
           ),
         );
         expect(textStyleWidget.style.decoration, equals(TextDecoration.underline));
+        expect(textStyleWidget.style.decorationThickness, equals(1.0));
+        expect(
+          textStyleWidget.style.decorationColor,
+          equals(textStyleWidget.style.color?.withValues(alpha: 0.6)),
+        );
+        // Layout identical between rest and hover (no size/shift)
+        final hoverSize = tester.getSize(find.text('Daft Punk'));
+        expect(hoverSize, equals(restSize));
 
         // Tap test
         await tester.tap(find.text('Daft Punk'));

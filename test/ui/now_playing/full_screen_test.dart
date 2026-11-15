@@ -651,7 +651,7 @@ void main() {
     );
 
     testWidgets(
-      'Seek bar idle armResume updates cleanly and RTL fills from right edge',
+      'Seek bar idle armResume updates cleanly and progress progresses left-to-right in RTL (S3)',
       (tester) async {
         setupDesktopViewport(tester);
         engine.fakeDuration = const Duration(seconds: 100);
@@ -676,12 +676,13 @@ void main() {
         expect(controller.currentState, equals(PlaybackState.idle));
         final fillFinder = find.byKey(const Key('fullscreen_seek_fill'));
         final fillRectBefore = tester.getRect(fillFinder);
-        expect(fillRectBefore.right, closeTo(1280.0, 0.5));
+        // Seek bar progresses left-to-right always (S3)
+        expect(fillRectBefore.left, closeTo(0.0, 0.5));
         expect(fillRectBefore.width, closeTo(1280.0 * 0.2, 2.0));
 
-        // Tap at 25% from the left edge in RTL -> 75% progress = 75s.
+        // Tap at 75% from the left edge -> 75% progress = 75s.
         final barRect = tester.getRect(find.byKey(const Key('fullscreen_seek_bar')));
-        await tester.tapAt(Offset(barRect.width * 0.25, barRect.center.dy));
+        await tester.tapAt(Offset(barRect.width * 0.75, barRect.center.dy));
         await tester.pump(const Duration(milliseconds: 20));
 
         expect(
@@ -689,7 +690,7 @@ void main() {
           closeTo(75000, 1500),
         );
         final fillRectAfter = tester.getRect(fillFinder);
-        expect(fillRectAfter.right, closeTo(1280.0, 0.5));
+        expect(fillRectAfter.left, closeTo(0.0, 0.5));
         expect(fillRectAfter.width, closeTo(1280.0 * 0.75, 4.0));
 
         await tester.pumpWidget(const SizedBox());

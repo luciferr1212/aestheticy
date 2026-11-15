@@ -141,7 +141,7 @@ void main() {
     }
 
     testWidgets(
-      'Double clicking background toggles play/pause and displays confirmation indicator',
+      'Double clicking background toggles play/pause without showing any flash icon/overlay',
       (tester) async {
         setupDesktopViewport(tester);
         await controller.playQueue(createSampleTracks(), startIndex: 0);
@@ -160,15 +160,7 @@ void main() {
         // Controller should now be paused
         expect(controller.currentState, PlaybackState.paused);
 
-        // Indicator should be visible
-        expect(find.byKey(const Key('fullscreen_play_pause_indicator')), findsOneWidget);
-
-        // Mid animation at 300 ms, indicator remains visible
-        await tester.pump(const Duration(milliseconds: 300));
-        expect(find.byKey(const Key('fullscreen_play_pause_indicator')), findsOneWidget);
-
-        // After completing total 600 ms, indicator is removed from widget tree
-        await tester.pump(const Duration(milliseconds: 350));
+        // Indicator overlay must NOT be shown
         expect(find.byKey(const Key('fullscreen_play_pause_indicator')), findsNothing);
 
         // Double click again to resume playback
@@ -178,9 +170,6 @@ void main() {
         await tester.pump();
 
         expect(controller.currentState, PlaybackState.playing);
-        expect(find.byKey(const Key('fullscreen_play_pause_indicator')), findsOneWidget);
-
-        await tester.pump(const Duration(milliseconds: 650));
         expect(find.byKey(const Key('fullscreen_play_pause_indicator')), findsNothing);
 
         await tester.pumpWidget(const SizedBox());
@@ -281,7 +270,7 @@ void main() {
     );
 
     testWidgets(
-      'Reduce motion sets indicator duration to zero and does not linger',
+      'Reduce motion: double click toggles play/pause with no flash icon',
       (tester) async {
         setupDesktopViewport(tester);
         settingsStore.update((s) => s.copyWith(reduceMotion: true));
@@ -291,9 +280,6 @@ void main() {
         await tester.pumpWidget(buildTestWidget());
         await tester.pump(const Duration(milliseconds: 50));
 
-        final state = tester.state<FullScreenViewState>(find.byType(FullScreenView));
-        expect(state.indicatorController.duration, equals(Duration.zero));
-
         // Double click background
         await tester.tapAt(const Offset(640, 400));
         await tester.pump(const Duration(milliseconds: 50));
@@ -302,7 +288,7 @@ void main() {
 
         // Toggled
         expect(controller.currentState, PlaybackState.paused);
-        // Indicator should not linger in tree with reduceMotion
+        // Indicator must not exist
         expect(find.byKey(const Key('fullscreen_play_pause_indicator')), findsNothing);
 
         await tester.pumpWidget(const SizedBox());

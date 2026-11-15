@@ -509,7 +509,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         backgroundColor: Colors.transparent,
         body: Stack(
           children: [
-            const Positioned.fill(child: AmbientBackground()),
+            Positioned.fill(
+              child: AmbientBackground(settingsStore: widget.settingsStore),
+            ),
             Positioned.fill(
               child: SafeArea(
                 child: LyricsView(
@@ -557,8 +559,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         body: Stack(
           children: [
             // 1. Ambient static background
-            const Positioned.fill(
-              child: AmbientBackground(),
+            Positioned.fill(
+              child: AmbientBackground(settingsStore: widget.settingsStore),
             ),
 
             // 2. Main structure: Sidebar + Content Column
@@ -592,6 +594,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                     duration: reduceMotion
                                         ? Duration.zero
                                         : const Duration(milliseconds: 100),
+                                    layoutBuilder: (currentChild, previousChildren) {
+                                      return Stack(
+                                        fit: StackFit.expand,
+                                        alignment: AlignmentDirectional.topStart,
+                                        children: <Widget>[
+                                          ...previousChildren.map(
+                                            (child) => IgnorePointer(child: child),
+                                          ),
+                                          ?currentChild,
+                                        ],
+                                      );
+                                    },
                                     child: _ViewStateRestorer(
                                       key: ValueKey('view_state_${widget.navigator.currentEntry.id}'),
                                       entry: widget.navigator.currentEntry,
@@ -615,6 +629,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             controller: widget.controller,
                             navigator: widget.navigator,
                             miniPlayerController: widget.miniPlayerController,
+                            settingsStore: widget.settingsStore,
                           ),
                         ),
                       ],

@@ -10,6 +10,8 @@ import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 import 'library_header.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 import 'track_table.dart';
 
 /// Tracks library screen displaying a virtualized table of all audio tracks with
@@ -59,15 +61,14 @@ class _TracksViewState extends State<TracksView> {
 
   Future<void> _loadTracks() async {
     final sortKey = widget.settingsStore.settings.trackSort;
+    final reversed = widget.settingsStore.settings.tracksSortReversed;
     final trackSort = _resolveSort(sortKey);
     final tracks = await widget.repository.listTracks(
       sort: trackSort,
       limit: 100000,
     );
 
-    if (sortKey == 'duration') {
-      tracks.sort((a, b) => a.durationMs.compareTo(b.durationMs));
-    }
+    _applySort(tracks, sortKey, reversed);
 
     if (mounted) {
       setState(() {
@@ -90,7 +91,11 @@ class _TracksViewState extends State<TracksView> {
     }
 
     final results = await widget.repository.search(_searchQuery);
-    _applySort(results, widget.settingsStore.settings.trackSort);
+    _applySort(
+      results,
+      widget.settingsStore.settings.trackSort,
+      widget.settingsStore.settings.tracksSortReversed,
+    );
 
     if (mounted) {
       setState(() {
@@ -99,22 +104,29 @@ class _TracksViewState extends State<TracksView> {
     }
   }
 
-  void _applySort(List<Track> list, String sortKey) {
-    switch (sortKey) {
-      case 'artist':
-        list.sort((a, b) =>
-            (a.artist ?? '').toLowerCase().compareTo((b.artist ?? '').toLowerCase()));
-      case 'album':
-        list.sort((a, b) =>
-            (a.album ?? '').toLowerCase().compareTo((b.album ?? '').toLowerCase()));
-      case 'duration':
-        list.sort((a, b) => a.durationMs.compareTo(b.durationMs));
-      case 'title':
-      default:
-        list.sort((a, b) =>
-            (a.title ?? '').toLowerCase().compareTo((b.title ?? '').toLowerCase()));
-        break;
-    }
+  void _applySort(List<Track> list, String sortKey, bool reversed) {
+    list.sort((a, b) {
+      int cmp;
+      switch (sortKey) {
+        case 'artist':
+          cmp = compareLocaleAware(a.artist ?? '', b.artist ?? '');
+          break;
+        case 'album':
+          cmp = compareLocaleAware(a.album ?? '', b.album ?? '');
+          break;
+        case 'duration':
+          cmp = a.durationMs.compareTo(b.durationMs);
+          break;
+        case 'recentlyAdded':
+          cmp = b.addedAt.compareTo(a.addedAt);
+          break;
+        case 'title':
+        default:
+          cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+      }
+      return reversed ? -cmp : cmp;
+    });
   }
 
   void _onSortChanged(String newSort) {
@@ -137,8 +149,9 @@ class _TracksViewState extends State<TracksView> {
     }
 
     final tracks = _searchQuery.isNotEmpty ? _searchResults : _tracks;
-    final currentSort = widget.settingsStore.settings.trackSort;
-    final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    final settings = widget.settingsStore.settings;
+    final currentSort = settings.trackSort;
+    final reduceMotion = settings.reduceMotion;
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 24),
@@ -152,9 +165,21 @@ class _TracksViewState extends State<TracksView> {
             itemCountLabel: context.t('tracks.count'),
             searchQuery: _searchQuery,
             onSearchChanged: _onSearchChanged,
-            sortOptions: const ['title', 'artist', 'album', 'duration'],
+            showControls: false,
+          ),
+          const SizedBox(height: 12),
+          LibraryViewControls(
+            sortOptions: const ['title', 'artist', 'album', 'duration', 'recentlyAdded'],
             currentSort: currentSort,
             onSortChanged: _onSortChanged,
+            sortDirection: SortDirection.fromReversed(settings.tracksSortReversed),
+            onSortDirectionChanged: (newDir) {
+              widget.settingsStore.update(
+                (s) => s.copyWith(tracksSortReversed: newDir.isReversed),
+              );
+              _loadTracks();
+            },
+            reduceMotion: reduceMotion,
           ),
           const SizedBox(height: 16),
 

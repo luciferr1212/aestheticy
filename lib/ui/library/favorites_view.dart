@@ -12,6 +12,8 @@ import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 import 'track_table.dart';
 
 /// Screen displaying the user's favorite tracks with synchronous updates on toggle,
@@ -53,14 +55,48 @@ class FavoritesView extends StatelessWidget {
     }
   }
 
+  List<Track> _sortFavorites(List<Track> list, String sortKey, bool reversed) {
+    final sorted = List<Track>.from(list);
+    sorted.sort((a, b) {
+      int cmp;
+      switch (sortKey) {
+        case 'title':
+          cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+        case 'artist':
+          cmp = compareLocaleAware(a.artist ?? '', b.artist ?? '');
+          break;
+        case 'album':
+          cmp = compareLocaleAware(a.album ?? '', b.album ?? '');
+          break;
+        case 'duration':
+          cmp = a.durationMs.compareTo(b.durationMs);
+          break;
+        case 'recentlyAdded':
+        default:
+          cmp = b.addedAt.compareTo(a.addedAt);
+          if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
+          break;
+      }
+      return reversed ? -cmp : cmp;
+    });
+    return sorted;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = settingsStore.settings.reduceMotion;
+    final settings = settingsStore.settings;
+    final reduceMotion = settings.reduceMotion;
 
     return ListenableBuilder(
       listenable: collections,
       builder: (context, _) {
-        final favoriteTracks = collections.favoriteTracks;
+        final rawTracks = collections.favoriteTracks;
+        final favoriteTracks = _sortFavorites(
+          rawTracks,
+          settings.favoritesSort,
+          settings.favoritesSortReversed,
+        );
         final totalDurationMs =
             favoriteTracks.fold<int>(0, (sum, t) => sum + t.durationMs);
 
@@ -125,7 +161,21 @@ class FavoritesView extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+
+              LibraryViewControls(
+                sortOptions: const ['recentlyAdded', 'title', 'artist', 'album', 'duration'],
+                currentSort: settings.favoritesSort,
+                onSortChanged: (newSort) {
+                  settingsStore.update((s) => s.copyWith(favoritesSort: newSort));
+                },
+                sortDirection: SortDirection.fromReversed(settings.favoritesSortReversed),
+                onSortDirectionChanged: (newDir) {
+                  settingsStore.update((s) => s.copyWith(favoritesSortReversed: newDir.isReversed));
+                },
+                reduceMotion: reduceMotion,
+              ),
+              const SizedBox(height: 16),
 
               // TrackTable
               Expanded(

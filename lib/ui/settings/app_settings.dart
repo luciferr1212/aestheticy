@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../glass/glass_quality.dart';
 
 /// Immutable model representing persistent user preferences and UI configuration.
@@ -20,6 +22,12 @@ class AppSettings {
   /// Music library grid/list layout mode ('square', 'wide', or 'list').
   final String libraryViewMode;
 
+  /// Artists list layout mode ('circle', 'square', or 'list').
+  final String artistsViewMode;
+
+  /// Playlists list layout mode ('square', 'wide', or 'list').
+  final String playlistsViewMode;
+
   /// Album tab sort key (e.g. 'recentlyAdded', 'title', 'artist').
   final String albumSort;
 
@@ -28,6 +36,42 @@ class AppSettings {
 
   /// Track tab sort key (e.g. 'title', 'artist', 'recentlyAdded').
   final String trackSort;
+
+  /// Whether track list sorting is in reverse direction.
+  final bool tracksSortReversed;
+
+  /// Artists tab sort key (e.g. 'name', 'mostSongs', 'mostAlbums', 'recentlyAdded').
+  final String artistsSort;
+
+  /// Whether artists list sorting is in reverse direction.
+  final bool artistsSortReversed;
+
+  /// Playlists tab sort key (e.g. 'name', 'trackCount', 'recentlyAdded').
+  final String playlistsSort;
+
+  /// Whether playlists list sorting is in reverse direction.
+  final bool playlistsSortReversed;
+
+  /// Favorites tab sort key (e.g. 'recentlyAdded', 'title', 'artist', 'album', 'duration').
+  final String favoritesSort;
+
+  /// Whether favorites list sorting is in reverse direction.
+  final bool favoritesSortReversed;
+
+  /// Recently played tab sort key (e.g. 'playedAt', 'title', 'artist', 'duration').
+  final String recentlyPlayedSort;
+
+  /// Whether recently played list sorting is in reverse direction.
+  final bool recentlyPlayedSortReversed;
+
+  /// Artist detail track list sort key (e.g. 'title', 'album', 'mostPlayed', 'recentlyAdded', 'duration').
+  final String artistDetailTrackSort;
+
+  /// Whether artist detail track list sorting is in reverse direction.
+  final bool artistDetailTrackSortReversed;
+
+  /// Custom ordered artist keys for Albums page artist chips.
+  final List<String> albumsArtistChipsOrder;
 
   /// Whether floating decorative glass shapes appear in full-screen view.
   final bool fullScreenGlassShapes;
@@ -112,9 +156,23 @@ class AppSettings {
     this.reduceMotion = false,
     this.sidebarCompact = false,
     this.libraryViewMode = 'square',
+    this.artistsViewMode = 'circle',
+    this.playlistsViewMode = 'square',
     this.albumSort = 'recentlyAdded',
     this.albumsSortReversed = false,
     this.trackSort = 'title',
+    this.tracksSortReversed = false,
+    this.artistsSort = 'name',
+    this.artistsSortReversed = false,
+    this.playlistsSort = 'name',
+    this.playlistsSortReversed = false,
+    this.favoritesSort = 'recentlyAdded',
+    this.favoritesSortReversed = false,
+    this.recentlyPlayedSort = 'playedAt',
+    this.recentlyPlayedSortReversed = false,
+    this.artistDetailTrackSort = 'title',
+    this.artistDetailTrackSortReversed = false,
+    this.albumsArtistChipsOrder = const [],
     this.fullScreenGlassShapes = true,
     this.arabicNumerals = false,
     this.textScale = 'normal',
@@ -182,9 +240,23 @@ class AppSettings {
     bool? reduceMotion,
     bool? sidebarCompact,
     String? libraryViewMode,
+    String? artistsViewMode,
+    String? playlistsViewMode,
     String? albumSort,
     bool? albumsSortReversed,
     String? trackSort,
+    bool? tracksSortReversed,
+    String? artistsSort,
+    bool? artistsSortReversed,
+    String? playlistsSort,
+    bool? playlistsSortReversed,
+    String? favoritesSort,
+    bool? favoritesSortReversed,
+    String? recentlyPlayedSort,
+    bool? recentlyPlayedSortReversed,
+    String? artistDetailTrackSort,
+    bool? artistDetailTrackSortReversed,
+    List<String>? albumsArtistChipsOrder,
     bool? fullScreenGlassShapes,
     bool? arabicNumerals,
     String? textScale,
@@ -218,9 +290,27 @@ class AppSettings {
       reduceMotion: reduceMotion ?? this.reduceMotion,
       sidebarCompact: sidebarCompact ?? this.sidebarCompact,
       libraryViewMode: libraryViewMode ?? this.libraryViewMode,
+      artistsViewMode: artistsViewMode ?? this.artistsViewMode,
+      playlistsViewMode: playlistsViewMode ?? this.playlistsViewMode,
       albumSort: albumSort ?? this.albumSort,
       albumsSortReversed: albumsSortReversed ?? this.albumsSortReversed,
       trackSort: trackSort ?? this.trackSort,
+      tracksSortReversed: tracksSortReversed ?? this.tracksSortReversed,
+      artistsSort: artistsSort ?? this.artistsSort,
+      artistsSortReversed: artistsSortReversed ?? this.artistsSortReversed,
+      playlistsSort: playlistsSort ?? this.playlistsSort,
+      playlistsSortReversed: playlistsSortReversed ?? this.playlistsSortReversed,
+      favoritesSort: favoritesSort ?? this.favoritesSort,
+      favoritesSortReversed: favoritesSortReversed ?? this.favoritesSortReversed,
+      recentlyPlayedSort: recentlyPlayedSort ?? this.recentlyPlayedSort,
+      recentlyPlayedSortReversed:
+          recentlyPlayedSortReversed ?? this.recentlyPlayedSortReversed,
+      artistDetailTrackSort:
+          artistDetailTrackSort ?? this.artistDetailTrackSort,
+      artistDetailTrackSortReversed:
+          artistDetailTrackSortReversed ?? this.artistDetailTrackSortReversed,
+      albumsArtistChipsOrder:
+          albumsArtistChipsOrder ?? this.albumsArtistChipsOrder,
       fullScreenGlassShapes:
           fullScreenGlassShapes ?? this.fullScreenGlassShapes,
       arabicNumerals: arabicNumerals ?? this.arabicNumerals,
@@ -264,9 +354,23 @@ class AppSettings {
       'reduceMotion': reduceMotion,
       'sidebarCompact': sidebarCompact,
       'libraryViewMode': libraryViewMode,
+      'artistsViewMode': artistsViewMode,
+      'playlistsViewMode': playlistsViewMode,
       'albumSort': albumSort,
       'albumsSortReversed': albumsSortReversed,
       'trackSort': trackSort,
+      'tracksSortReversed': tracksSortReversed,
+      'artistsSort': artistsSort,
+      'artistsSortReversed': artistsSortReversed,
+      'playlistsSort': playlistsSort,
+      'playlistsSortReversed': playlistsSortReversed,
+      'favoritesSort': favoritesSort,
+      'favoritesSortReversed': favoritesSortReversed,
+      'recentlyPlayedSort': recentlyPlayedSort,
+      'recentlyPlayedSortReversed': recentlyPlayedSortReversed,
+      'artistDetailTrackSort': artistDetailTrackSort,
+      'artistDetailTrackSortReversed': artistDetailTrackSortReversed,
+      'albumsArtistChipsOrder': albumsArtistChipsOrder,
       'fullScreenGlassShapes': fullScreenGlassShapes,
       'arabicNumerals': arabicNumerals,
       'textScale': textScale,
@@ -328,6 +432,22 @@ class AppSettings {
         ? rawView
         : 'square';
 
+    final rawArtistsView = json['artistsViewMode'];
+    final artistsViewMode = (rawArtistsView is String &&
+            (rawArtistsView == 'circle' ||
+                rawArtistsView == 'square' ||
+                rawArtistsView == 'list'))
+        ? rawArtistsView
+        : 'circle';
+
+    final rawPlaylistsView = json['playlistsViewMode'];
+    final playlistsViewMode = (rawPlaylistsView is String &&
+            (rawPlaylistsView == 'square' ||
+                rawPlaylistsView == 'wide' ||
+                rawPlaylistsView == 'list'))
+        ? rawPlaylistsView
+        : 'square';
+
     final rawAlbumSort = json['albumSort'];
     final albumSort = (rawAlbumSort is String &&
             (rawAlbumSort == 'recentlyAdded' ||
@@ -346,9 +466,85 @@ class AppSettings {
             (rawTrackSort == 'title' ||
                 rawTrackSort == 'artist' ||
                 rawTrackSort == 'album' ||
-                rawTrackSort == 'duration'))
+                rawTrackSort == 'duration' ||
+                rawTrackSort == 'recentlyAdded'))
         ? rawTrackSort
         : 'title';
+
+    final rawTracksReversed = json['tracksSortReversed'];
+    final tracksSortReversed =
+        rawTracksReversed is bool ? rawTracksReversed : false;
+
+    final rawArtistsSort = json['artistsSort'];
+    final artistsSort = (rawArtistsSort is String &&
+            (rawArtistsSort == 'name' ||
+                rawArtistsSort == 'mostSongs' ||
+                rawArtistsSort == 'mostAlbums' ||
+                rawArtistsSort == 'recentlyAdded'))
+        ? rawArtistsSort
+        : 'name';
+
+    final rawArtistsReversed = json['artistsSortReversed'];
+    final artistsSortReversed =
+        rawArtistsReversed is bool ? rawArtistsReversed : false;
+
+    final rawPlaylistsSort = json['playlistsSort'];
+    final playlistsSort = (rawPlaylistsSort is String &&
+            (rawPlaylistsSort == 'name' ||
+                rawPlaylistsSort == 'trackCount' ||
+                rawPlaylistsSort == 'recentlyAdded'))
+        ? rawPlaylistsSort
+        : 'name';
+
+    final rawPlaylistsReversed = json['playlistsSortReversed'];
+    final playlistsSortReversed =
+        rawPlaylistsReversed is bool ? rawPlaylistsReversed : false;
+
+    final rawFavoritesSort = json['favoritesSort'];
+    final favoritesSort = (rawFavoritesSort is String &&
+            (rawFavoritesSort == 'recentlyAdded' ||
+                rawFavoritesSort == 'title' ||
+                rawFavoritesSort == 'artist' ||
+                rawFavoritesSort == 'album' ||
+                rawFavoritesSort == 'duration'))
+        ? rawFavoritesSort
+        : 'recentlyAdded';
+
+    final rawFavoritesReversed = json['favoritesSortReversed'];
+    final favoritesSortReversed =
+        rawFavoritesReversed is bool ? rawFavoritesReversed : false;
+
+    final rawRecentSort = json['recentlyPlayedSort'];
+    final recentlyPlayedSort = (rawRecentSort is String &&
+            (rawRecentSort == 'playedAt' ||
+                rawRecentSort == 'title' ||
+                rawRecentSort == 'artist' ||
+                rawRecentSort == 'duration'))
+        ? rawRecentSort
+        : 'playedAt';
+
+    final rawRecentReversed = json['recentlyPlayedSortReversed'];
+    final recentlyPlayedSortReversed =
+        rawRecentReversed is bool ? rawRecentReversed : false;
+
+    final rawDetailTrackSort = json['artistDetailTrackSort'];
+    final artistDetailTrackSort = (rawDetailTrackSort is String &&
+            (rawDetailTrackSort == 'title' ||
+                rawDetailTrackSort == 'album' ||
+                rawDetailTrackSort == 'mostPlayed' ||
+                rawDetailTrackSort == 'recentlyAdded' ||
+                rawDetailTrackSort == 'duration'))
+        ? rawDetailTrackSort
+        : 'title';
+
+    final rawDetailTrackReversed = json['artistDetailTrackSortReversed'];
+    final artistDetailTrackSortReversed =
+        rawDetailTrackReversed is bool ? rawDetailTrackReversed : false;
+
+    final rawChips = json['albumsArtistChipsOrder'];
+    final albumsArtistChipsOrder = (rawChips is List)
+        ? rawChips.whereType<String>().toList()
+        : const <String>[];
 
     final rawGlassShapes = json['fullScreenGlassShapes'];
     final fullScreenGlassShapes =
@@ -477,9 +673,23 @@ class AppSettings {
       reduceMotion: reduceMotion,
       sidebarCompact: sidebarCompact,
       libraryViewMode: libraryViewMode,
+      artistsViewMode: artistsViewMode,
+      playlistsViewMode: playlistsViewMode,
       albumSort: albumSort,
       albumsSortReversed: albumsSortReversed,
       trackSort: trackSort,
+      tracksSortReversed: tracksSortReversed,
+      artistsSort: artistsSort,
+      artistsSortReversed: artistsSortReversed,
+      playlistsSort: playlistsSort,
+      playlistsSortReversed: playlistsSortReversed,
+      favoritesSort: favoritesSort,
+      favoritesSortReversed: favoritesSortReversed,
+      recentlyPlayedSort: recentlyPlayedSort,
+      recentlyPlayedSortReversed: recentlyPlayedSortReversed,
+      artistDetailTrackSort: artistDetailTrackSort,
+      artistDetailTrackSortReversed: artistDetailTrackSortReversed,
+      albumsArtistChipsOrder: albumsArtistChipsOrder,
       fullScreenGlassShapes: fullScreenGlassShapes,
       arabicNumerals: arabicNumerals,
       textScale: textScale,
@@ -519,9 +729,24 @@ class AppSettings {
           reduceMotion == other.reduceMotion &&
           sidebarCompact == other.sidebarCompact &&
           libraryViewMode == other.libraryViewMode &&
+          artistsViewMode == other.artistsViewMode &&
+          playlistsViewMode == other.playlistsViewMode &&
           albumSort == other.albumSort &&
           albumsSortReversed == other.albumsSortReversed &&
           trackSort == other.trackSort &&
+          tracksSortReversed == other.tracksSortReversed &&
+          artistsSort == other.artistsSort &&
+          artistsSortReversed == other.artistsSortReversed &&
+          playlistsSort == other.playlistsSort &&
+          playlistsSortReversed == other.playlistsSortReversed &&
+          favoritesSort == other.favoritesSort &&
+          favoritesSortReversed == other.favoritesSortReversed &&
+          recentlyPlayedSort == other.recentlyPlayedSort &&
+          recentlyPlayedSortReversed == other.recentlyPlayedSortReversed &&
+          artistDetailTrackSort == other.artistDetailTrackSort &&
+          artistDetailTrackSortReversed ==
+              other.artistDetailTrackSortReversed &&
+          listEquals(albumsArtistChipsOrder, other.albumsArtistChipsOrder) &&
           fullScreenGlassShapes == other.fullScreenGlassShapes &&
           arabicNumerals == other.arabicNumerals &&
           textScale == other.textScale &&
@@ -556,9 +781,23 @@ class AppSettings {
         reduceMotion,
         sidebarCompact,
         libraryViewMode,
+        artistsViewMode,
+        playlistsViewMode,
         albumSort,
         albumsSortReversed,
         trackSort,
+        tracksSortReversed,
+        artistsSort,
+        artistsSortReversed,
+        playlistsSort,
+        playlistsSortReversed,
+        favoritesSort,
+        favoritesSortReversed,
+        recentlyPlayedSort,
+        recentlyPlayedSortReversed,
+        artistDetailTrackSort,
+        artistDetailTrackSortReversed,
+        Object.hashAll(albumsArtistChipsOrder),
         fullScreenGlassShapes,
         arabicNumerals,
         textScale,

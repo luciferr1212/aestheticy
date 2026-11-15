@@ -15,8 +15,9 @@ import '../glass/glass_button.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
-import '../settings/settings_scope.dart';
 import '../now_playing/metadata_link.dart';
+import '../settings/settings_scope.dart';
+import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
@@ -38,6 +39,9 @@ class BottomNowPlayingBar extends StatelessWidget {
   /// Optional callback invoked when the track info area is built (for test counters).
   final VoidCallback? onTrackInfoBuild;
 
+  /// Optional settings store for inspecting glass quality.
+  final SettingsStore? settingsStore;
+
   /// Creates a [BottomNowPlayingBar].
   const BottomNowPlayingBar({
     super.key,
@@ -45,6 +49,7 @@ class BottomNowPlayingBar extends StatelessWidget {
     this.navigator,
     this.miniPlayerController,
     this.onTrackInfoBuild,
+    this.settingsStore,
   });
 
   @override
@@ -295,6 +300,7 @@ class _CenterTransportArea extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 GlassIconButton(
+                  key: const Key('bottom_bar_prev_button'),
                   icon: Icons.skip_previous,
                   tooltip: context.t('common.previous'),
                   semanticLabel: context.t('common.previous'),
@@ -303,6 +309,7 @@ class _CenterTransportArea extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 GlassIconButton(
+                  key: const Key('bottom_bar_play_pause_button'),
                   icon: isPlaying ? Icons.pause : Icons.play_arrow,
                   tooltip: isPlaying
                       ? context.t('common.pause')
@@ -316,6 +323,7 @@ class _CenterTransportArea extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 GlassIconButton(
+                  key: const Key('bottom_bar_next_button'),
                   icon: Icons.skip_next,
                   tooltip: context.t('common.next'),
                   semanticLabel: context.t('common.next'),

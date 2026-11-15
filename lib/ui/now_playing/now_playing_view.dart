@@ -15,6 +15,8 @@ import '../../features/lyrics/lyrics_repository.dart';
 import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
+import '../glass/glass_quality.dart';
+import '../glass/glass_scope.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
@@ -94,12 +96,26 @@ class _NowPlayingViewState extends State<NowPlayingView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
+    widget.settingsStore.addListener(_onSettingsChanged);
     _updatePalette(widget.controller.queue.current?.extras?['coverKey']);
     _currentSub = widget.controller.currentStream.listen((source) {
       if (!mounted) return;
       _updatePalette(source?.extras?['coverKey']);
       setState(() {});
     });
+  }
+
+  @override
+  void didUpdateWidget(NowPlayingView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.settingsStore != widget.settingsStore) {
+      oldWidget.settingsStore.removeListener(_onSettingsChanged);
+      widget.settingsStore.addListener(_onSettingsChanged);
+    }
+  }
+
+  void _onSettingsChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _updatePalette(String? coverKey) async {
@@ -112,6 +128,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
 
   @override
   void dispose() {
+    widget.settingsStore.removeListener(_onSettingsChanged);
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
     }
@@ -173,6 +190,11 @@ class _NowPlayingViewState extends State<NowPlayingView> {
     final album = hasTrack ? (current.extras?['album'] ?? '') : '';
     final coverKey = current?.extras?['coverKey'];
 
+    final storeQuality = widget.settingsStore.settings.glassQuality;
+    final quality = (storeQuality != GlassQuality.full)
+        ? storeQuality
+        : GlassScope.qualityOf(context);
+
     return Focus(
       focusNode: _focusNode,
       autofocus: true,
@@ -181,28 +203,44 @@ class _NowPlayingViewState extends State<NowPlayingView> {
         backgroundColor: AppColors.base,
         body: Stack(
           children: [
-            // 1. Ambient radial glow from CoverPalette
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: const Alignment(-0.5, 0.0),
-                    radius: 0.9,
-                    colors: [
-                      _palette.primary.withValues(alpha: 0.24),
-                      _palette.secondary.withValues(alpha: 0.12),
-                      Colors.transparent,
-                    ],
-                    stops: const [0.0, 0.55, 1.0],
+            // 1. Ambient radial glow from CoverPalette (adapting to GlassQuality)
+            if (quality == GlassQuality.full) ...[
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(-0.5, 0.0),
+                      radius: 0.9,
+                      colors: [
+                        _palette.primary.withValues(alpha: 0.24),
+                        _palette.secondary.withValues(alpha: 0.12),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.55, 1.0],
+                    ),
                   ),
                 ),
               ),
-            ),
-
-            // Dither noise overlay to prevent gradient banding (directly above gradient background)
-            const Positioned.fill(
-              child: DitherOverlay(),
-            ),
+              const Positioned.fill(
+                child: DitherOverlay(),
+              ),
+            ] else if (quality == GlassQuality.light) ...[
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(-0.5, 0.0),
+                      radius: 0.9,
+                      colors: [
+                        _palette.primary.withValues(alpha: 0.15),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+            ],
 
             // 2. Dark scrim ensuring text contrast >= 4.5:1
             Positioned.fill(
@@ -258,9 +296,12 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                         ),
                                         const SizedBox(height: 16),
                                         // Isolated seekbar leaf widget (zero rebuilds on ticks)
-                                        _IsolatedSeekBar(
-                                          engine: widget.engine,
-                                          controller: widget.controller,
+                                        Directionality(
+                                          textDirection: TextDirection.ltr,
+                                          child: _IsolatedSeekBar(
+                                            engine: widget.engine,
+                                            controller: widget.controller,
+                                          ),
                                         ),
                                         const SizedBox(height: 16),
                                         // Transport row (strictly LTR)
@@ -398,6 +439,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
 
             // Previous
             GlassIconButton(
+              key: const Key('now_playing_prev_button'),
               icon: Icons.skip_previous,
               tooltip: context.t('common.previous'),
               semanticLabel: context.t('common.previous'),
@@ -427,6 +469,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
 
             // Next
             GlassIconButton(
+              key: const Key('now_playing_next_button'),
               icon: Icons.skip_next,
               tooltip: context.t('common.next'),
               semanticLabel: context.t('common.next'),

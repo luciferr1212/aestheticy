@@ -11,6 +11,8 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import 'library_header.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 
 /// Calm deterministic gradients for artist avatar placeholders.
 const List<List<Color>> _avatarGradients = [
@@ -272,13 +274,54 @@ class _ArtistsViewState extends State<ArtistsView> {
     });
   }
 
+  List<ArtistSummary> _sortArtists(
+    List<ArtistSummary> list,
+    String sortKey,
+    bool reversed,
+  ) {
+    final sorted = List<ArtistSummary>.from(list);
+    sorted.sort((a, b) {
+      int cmp;
+      switch (sortKey) {
+        case 'mostSongs':
+          cmp = b.trackCount.compareTo(a.trackCount);
+          if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
+          break;
+        case 'mostAlbums':
+          cmp = b.albumCount.compareTo(a.albumCount);
+          if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
+          break;
+        case 'recentlyAdded':
+          final aTime = a.addedAt?.millisecondsSinceEpoch ?? 0;
+          final bTime = b.addedAt?.millisecondsSinceEpoch ?? 0;
+          cmp = bTime.compareTo(aTime);
+          if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
+          break;
+        case 'name':
+        default:
+          cmp = compareLocaleAware(a.name, b.name);
+          break;
+      }
+      return reversed ? -cmp : cmp;
+    });
+    return sorted;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final artists = _searchQuery.isNotEmpty ? _searchResults : _artists;
+    final rawArtists = _searchQuery.isNotEmpty ? _searchResults : _artists;
+    final settings = widget.settingsStore.settings;
+    final artists = _sortArtists(
+      rawArtists,
+      settings.artistsSort,
+      settings.artistsSortReversed,
+    );
+    final currentShape = settings.artistsViewMode;
+    final reduceMotion = settings.reduceMotion;
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 24),
@@ -292,11 +335,27 @@ class _ArtistsViewState extends State<ArtistsView> {
             itemCountLabel: context.t('artists.count'),
             searchQuery: _searchQuery,
             onSearchChanged: _onSearchChanged,
-            sortOptions: const ['title'],
-            currentSort: 'title',
-            onSortChanged: (_) {},
+            showControls: false,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+          LibraryViewControls(
+            allowedShapes: const ['circle', 'square', 'list'],
+            currentShape: currentShape,
+            onShapeChanged: (newShape) {
+              widget.settingsStore.update((s) => s.copyWith(artistsViewMode: newShape));
+            },
+            sortOptions: const ['name', 'mostSongs', 'mostAlbums', 'recentlyAdded'],
+            currentSort: settings.artistsSort,
+            onSortChanged: (newSort) {
+              widget.settingsStore.update((s) => s.copyWith(artistsSort: newSort));
+            },
+            sortDirection: SortDirection.fromReversed(settings.artistsSortReversed),
+            onSortDirectionChanged: (newDir) {
+              widget.settingsStore.update((s) => s.copyWith(artistsSortReversed: newDir.isReversed));
+            },
+            reduceMotion: reduceMotion,
+          ),
+          const SizedBox(height: 16),
           Expanded(
             child: artists.isEmpty
                 ? Center(
@@ -309,36 +368,186 @@ class _ArtistsViewState extends State<ArtistsView> {
                       ),
                     ),
                   )
-                : GridView.builder(
-                    key: const Key('artists_grid_view'),
-                    padding: const EdgeInsets.only(bottom: 120),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 180,
-                      mainAxisExtent: 220,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 20,
+                : AnimatedSwitcher(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 180),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeOut,
+                    child: KeyedSubtree(
+                      key: ValueKey('artists_view_mode_$currentShape'),
+                      child: _buildShapeContent(artists, currentShape),
                     ),
-                    itemCount: artists.length,
-                    itemBuilder: (context, index) {
-                      final artist = artists[index];
-                      final isMerged =
-                          _mergedCanonicalKeys.contains(artist.key);
-
-                      return _ArtistTile(
-                        artist: artist,
-                        isMerged: isMerged,
-                        onTap: () => widget.navigator.openArtistDetail(
-                          artist.key,
-                          artist: artist,
-                        ),
-                        onMerge: () => _openMergeDialog(artist),
-                        onRules: _openRulesSheet,
-                      );
-                    },
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildShapeContent(List<ArtistSummary> artists, String shape) {
+    if (shape == 'list') {
+      return ListView.builder(
+        key: const Key('artists_list_view'),
+        padding: const EdgeInsets.only(bottom: 120),
+        itemCount: artists.length,
+        itemBuilder: (context, index) {
+          final artist = artists[index];
+          final isMerged = _mergedCanonicalKeys.contains(artist.key);
+
+          return _ArtistListTile(
+            artist: artist,
+            isMerged: isMerged,
+            onTap: () => widget.navigator.openArtistDetail(
+              artist.key,
+              artist: artist,
+            ),
+            onMerge: () => _openMergeDialog(artist),
+            onRules: _openRulesSheet,
+          );
+        },
+      );
+    }
+
+    return GridView.builder(
+      key: const Key('artists_grid_view'),
+      padding: const EdgeInsets.only(bottom: 120),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 180,
+        mainAxisExtent: 220,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 20,
+      ),
+      itemCount: artists.length,
+      itemBuilder: (context, index) {
+        final artist = artists[index];
+        final isMerged = _mergedCanonicalKeys.contains(artist.key);
+
+        return _ArtistTile(
+          artist: artist,
+          shape: shape,
+          isMerged: isMerged,
+          onTap: () => widget.navigator.openArtistDetail(
+            artist.key,
+            artist: artist,
+          ),
+          onMerge: () => _openMergeDialog(artist),
+          onRules: _openRulesSheet,
+        );
+      },
+    );
+  }
+}
+
+class _ArtistListTile extends StatelessWidget {
+  final ArtistSummary artist;
+  final bool isMerged;
+  final VoidCallback onTap;
+  final VoidCallback onMerge;
+  final VoidCallback onRules;
+
+  const _ArtistListTile({
+    required this.artist,
+    required this.isMerged,
+    required this.onTap,
+    required this.onMerge,
+    required this.onRules,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final gradient = _gradientForArtist(artist.name);
+    final initial = _initialForArtist(artist.name);
+    final displayName = context.displayArtist(artist.name);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppSpacing.r10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: gradient,
+                ),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Center(
+                child: Text(
+                  initial,
+                  style: AppTypography.title.copyWith(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textDirection: textDirectionFor(displayName),
+                          style: AppTypography.bodyStrong.copyWith(
+                            color: AppColors.text,
+                          ),
+                        ),
+                      ),
+                      if (isMerged) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.circular(AppSpacing.r10),
+                          ),
+                          child: Text(
+                            context.t('artist.mergedBadge'),
+                            style: AppTypography.micro.copyWith(
+                              color: Colors.black,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 9.0,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${artist.albumCount} ${context.t('albums.count')} • ${artist.trackCount} ${context.t('tracks.count')}',
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _ArtistContextMenuButton(
+              artist: artist,
+              onMerge: onMerge,
+              onRules: onRules,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -346,6 +555,7 @@ class _ArtistsViewState extends State<ArtistsView> {
 
 class _ArtistTile extends StatelessWidget {
   final ArtistSummary artist;
+  final String shape;
   final bool isMerged;
   final VoidCallback onTap;
   final VoidCallback onMerge;
@@ -353,6 +563,7 @@ class _ArtistTile extends StatelessWidget {
 
   const _ArtistTile({
     required this.artist,
+    this.shape = 'circle',
     required this.isMerged,
     required this.onTap,
     required this.onMerge,
@@ -370,7 +581,7 @@ class _ArtistTile extends StatelessWidget {
         onTap: onTap,
         child: Column(
           children: [
-            // Circular avatar container
+            // Circular or square avatar container
             Stack(
               alignment: Alignment.center,
               children: [
@@ -378,7 +589,10 @@ class _ArtistTile extends StatelessWidget {
                   width: 128,
                   height: 128,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
+                    shape: shape == 'circle' ? BoxShape.circle : BoxShape.rectangle,
+                    borderRadius: shape == 'square'
+                        ? BorderRadius.circular(AppSpacing.r12)
+                        : null,
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,

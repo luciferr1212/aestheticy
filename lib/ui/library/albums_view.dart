@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../../library/text_normalizer.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
@@ -13,7 +14,10 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'albums_artist_chips.dart';
 import 'library_header.dart';
+import 'library_view_controls.dart';
+import 'sort_direction_button.dart';
 
 /// A section of albums sharing the same release [year] (or `null` for unknown).
 class AlbumYearGroup {
@@ -101,6 +105,8 @@ class AlbumsView extends StatefulWidget {
 class _AlbumsViewState extends State<AlbumsView> {
   List<AlbumSummary> _albums = [];
   List<AlbumSummary> _searchResults = [];
+  List<ArtistSummary> _rawArtists = [];
+  String? _selectedArtistKey;
   String _searchQuery = '';
   bool _isLoading = true;
 
@@ -112,9 +118,11 @@ class _AlbumsViewState extends State<AlbumsView> {
 
   Future<void> _loadAlbums() async {
     final albums = await widget.repository.listAlbums();
+    final artists = await widget.repository.listArtists();
     if (mounted) {
       setState(() {
         _albums = albums;
+        _rawArtists = artists;
         _isLoading = false;
       });
     }
@@ -140,19 +148,79 @@ class _AlbumsViewState extends State<AlbumsView> {
     }
   }
 
+  List<ArtistChipItem> _getArtistChips(BuildContext context) {
+    final Map<String, ({String name, int songCount})> map = {};
+    for (final a in _rawArtists) {
+      final displayName = context.displayArtist(a.name);
+      final key = a.key;
+      final existing = map[key];
+      if (existing == null) {
+        map[key] = (name: displayName, songCount: a.trackCount);
+      } else {
+        map[key] =
+            (name: displayName, songCount: existing.songCount + a.trackCount);
+      }
+    }
+
+    final items = map.entries
+        .map((e) => ArtistChipItem(
+              key: e.key,
+              name: e.value.name,
+              songCount: e.value.songCount,
+            ))
+        .toList();
+
+    // Default order: songCount descending, then stable locale-aware name
+    items.sort((a, b) {
+      final cmp = b.songCount.compareTo(a.songCount);
+      if (cmp != 0) return cmp;
+      return compareLocaleAware(a.name, b.name);
+    });
+
+    final customOrder = widget.settingsStore.settings.albumsArtistChipsOrder;
+    if (customOrder.isEmpty) {
+      return items;
+    }
+
+    final Map<String, ArtistChipItem> byKey = {
+      for (final it in items) it.key: it,
+    };
+    final ordered = <ArtistChipItem>[];
+    for (final k in customOrder) {
+      final it = byKey.remove(k);
+      if (it != null) {
+        ordered.add(it);
+      }
+    }
+    ordered.addAll(byKey.values);
+    return ordered;
+  }
+
   List<AlbumSummary> _getSortedAlbums() {
-    final list = List<AlbumSummary>.from(
+    var list = List<AlbumSummary>.from(
       _searchQuery.isNotEmpty ? _searchResults : _albums,
     );
+
+    if (_selectedArtistKey != null) {
+      list = list.where((a) {
+        final artistName = a.displayArtist ?? a.albumArtist ?? '';
+        final key = TextNormalizer.normalize(artistName);
+        return key == _selectedArtistKey ||
+            artistName.toLowerCase().contains(_selectedArtistKey!.toLowerCase());
+      }).toList();
+    }
+
     final sortKey = widget.settingsStore.settings.albumSort;
     final isReversed = widget.settingsStore.settings.albumsSortReversed;
 
     switch (sortKey) {
       case 'title':
-        list.sort((a, b) => a.album.toLowerCase().compareTo(b.album.toLowerCase()));
+        list.sort((a, b) => compareLocaleAware(a.album, b.album));
       case 'artist':
-        list.sort((a, b) =>
-            (a.albumArtist ?? '').toLowerCase().compareTo((b.albumArtist ?? '').toLowerCase()));
+        list.sort((a, b) => compareLocaleAware(
+              a.displayArtist ?? a.albumArtist ?? '',
+              b.displayArtist ?? b.albumArtist ?? '',
+            ));
       case 'year':
         list.sort((a, b) => (b.year ?? 0).compareTo(a.year ?? 0));
       case 'recentlyAdded':
@@ -170,20 +238,33 @@ class _AlbumsViewState extends State<AlbumsView> {
 
   void _onSortChanged(String newSort) {
     widget.settingsStore.update((s) => s.copyWith(
-      albumSort: newSort,
-      albumsSortReversed: false,
-    ));
+          albumSort: newSort,
+          albumsSortReversed: false,
+        ));
     setState(() {});
   }
 
-  void _onSortDirectionToggle() {
-    final current = widget.settingsStore.settings.albumsSortReversed;
-    widget.settingsStore.update((s) => s.copyWith(albumsSortReversed: !current));
+  void _onSortDirectionChanged(SortDirection dir) {
+    widget.settingsStore.update((s) => s.copyWith(
+          albumsSortReversed: dir.isDescending,
+        ));
     setState(() {});
   }
 
   void _onViewModeChanged(String newMode) {
     widget.settingsStore.update((s) => s.copyWith(libraryViewMode: newMode));
+    setState(() {});
+  }
+
+  void _onChipsOrderChanged(List<String> newOrder) {
+    widget.settingsStore
+        .update((s) => s.copyWith(albumsArtistChipsOrder: newOrder));
+    setState(() {});
+  }
+
+  void _onChipsResetOrder() {
+    widget.settingsStore
+        .update((s) => s.copyWith(albumsArtistChipsOrder: const []));
     setState(() {});
   }
 
@@ -196,12 +277,16 @@ class _AlbumsViewState extends State<AlbumsView> {
     final sortedAlbums = _getSortedAlbums();
     final viewMode = widget.settingsStore.settings.libraryViewMode;
     final currentSort = widget.settingsStore.settings.albumSort;
+    final isReversed = widget.settingsStore.settings.albumsSortReversed;
+    final reduceMotion = widget.settingsStore.settings.reduceMotion;
+    final artistChips = _getArtistChips(context);
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // 1. Page Header
           LibraryHeader(
             title: context.t('nav.albums'),
             settingsStore: widget.settingsStore,
@@ -209,17 +294,54 @@ class _AlbumsViewState extends State<AlbumsView> {
             itemCountLabel: context.t('albums.count'),
             searchQuery: _searchQuery,
             onSearchChanged: _onSearchChanged,
-            sortOptions: const ['recentlyAdded', 'title', 'artist', 'year'],
-            currentSort: currentSort,
-            onSortChanged: _onSortChanged,
-            viewMode: viewMode,
-            onViewModeChanged: _onViewModeChanged,
-            isSortReversed: widget.settingsStore.settings.albumsSortReversed,
-            onSortDirectionToggle: _onSortDirectionToggle,
+            showControls: false,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 10),
+
+          // 2. LibraryViewControls (shape + sort dropdown + SortDirectionButton)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: LibraryViewControls(
+              allowedShapes: const ['square', 'wide', 'list'],
+              currentShape: viewMode,
+              onShapeChanged: _onViewModeChanged,
+              sortOptions: const ['recentlyAdded', 'title', 'artist', 'year'],
+              currentSort: currentSort,
+              onSortChanged: _onSortChanged,
+              sortDirection: SortDirection.fromReversed(isReversed),
+              onSortDirectionChanged: _onSortDirectionChanged,
+              sortDirectionButtonKey: const Key('albums_sort_direction'),
+              reduceMotion: reduceMotion,
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          // 3. Horizontal artist chips row
+          if (artistChips.isNotEmpty)
+            AlbumsArtistChips(
+              artists: artistChips,
+              selectedArtistKey: _selectedArtistKey,
+              onArtistSelected: (key) =>
+                  setState(() => _selectedArtistKey = key),
+              onOrderChanged: _onChipsOrderChanged,
+              onResetOrder: _onChipsResetOrder,
+              reduceMotion: reduceMotion,
+            ),
+          const SizedBox(height: 12),
+
+          // 4. Content (with cross-fade between shapes)
           Expanded(
-            child: _buildAlbumContent(sortedAlbums, viewMode, currentSort),
+            child: AnimatedSwitcher(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeOut,
+              child: KeyedSubtree(
+                key: ValueKey('albums_content_$viewMode'),
+                child: _buildAlbumContent(sortedAlbums, viewMode, currentSort),
+              ),
+            ),
           ),
         ],
       ),
@@ -619,8 +741,15 @@ class _AlbumCoverImage extends StatelessWidget {
       imageWidget = Image.file(
         file,
         fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        gaplessPlayback: true,
         cacheWidth: cacheSize * 2,
         cacheHeight: cacheSize * 2,
+        frameBuilder: (context, child, frame, wasSync) {
+          if (wasSync || frame != null) return child;
+          return _buildPlaceholder();
+        },
         errorBuilder: (_, _, _) => _buildPlaceholder(),
       );
     } else {
@@ -635,6 +764,8 @@ class _AlbumCoverImage extends StatelessWidget {
 
   Widget _buildPlaceholder() {
     return Container(
+      width: double.infinity,
+      height: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF22212C),
         borderRadius: BorderRadius.circular(borderRadius),
