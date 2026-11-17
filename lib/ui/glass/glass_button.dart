@@ -220,6 +220,9 @@ class GlassPillButton extends StatefulWidget {
   /// Optional leading icon preceding the label.
   final IconData? leadingIcon;
 
+  /// Optional trailing widget displayed after the label.
+  final Widget? trailing;
+
   /// Callback when pressed. If null, button renders disabled.
   final VoidCallback? onPressed;
 
@@ -243,6 +246,7 @@ class GlassPillButton extends StatefulWidget {
     super.key,
     required this.label,
     this.leadingIcon,
+    this.trailing,
     this.onPressed,
     this.variant = GlassButtonVariant.normal,
     this.size = GlassButtonSize.medium,
@@ -398,6 +402,10 @@ class _GlassPillButtonState extends State<GlassPillButton> {
                   maxLines: 1,
                 ),
               ),
+              if (widget.trailing != null) ...[
+                const SizedBox(width: 6.0),
+                widget.trailing!,
+              ],
             ],
           ),
         ),

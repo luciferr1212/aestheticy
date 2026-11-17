@@ -17,10 +17,22 @@ import '../../library/fake_library_repository.dart';
 
 class _AlbumTestRepository extends FakeLibraryRepository {
   List<AlbumSummary> albumsData = const [];
+  List<ArtistSummary> artistsData = const [];
+  Map<String, List<AlbumSummary>> albumsByArtistData = const {};
 
   @override
   Future<List<AlbumSummary>> listAlbums({int? limit, int? offset}) async {
     return albumsData;
+  }
+
+  @override
+  Future<List<ArtistSummary>> listArtists({int? limit, int? offset}) async {
+    return artistsData;
+  }
+
+  @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async {
+    return albumsByArtistData[artistKey] ?? [];
   }
 
   @override
@@ -495,6 +507,237 @@ void main() {
         expect(settingsStore.settings.albumSort, equals('artist'));
         expect(settingsStore.settings.albumsSortReversed, isFalse);
         await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+  });
+
+  group('AlbumsView Artist Filter Tests (S1)', () {
+    late Directory tempDir;
+    late _AlbumTestRepository repo;
+    late SettingsStore settingsStore;
+    late ArtistNameStore artistNameStore;
+    late AppNavigator navigator;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('aestheticy_albums_s1_');
+      repo = _AlbumTestRepository()
+        ..albumsData = const [
+          AlbumSummary(album: 'Sunburst', albumArtist: 'Aria', year: 2024, trackCount: 11),
+          AlbumSummary(album: 'Aurora', albumArtist: 'Aria', year: 2024, trackCount: 7),
+          AlbumSummary(album: 'Midnight Echoes', albumArtist: 'Zed', year: 2020, trackCount: 9),
+        ]
+        ..artistsData = const [
+          ArtistSummary(key: 'aria', name: 'Aria', trackCount: 18, albumCount: 2),
+          ArtistSummary(key: 'zed', name: 'Zed', trackCount: 9, albumCount: 1),
+          ArtistSummary(key: 'single_only', name: 'Single Only', trackCount: 3, albumCount: 0),
+        ]
+        ..albumsByArtistData = const {
+          'aria': [
+            AlbumSummary(album: 'Sunburst', albumArtist: 'Aria', year: 2024, trackCount: 11),
+            AlbumSummary(album: 'Aurora', albumArtist: 'Aria', year: 2024, trackCount: 7),
+          ],
+          'zed': [
+            AlbumSummary(album: 'Midnight Echoes', albumArtist: 'Zed', year: 2020, trackCount: 9),
+          ],
+          'single_only': [],
+        };
+
+      settingsStore = SettingsStore(
+        directory: tempDir,
+        initialSettings: const AppSettings(
+          language: 'en',
+          albumSort: 'title',
+          libraryViewMode: 'list',
+        ),
+      );
+      await settingsStore.init();
+      artistNameStore = ArtistNameStore(directory: tempDir);
+      await artistNameStore.init();
+      navigator = AppNavigator();
+    });
+
+    tearDown(() async {
+      settingsStore.dispose();
+      artistNameStore.dispose();
+      if (tempDir.existsSync()) {
+        try {
+          await tempDir.delete(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    Widget buildHarness() {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        home: SettingsScope(
+          store: settingsStore,
+          child: ArtistNameScope(
+            store: artistNameStore,
+            child: Scaffold(
+              body: AlbumsView(
+                repository: repo,
+                settingsStore: settingsStore,
+                navigator: navigator,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets(
+      'header count shows filtered count when artist chip is selected',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        // Initially 3 albums
+        expect(find.text('3 albums'), findsOneWidget);
+        expect(find.text('Sunburst'), findsOneWidget);
+        expect(find.text('Aurora'), findsOneWidget);
+        expect(find.text('Midnight Echoes'), findsOneWidget);
+
+        // Tap chip for Aria
+        await tester.tap(find.byKey(const Key('artist_chip_button_aria')));
+        await tester.pumpAndSettle();
+
+        // Filtered: 2 albums
+        expect(find.text('2 albums'), findsOneWidget);
+        expect(find.text('Sunburst'), findsOneWidget);
+        expect(find.text('Aurora'), findsOneWidget);
+        expect(find.text('Midnight Echoes'), findsNothing);
+
+        // Search on top of artist filter
+        await tester.enterText(find.byType(TextField), 'sun');
+        await tester.pumpAndSettle();
+
+        expect(find.text('1 albums'), findsOneWidget);
+        expect(find.text('Sunburst'), findsOneWidget);
+        expect(find.text('Aurora'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'artist with zero albums shows localized empty state with "Show all" button and never "No albums in library"',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        // Add artist to chips data
+        repo.artistsData = const [
+          ArtistSummary(key: 'aria', name: 'Aria', trackCount: 18, albumCount: 2),
+          ArtistSummary(key: 'zero_artist', name: 'Zero Artist', trackCount: 2, albumCount: 1),
+        ];
+        repo.albumsByArtistData = const {
+          'aria': [
+            AlbumSummary(album: 'Sunburst', albumArtist: 'Aria', year: 2024, trackCount: 11),
+          ],
+          'zero_artist': [],
+        };
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        expect(find.text('3 albums'), findsOneWidget);
+
+        // Tap Zero Artist chip
+        await tester.tap(find.byKey(const Key('artist_chip_button_zero_artist')));
+        await tester.pumpAndSettle();
+
+        // Must show localized empty state for artist
+        expect(find.text('No albums for this artist'), findsOneWidget);
+        expect(find.text('No albums in library'), findsNothing);
+        expect(find.byKey(const Key('albums_empty_show_all_button')), findsOneWidget);
+        expect(find.text('0 albums'), findsOneWidget);
+
+        // Tap Show all button
+        await tester.tap(find.byKey(const Key('albums_empty_show_all_button')));
+        await tester.pumpAndSettle();
+
+        // Restores full list
+        expect(find.text('3 albums'), findsOneWidget);
+        expect(find.text('Sunburst'), findsOneWidget);
+        expect(find.text('No albums for this artist'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'only artists with at least one album get a chip in the row (S2)',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        // Aria has 2 albums; Single Artist has 0 albums
+        repo.artistsData = const [
+          ArtistSummary(key: 'aria', name: 'Aria', trackCount: 18, albumCount: 2),
+          ArtistSummary(key: 'single_only', name: 'Single Only', trackCount: 5, albumCount: 0),
+        ];
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        // Aria appears
+        expect(find.byKey(const Key('artist_chip_button_aria')), findsOneWidget);
+
+        // Single Only does NOT get a chip in the row
+        expect(find.byKey(const Key('artist_chip_button_single_only')), findsNothing);
+
+        // But Single Only is available in All Artists dialog
+        await tester.tap(find.byKey(const Key('albums_artist_chips_all_artists')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('all_artists_item_single_only')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'albumsArtistChipsOrder reorder and reset persists to settingsStore (S2)',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        repo.artistsData = const [
+          ArtistSummary(key: 'aria', name: 'Aria', trackCount: 18, albumCount: 2),
+          ArtistSummary(key: 'zed', name: 'Zed', trackCount: 9, albumCount: 1),
+        ];
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        // Default order: aria, zed
+        expect(settingsStore.settings.albumsArtistChipsOrder, isEmpty);
+
+        // Reset order menu action
+        await tester.tap(find.byKey(const Key('albums_artist_chips_menu')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('albums_artist_chips_reset_order')));
+        await tester.pumpAndSettle();
+
+        expect(settingsStore.settings.albumsArtistChipsOrder, isEmpty);
       },
     );
   });

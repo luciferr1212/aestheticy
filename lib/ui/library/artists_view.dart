@@ -284,17 +284,17 @@ class _ArtistsViewState extends State<ArtistsView> {
       int cmp;
       switch (sortKey) {
         case 'mostSongs':
-          cmp = b.trackCount.compareTo(a.trackCount);
+          cmp = a.trackCount.compareTo(b.trackCount);
           if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
           break;
         case 'mostAlbums':
-          cmp = b.albumCount.compareTo(a.albumCount);
+          cmp = a.albumCount.compareTo(b.albumCount);
           if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
           break;
         case 'recentlyAdded':
           final aTime = a.addedAt?.millisecondsSinceEpoch ?? 0;
           final bTime = b.addedAt?.millisecondsSinceEpoch ?? 0;
-          cmp = bTime.compareTo(aTime);
+          cmp = aTime.compareTo(bTime);
           if (cmp == 0) cmp = compareLocaleAware(a.name, b.name);
           break;
         case 'name':
@@ -347,7 +347,11 @@ class _ArtistsViewState extends State<ArtistsView> {
             sortOptions: const ['name', 'mostSongs', 'mostAlbums', 'recentlyAdded'],
             currentSort: settings.artistsSort,
             onSortChanged: (newSort) {
-              widget.settingsStore.update((s) => s.copyWith(artistsSort: newSort));
+              final newReversed = SortDirection.defaultReversedFor(newSort);
+              widget.settingsStore.update((s) => s.copyWith(
+                    artistsSort: newSort,
+                    artistsSortReversed: newReversed,
+                  ));
             },
             sortDirection: SortDirection.fromReversed(settings.artistsSortReversed),
             onSortDirectionChanged: (newDir) {

@@ -126,26 +126,38 @@ abstract final class ReleaseKindClassifier {
     return ReleaseCategory.singles;
   }
 
-  /// Groups [tracks] by album title + album artist and maps each [ReleaseCategory] to its tracks.
-  static Map<ReleaseCategory, List<Track>> classifyTracks({
+  /// Classifies [tracks] into release categories and counts distinct releases per category.
+  static ReleaseClassification classify({
     required List<Track> tracks,
     required String artistName,
     String? artistKey,
   }) {
     final groups = <String, List<Track>>{};
     for (final track in tracks) {
-      final key =
-          '${track.album?.trim().toLowerCase() ?? ''}|${track.albumArtist?.trim().toLowerCase() ?? ''}';
+      final albumName = track.album?.trim() ?? '';
+      // Rule 5: Tracks without an album are treated as individual single releases.
+      final key = albumName.isEmpty
+          ? ':loose:${track.path}'
+          : '${albumName.toLowerCase()}|${track.albumArtist?.trim().toLowerCase() ?? ''}';
       groups.putIfAbsent(key, () => []).add(track);
     }
 
-    final result = <ReleaseCategory, List<Track>>{
+    final tracksMap = <ReleaseCategory, List<Track>>{
       ReleaseCategory.all: List.unmodifiable(tracks),
       ReleaseCategory.albums: [],
       ReleaseCategory.singles: [],
       ReleaseCategory.eps: [],
       ReleaseCategory.compilations: [],
       ReleaseCategory.appearsOn: [],
+    };
+
+    final releaseCounts = <ReleaseCategory, int>{
+      ReleaseCategory.all: 0,
+      ReleaseCategory.albums: 0,
+      ReleaseCategory.singles: 0,
+      ReleaseCategory.eps: 0,
+      ReleaseCategory.compilations: 0,
+      ReleaseCategory.appearsOn: 0,
     };
 
     for (final entry in groups.entries) {
@@ -158,9 +170,56 @@ abstract final class ReleaseKindClassifier {
         artistName: artistName,
         artistKey: artistKey,
       );
-      result[category]!.addAll(groupTracks);
+      tracksMap[category]!.addAll(groupTracks);
+      releaseCounts[category] = (releaseCounts[category] ?? 0) + 1;
     }
 
-    return result;
+    releaseCounts[ReleaseCategory.all] = groups.length;
+
+    return ReleaseClassification(
+      tracks: tracksMap,
+      releaseCounts: releaseCounts,
+    );
   }
+
+  /// Groups [tracks] by album title + album artist and maps each [ReleaseCategory] to its tracks.
+  static Map<ReleaseCategory, List<Track>> classifyTracks({
+    required List<Track> tracks,
+    required String artistName,
+    String? artistKey,
+  }) {
+    return classify(
+      tracks: tracks,
+      artistName: artistName,
+      artistKey: artistKey,
+    ).tracks;
+  }
+
+  /// Returns the release counts for each [ReleaseCategory].
+  static Map<ReleaseCategory, int> countReleases({
+    required List<Track> tracks,
+    required String artistName,
+    String? artistKey,
+  }) {
+    return classify(
+      tracks: tracks,
+      artistName: artistName,
+      artistKey: artistKey,
+    ).releaseCounts;
+  }
+}
+
+/// Result of classifying tracks into release categories, including track lists and release counts.
+class ReleaseClassification {
+  /// Map of [ReleaseCategory] to the list of tracks belonging to it.
+  final Map<ReleaseCategory, List<Track>> tracks;
+
+  /// Map of [ReleaseCategory] to the number of distinct releases (albums / singles).
+  final Map<ReleaseCategory, int> releaseCounts;
+
+  /// Creates a [ReleaseClassification].
+  const ReleaseClassification({
+    required this.tracks,
+    required this.releaseCounts,
+  });
 }

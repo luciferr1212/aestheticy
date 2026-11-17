@@ -39,6 +39,13 @@ abstract class LibraryRepository {
   /// Lists all derived albums with track counts and aggregated metadata.
   Future<List<AlbumSummary>> listAlbums({int? limit, int? offset});
 
+  /// Lists all derived albums containing at least one track linked to [artistKey].
+  ///
+  /// Uses the same matching rules as [tracksOfArtist] (artist key, aliases,
+  /// merge/split rules, translations). Track count on each album summary is the
+  /// full album track count.
+  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey);
+
   /// Lists all derived artists with album and track counts.
   Future<List<ArtistSummary>> listArtists({int? limit, int? offset});
 

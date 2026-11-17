@@ -85,6 +85,17 @@ class FakeLibraryRepository implements LibraryRepository {
   @override
   Future<List<AlbumSummary>> listAlbums({int? limit, int? offset}) async => [];
 
+  /// Optional hook for [listAlbumsByArtistKey].
+  List<AlbumSummary> Function(String artistKey)? onListAlbumsByArtistKey;
+
+  @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async {
+    if (onListAlbumsByArtistKey != null) {
+      return onListAlbumsByArtistKey!(artistKey);
+    }
+    return [];
+  }
+
   @override
   Future<List<ArtistSummary>> listArtists({int? limit, int? offset}) async => [];
 

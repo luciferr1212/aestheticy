@@ -621,13 +621,15 @@ class _EndControlsArea extends StatelessWidget {
         ),
         const SizedBox(width: 4),
 
-        // Equalizer (disabled)
+        // Equalizer
         GlassIconButton(
+          key: const Key('player_equalizer_button'),
           icon: Icons.equalizer,
           tooltip: context.t('common.equalizer'),
           semanticLabel: context.t('common.equalizer'),
           size: GlassButtonSize.small,
-          onPressed: null,
+          onPressed:
+              navigator != null ? () => navigator!.openAudioPanels() : null,
         ),
         const SizedBox(width: 4),
 

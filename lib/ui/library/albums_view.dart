@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
-import '../../library/text_normalizer.dart';
 import '../artist_names/artist_name_scope.dart';
+import '../glass/glass_button.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
@@ -104,6 +104,7 @@ class AlbumsView extends StatefulWidget {
 
 class _AlbumsViewState extends State<AlbumsView> {
   List<AlbumSummary> _albums = [];
+  List<AlbumSummary> _artistAlbums = [];
   List<AlbumSummary> _searchResults = [];
   List<ArtistSummary> _rawArtists = [];
   String? _selectedArtistKey;
@@ -119,12 +120,37 @@ class _AlbumsViewState extends State<AlbumsView> {
   Future<void> _loadAlbums() async {
     final albums = await widget.repository.listAlbums();
     final artists = await widget.repository.listArtists();
+    List<AlbumSummary> artistAlbums = [];
+    if (_selectedArtistKey != null) {
+      artistAlbums =
+          await widget.repository.listAlbumsByArtistKey(_selectedArtistKey!);
+    }
     if (mounted) {
       setState(() {
         _albums = albums;
         _rawArtists = artists;
+        _artistAlbums = artistAlbums;
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _onArtistSelected(String? key) async {
+    if (_selectedArtistKey == key) return;
+    setState(() {
+      _selectedArtistKey = key;
+    });
+    if (key == null) {
+      setState(() {
+        _artistAlbums = [];
+      });
+    } else {
+      final albums = await widget.repository.listAlbumsByArtistKey(key);
+      if (mounted && _selectedArtistKey == key) {
+        setState(() {
+          _artistAlbums = albums;
+        });
+      }
     }
   }
 
@@ -151,6 +177,7 @@ class _AlbumsViewState extends State<AlbumsView> {
   List<ArtistChipItem> _getArtistChips(BuildContext context) {
     final Map<String, ({String name, int songCount})> map = {};
     for (final a in _rawArtists) {
+      if (a.albumCount <= 0) continue;
       final displayName = context.displayArtist(a.name);
       final key = a.key;
       final existing = map[key];
@@ -196,19 +223,56 @@ class _AlbumsViewState extends State<AlbumsView> {
     return ordered;
   }
 
-  List<AlbumSummary> _getSortedAlbums() {
-    var list = List<AlbumSummary>.from(
-      _searchQuery.isNotEmpty ? _searchResults : _albums,
-    );
-
-    if (_selectedArtistKey != null) {
-      list = list.where((a) {
-        final artistName = a.displayArtist ?? a.albumArtist ?? '';
-        final key = TextNormalizer.normalize(artistName);
-        return key == _selectedArtistKey ||
-            artistName.toLowerCase().contains(_selectedArtistKey!.toLowerCase());
-      }).toList();
+  List<ArtistChipItem> _getAllArtists(BuildContext context) {
+    final Map<String, ({String name, int songCount})> map = {};
+    for (final a in _rawArtists) {
+      final displayName = context.displayArtist(a.name);
+      final key = a.key;
+      final existing = map[key];
+      if (existing == null) {
+        map[key] = (name: displayName, songCount: a.trackCount);
+      } else {
+        map[key] =
+            (name: displayName, songCount: existing.songCount + a.trackCount);
+      }
     }
+
+    final items = map.entries
+        .map((e) => ArtistChipItem(
+              key: e.key,
+              name: e.value.name,
+              songCount: e.value.songCount,
+            ))
+        .toList();
+
+    items.sort((a, b) {
+      final cmp = b.songCount.compareTo(a.songCount);
+      if (cmp != 0) return cmp;
+      return compareLocaleAware(a.name, b.name);
+    });
+
+    return items;
+  }
+
+  List<AlbumSummary> _getSortedAlbums() {
+    List<AlbumSummary> base;
+    if (_selectedArtistKey != null) {
+      base = _artistAlbums;
+      if (_searchQuery.isNotEmpty) {
+        final q = _searchQuery.toLowerCase();
+        base = base.where((a) {
+          final titleMatch = a.album.toLowerCase().contains(q);
+          final artistMatch = (a.displayArtist ?? a.albumArtist ?? '')
+              .toLowerCase()
+              .contains(q);
+          return titleMatch || artistMatch;
+        }).toList();
+      }
+    } else {
+      base = _searchQuery.isNotEmpty ? _searchResults : _albums;
+    }
+
+    final list = List<AlbumSummary>.from(base);
 
     final sortKey = widget.settingsStore.settings.albumSort;
     final isReversed = widget.settingsStore.settings.albumsSortReversed;
@@ -222,7 +286,9 @@ class _AlbumsViewState extends State<AlbumsView> {
               b.displayArtist ?? b.albumArtist ?? '',
             ));
       case 'year':
-        list.sort((a, b) => (b.year ?? 0).compareTo(a.year ?? 0));
+        list.sort((a, b) => isReversed
+            ? (b.year ?? 0).compareTo(a.year ?? 0)
+            : (a.year ?? 0).compareTo(b.year ?? 0));
       case 'recentlyAdded':
       default:
         // Keep natural repository order
@@ -239,7 +305,7 @@ class _AlbumsViewState extends State<AlbumsView> {
   void _onSortChanged(String newSort) {
     widget.settingsStore.update((s) => s.copyWith(
           albumSort: newSort,
-          albumsSortReversed: false,
+          albumsSortReversed: SortDirection.defaultReversedFor(newSort),
         ));
     setState(() {});
   }
@@ -280,6 +346,7 @@ class _AlbumsViewState extends State<AlbumsView> {
     final isReversed = widget.settingsStore.settings.albumsSortReversed;
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
     final artistChips = _getArtistChips(context);
+    final allArtists = _getAllArtists(context);
 
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 24, end: 24, top: 24),
@@ -320,9 +387,9 @@ class _AlbumsViewState extends State<AlbumsView> {
           if (artistChips.isNotEmpty)
             AlbumsArtistChips(
               artists: artistChips,
+              allArtists: allArtists,
               selectedArtistKey: _selectedArtistKey,
-              onArtistSelected: (key) =>
-                  setState(() => _selectedArtistKey = key),
+              onArtistSelected: _onArtistSelected,
               onOrderChanged: _onChipsOrderChanged,
               onResetOrder: _onChipsResetOrder,
               reduceMotion: reduceMotion,
@@ -417,9 +484,31 @@ class _AlbumsViewState extends State<AlbumsView> {
     String currentSort,
   ) {
     if (albums.isEmpty) {
+      if (_selectedArtistKey != null) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                context.t('albums.noAlbumsForArtist'),
+                style: AppTypography.body.copyWith(color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 12),
+              GlassPillButton(
+                key: const Key('albums_empty_show_all_button'),
+                label: context.t('albums.showAll'),
+                size: GlassButtonSize.small,
+                onPressed: () => _onArtistSelected(null),
+              ),
+            ],
+          ),
+        );
+      }
       return Center(
         child: Text(
-          _searchQuery.isNotEmpty ? 'No albums match "$_searchQuery"' : 'No albums in library',
+          _searchQuery.isNotEmpty
+              ? context.t('albums.noMatches', args: {'query': _searchQuery})
+              : context.t('albums.empty'),
           style: AppTypography.body.copyWith(color: AppColors.textMuted),
         ),
       );

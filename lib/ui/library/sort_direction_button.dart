@@ -28,6 +28,34 @@ enum SortDirection {
 
   /// Converts this direction to a boolean where true means descending (reversed).
   bool get isReversed => isDescending;
+
+  /// Returns the natural sort reversal state for a given sort key.
+  ///
+  /// 'mostPlayed', 'mostSongs', 'mostAlbums', 'recentlyAdded', and 'year'
+  /// default to descending (true).
+  /// 'title', 'album', 'name', 'artist', and 'duration'
+  /// default to ascending (false).
+  static bool defaultReversedFor(String sortKey) {
+    switch (sortKey) {
+      case 'mostPlayed':
+      case 'mostSongs':
+      case 'mostAlbums':
+      case 'recentlyAdded':
+      case 'year':
+        return true;
+      case 'title':
+      case 'album':
+      case 'name':
+      case 'artist':
+      case 'duration':
+      default:
+        return false;
+    }
+  }
+
+  /// Returns the natural sort direction for a given sort key.
+  static SortDirection defaultFor(String sortKey) =>
+      fromReversed(defaultReversedFor(sortKey));
 }
 
 /// Shared sort direction toggle button used across all library list pages.

@@ -1000,4 +1000,220 @@ void main() {
       expect(stopwatch.elapsedMilliseconds, lessThan(3000));
     });
   });
+
+  group('listAlbumsByArtistKey Tests (S1)', () {
+    late SqliteLibraryRepository repo;
+    late LibraryFolder folder;
+    final now = DateTime.now();
+
+    setUp(() async {
+      repo = SqliteLibraryRepository.inMemory();
+      folder = await repo.addFolder('C:\\Music\\S1');
+    });
+
+    tearDown(() async {
+      await repo.close();
+    });
+
+    test('1. Artist without album_artist tag returns album with full trackCount', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S1\\s1.mp3',
+          folderId: folder.id!,
+          title: 'Track 1',
+          artist: 'Solo Artist',
+          album: 'Solo Album',
+          albumArtist: null,
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\S1\\s2.mp3',
+          folderId: folder.id!,
+          title: 'Track 2',
+          artist: 'Solo Artist',
+          album: 'Solo Album',
+          albumArtist: null,
+          durationMs: 190000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final albums = await repo.listAlbumsByArtistKey('solo artist');
+      expect(albums.length, 1);
+      expect(albums.first.album, 'Solo Album');
+      expect(albums.first.trackCount, 2);
+      expect(albums.first.displayArtist, 'Solo Artist');
+    });
+
+    test('2. Collaboration track split into two artists returns album for both artists', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S1\\collab.mp3',
+          folderId: folder.id!,
+          title: 'Duet Hit',
+          artist: 'Alpha feat. Beta',
+          album: 'Collab Album',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final alphaAlbums = await repo.listAlbumsByArtistKey('alpha');
+      expect(alphaAlbums.length, 1);
+      expect(alphaAlbums.first.album, 'Collab Album');
+
+      final betaAlbums = await repo.listAlbumsByArtistKey('beta');
+      expect(betaAlbums.length, 1);
+      expect(betaAlbums.first.album, 'Collab Album');
+    });
+
+    test('3. Merged alias returns albums from both original and target artist', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S1\\ar.mp3',
+          folderId: folder.id!,
+          title: 'Habaytak',
+          artist: 'فيروز',
+          album: 'Album Arabic',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\S1\\en.mp3',
+          folderId: folder.id!,
+          title: 'Li Beirut',
+          artist: 'fairouz',
+          album: 'Album English',
+          durationMs: 190000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final artists = await repo.listArtists();
+      final arArtist = artists.firstWhere((a) => a.name == 'فيروز');
+      final enArtist = artists.firstWhere((a) => a.name == 'fairouz');
+      await repo.mergeArtists(arArtist.key, enArtist.key);
+
+      final fairouzAlbums = await repo.listAlbumsByArtistKey('fairouz');
+      expect(fairouzAlbums.length, 2);
+      expect(fairouzAlbums.map((a) => a.album).toSet(), {'Album Arabic', 'Album English'});
+
+      final arAlbums = await repo.listAlbumsByArtistKey(arArtist.key);
+      expect(arAlbums.length, 2);
+    });
+
+    test('4. Translated / diacritic normalized display name matches correctly', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S1\\amr.mp3',
+          folderId: folder.id!,
+          title: 'Tamally Maak',
+          artist: 'عَمْرُو دِيَاب',
+          album: 'Ayyamna',
+          durationMs: 210000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final albums = await repo.listAlbumsByArtistKey('عمرو دياب');
+      expect(albums.length, 1);
+      expect(albums.first.album, 'Ayyamna');
+    });
+
+    test('5. Various Artists album containing one track returns album with full track count', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S1\\va1.mp3',
+          folderId: folder.id!,
+          title: 'Song 1',
+          artist: 'Artist One',
+          album: 'Summer Hits',
+          albumArtist: 'Various Artists',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\S1\\va2.mp3',
+          folderId: folder.id!,
+          title: 'Song 2',
+          artist: 'Artist Two',
+          album: 'Summer Hits',
+          albumArtist: 'Various Artists',
+          durationMs: 190000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\S1\\va3.mp3',
+          folderId: folder.id!,
+          title: 'Song 3',
+          artist: 'Artist Three',
+          album: 'Summer Hits',
+          albumArtist: 'Various Artists',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final albums = await repo.listAlbumsByArtistKey('artist one');
+      expect(albums.length, 1);
+      expect(albums.first.album, 'Summer Hits');
+      expect(albums.first.albumArtist, 'Various Artists');
+      expect(albums.first.trackCount, 3);
+    });
+
+    test('6. Artist with only tracks without an album returns zero albums', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S1\\single1.mp3',
+          folderId: folder.id!,
+          title: 'Single 1',
+          artist: 'Single Artist',
+          album: null,
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\S1\\single2.mp3',
+          folderId: folder.id!,
+          title: 'Single 2',
+          artist: 'Single Artist',
+          album: '',
+          durationMs: 190000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final albums = await repo.listAlbumsByArtistKey('single artist');
+      expect(albums, isEmpty);
+    });
+  });
 }

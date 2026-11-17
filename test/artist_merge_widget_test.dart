@@ -63,6 +63,10 @@ class FailingMergeRepository implements LibraryRepository {
       _inner.listAlbums(limit: limit, offset: offset);
 
   @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) =>
+      _inner.listAlbumsByArtistKey(artistKey);
+
+  @override
   Future<List<ArtistSummary>> listArtists({int? limit, int? offset}) =>
       _inner.listArtists(limit: limit, offset: offset);
 

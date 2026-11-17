@@ -258,34 +258,76 @@ class SqliteLibraryRepository implements LibraryRepository {
     sql.write(';');
 
     final rows = _db.select(sql.toString(), params);
+    return rows.map(_mapAlbumRow).toList();
+  }
 
-    return rows.map((row) {
-      final rawAlbumArtist = row['album_artist'] as String?;
-      final distinctArtistCount = row['distinct_artist_count'] as int;
-      final singleArtist = row['single_artist'] as String?;
+  static AlbumSummary _mapAlbumRow(Row row) {
+    final rawAlbumArtist = row['album_artist'] as String?;
+    final distinctArtistCount = row['distinct_artist_count'] as int;
+    final singleArtist = row['single_artist'] as String?;
 
-      final String? displayArtist;
-      if (rawAlbumArtist != null && rawAlbumArtist.isNotEmpty) {
-        displayArtist = rawAlbumArtist;
-      } else if (distinctArtistCount == 1 &&
-          singleArtist != null &&
-          singleArtist.isNotEmpty) {
-        displayArtist = singleArtist;
-      } else if (distinctArtistCount > 1) {
-        displayArtist = 'various';
-      } else {
-        displayArtist = null;
-      }
+    final String? displayArtist;
+    if (rawAlbumArtist != null && rawAlbumArtist.isNotEmpty) {
+      displayArtist = rawAlbumArtist;
+    } else if (distinctArtistCount == 1 &&
+        singleArtist != null &&
+        singleArtist.isNotEmpty) {
+      displayArtist = singleArtist;
+    } else if (distinctArtistCount > 1) {
+      displayArtist = 'various';
+    } else {
+      displayArtist = null;
+    }
 
-      return AlbumSummary(
-        album: row['album_name'] as String,
-        albumArtist: rawAlbumArtist,
-        year: row['release_year'] as int?,
-        trackCount: row['track_count'] as int,
-        coverKey: row['cover_key'] as String?,
-        displayArtist: displayArtist,
-      );
-    }).toList();
+    return AlbumSummary(
+      album: row['album_name'] as String,
+      albumArtist: rawAlbumArtist,
+      year: row['release_year'] as int?,
+      trackCount: row['track_count'] as int,
+      coverKey: row['cover_key'] as String?,
+      displayArtist: displayArtist,
+    );
+  }
+
+  @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async {
+    final rows = _db.select(
+      '''
+      SELECT
+        COALESCE(NULLIF(t.album, ''), 'Unknown Album') AS album_name,
+        t.album_artist,
+        MAX(t.year) AS release_year,
+        COUNT(*) AS track_count,
+        MAX(t.cover_key) AS cover_key,
+        COUNT(DISTINCT NULLIF(t.artist, '')) AS distinct_artist_count,
+        MIN(NULLIF(t.artist, '')) AS single_artist
+      FROM tracks t
+      WHERE t.album IS NOT NULL AND TRIM(t.album) != ''
+        AND EXISTS (
+          SELECT 1
+          FROM tracks t2
+          JOIN track_artists ta ON ta.track_id = t2.id
+          WHERE COALESCE(NULLIF(t2.album, ''), 'Unknown Album') = COALESCE(NULLIF(t.album, ''), 'Unknown Album')
+            AND NULLIF(t2.album_artist, '') IS NULLIF(t.album_artist, '')
+            AND (
+              ta.artist_key = ?
+              OR ta.artist_key = normalize_text(?)
+              OR ta.artist_name = ?
+              OR ta.artist_key IN (
+                SELECT canonical_key FROM artist_aliases WHERE alias_key = ? OR alias_key = normalize_text(?)
+              )
+              OR ta.artist_key IN (
+                SELECT alias_key FROM artist_aliases WHERE canonical_key = ? OR canonical_key = normalize_text(?)
+              )
+            )
+        )
+      GROUP BY album_name, t.album_artist
+      ORDER BY album_name COLLATE NOCASE ASC;
+      ''',
+      [artistKey, artistKey, artistKey, artistKey, artistKey, artistKey, artistKey],
+    );
+
+    return rows.map(_mapAlbumRow).toList();
   }
 
   @override
@@ -310,7 +352,7 @@ class SqliteLibraryRepository implements LibraryRepository {
           ),
           'Unknown Artist'
         ) AS artist_name,
-        COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
+        COUNT(DISTINCT NULLIF(TRIM(t.album), '')) AS album_count,
         COUNT(DISTINCT t.id) AS track_count,
         MAX(t.added_at) AS latest_added_at
       FROM track_artists ta
@@ -496,33 +538,7 @@ class SqliteLibraryRepository implements LibraryRepository {
     params.add(effectiveLimit);
 
     final rows = _db.select(sql, params);
-    return rows.map((row) {
-      final rawAlbumArtist = row['album_artist'] as String?;
-      final distinctArtistCount = row['distinct_artist_count'] as int;
-      final singleArtist = row['single_artist'] as String?;
-
-      final String? displayArtist;
-      if (rawAlbumArtist != null && rawAlbumArtist.isNotEmpty) {
-        displayArtist = rawAlbumArtist;
-      } else if (distinctArtistCount == 1 &&
-          singleArtist != null &&
-          singleArtist.isNotEmpty) {
-        displayArtist = singleArtist;
-      } else if (distinctArtistCount > 1) {
-        displayArtist = 'various';
-      } else {
-        displayArtist = null;
-      }
-
-      return AlbumSummary(
-        album: row['album_name'] as String,
-        albumArtist: rawAlbumArtist,
-        year: row['release_year'] as int?,
-        trackCount: row['track_count'] as int,
-        coverKey: row['cover_key'] as String?,
-        displayArtist: displayArtist,
-      );
-    }).toList();
+    return rows.map(_mapAlbumRow).toList();
   }
 
   @override
@@ -561,7 +577,7 @@ class SqliteLibraryRepository implements LibraryRepository {
           ),
           'Unknown Artist'
         ) AS artist_name,
-        COUNT(DISTINCT COALESCE(NULLIF(t.album, ''), 'Unknown Album')) AS album_count,
+        COUNT(DISTINCT NULLIF(TRIM(t.album), '')) AS album_count,
         COUNT(DISTINCT t.id) AS track_count
       FROM track_artists ta
       JOIN tracks t ON t.id = ta.track_id

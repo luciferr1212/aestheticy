@@ -9,6 +9,8 @@ import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/ui/library/artist_detail_view.dart';
+import 'package:aestheticy/ui/library/library_view_controls.dart';
+import 'package:aestheticy/ui/library/sort_direction_button.dart';
 import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
@@ -40,8 +42,11 @@ void main() {
       await repository.close();
       await controller.dispose();
       await engine.dispose();
+      settingsStore.dispose();
       if (tempDir.existsSync()) {
-        await tempDir.delete(recursive: true);
+        try {
+          await tempDir.delete(recursive: true);
+        } catch (_) {}
       }
     });
 
@@ -375,6 +380,185 @@ void main() {
         // List builder builds only what fits in viewport
         expect(find.text('Massive Track 0'), findsOneWidget);
         expect(find.text('Massive Track 4999'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'LibraryViewControls takes natural width and aligns to start without stretching',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        setupDesktopViewport(tester);
+        final folder = await repository.addFolder('/music');
+        final now = DateTime.now();
+
+        await repository.upsertTracks([
+          Track(
+            path: '/music/w1.mp3',
+            folderId: folder.id!,
+            title: 'Song 1',
+            artist: 'Width Test Artist',
+            albumArtist: 'Width Test Artist',
+            album: 'Album 1',
+            durationMs: 180000,
+            mtimeMs: 1000,
+            sizeBytes: 1024,
+            addedAt: now,
+          ),
+        ]);
+        await repository.rebuildArtistLinks();
+
+        const artist = ArtistSummary(
+          name: 'Width Test Artist',
+          trackCount: 1,
+          albumCount: 1,
+        );
+
+        await tester.pumpWidget(buildTestWidget(artist: artist));
+        await tester.pumpAndSettle();
+
+        final controlsFinder = find.byType(LibraryViewControls);
+        expect(controlsFinder, findsOneWidget);
+
+        final controlsSize = tester.getSize(controlsFinder);
+        final detailSize = tester.getSize(find.byType(ArtistDetailView));
+
+        // Natural width is significantly less than full page width
+        expect(controlsSize.width, lessThan(detailSize.width * 0.6));
+      },
+    );
+
+    testWidgets(
+      'Category chips show track count for All and release count with track count for categories',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        setupDesktopViewport(tester);
+        final folder = await repository.addFolder('/music');
+        final now = DateTime.now();
+
+        // 8 tracks in Album, 1 Single -> 2 categories
+        final albumTracks = List.generate(
+          8,
+          (i) => Track(
+            path: '/music/album_track$i.mp3',
+            folderId: folder.id!,
+            title: 'Album Song $i',
+            artist: 'Counts Artist',
+            albumArtist: 'Counts Artist',
+            album: 'Big Album',
+            durationMs: 180000,
+            mtimeMs: 1000,
+            sizeBytes: 1024,
+            addedAt: now,
+          ),
+        );
+        final singleTrack = Track(
+          path: '/music/single.mp3',
+          folderId: folder.id!,
+          title: 'Lone Single',
+          artist: 'Counts Artist',
+          albumArtist: 'Counts Artist',
+          album: 'Lone Single - Single',
+          durationMs: 180000,
+          mtimeMs: 1000,
+          sizeBytes: 1024,
+          addedAt: now,
+        );
+
+        await repository.upsertTracks([...albumTracks, singleTrack]);
+        await repository.rebuildArtistLinks();
+
+        const artist = ArtistSummary(
+          name: 'Counts Artist',
+          trackCount: 9,
+          albumCount: 2,
+        );
+
+        await tester.pumpWidget(buildTestWidget(artist: artist));
+        await tester.pumpAndSettle();
+
+        // "All" chip shows track count
+        expect(find.textContaining('All - 9 tracks'), findsOneWidget);
+
+        // "Albums" chip shows 1 release and 8 tracks
+        expect(find.textContaining('Albums - 1 releases'), findsOneWidget);
+        expect(find.textContaining('- 8 tracks'), findsOneWidget);
+
+        // "Singles" chip shows 1 release and 1 track
+        expect(find.textContaining('Singles - 1 releases'), findsOneWidget);
+        expect(find.textContaining('- 1 tracks'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Sort defaults set natural directions on sort change',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        setupDesktopViewport(tester);
+        final folder = await repository.addFolder('/music');
+        final now = DateTime.now();
+
+        await repository.upsertTracks([
+          Track(
+            path: '/music/t1.mp3',
+            folderId: folder.id!,
+            title: 'Track A',
+            artist: 'Sort Artist',
+            album: 'Album A',
+            durationMs: 180000,
+            mtimeMs: 1000,
+            sizeBytes: 1024,
+            addedAt: now,
+          ),
+        ]);
+        await repository.rebuildArtistLinks();
+
+        const artist = ArtistSummary(
+          name: 'Sort Artist',
+          trackCount: 1,
+          albumCount: 1,
+        );
+
+        // Test SortDirection defaultReversedFor and defaultFor pure contracts
+        expect(SortDirection.defaultReversedFor('mostPlayed'), isTrue);
+        expect(SortDirection.defaultReversedFor('mostSongs'), isTrue);
+        expect(SortDirection.defaultReversedFor('mostAlbums'), isTrue);
+        expect(SortDirection.defaultReversedFor('recentlyAdded'), isTrue);
+        expect(SortDirection.defaultReversedFor('year'), isTrue);
+
+        expect(SortDirection.defaultReversedFor('title'), isFalse);
+        expect(SortDirection.defaultReversedFor('album'), isFalse);
+        expect(SortDirection.defaultReversedFor('name'), isFalse);
+        expect(SortDirection.defaultReversedFor('duration'), isFalse);
+        expect(SortDirection.defaultReversedFor('artist'), isFalse);
+
+        expect(SortDirection.defaultFor('mostPlayed'), equals(SortDirection.descending));
+        expect(SortDirection.defaultFor('title'), equals(SortDirection.ascending));
+
+        // Test in ArtistDetailView: selecting a sort key sets its natural direction
+        await tester.pumpWidget(buildTestWidget(artist: artist));
+        await tester.pumpAndSettle();
+
+        // Initial default: title ascending
+        expect(settingsStore.settings.artistDetailTrackSort, equals('title'));
+        expect(settingsStore.settings.artistDetailTrackSortReversed, isFalse);
+
+        // Open sort menu and select 'Most played' -> defaults to descending (true)
+        await tester.tap(find.byKey(const Key('sort_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Most played').last);
+        await tester.pumpAndSettle();
+
+        expect(settingsStore.settings.artistDetailTrackSort, equals('mostPlayed'));
+        expect(settingsStore.settings.artistDetailTrackSortReversed, isTrue);
+
+        // Open sort menu and select 'Duration' -> defaults to ascending (false)
+        await tester.tap(find.byKey(const Key('sort_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Duration').last);
+        await tester.pumpAndSettle();
+
+        expect(settingsStore.settings.artistDetailTrackSort, equals('duration'));
+        expect(settingsStore.settings.artistDetailTrackSortReversed, isFalse);
       },
     );
   });

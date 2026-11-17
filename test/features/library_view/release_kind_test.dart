@@ -237,5 +237,120 @@ void main() {
       expect(map[ReleaseCategory.eps]?.length, equals(10));
       expect(map[ReleaseCategory.albums]?.isEmpty, isTrue);
     });
+
+    test('S3: Classifier fixtures and release counts', () {
+      // 1. 12-track album = Albums
+      final album12Tracks = List.generate(
+        12,
+        (i) => makeTrack(
+          path: '/full_album_$i.mp3',
+          artist: mainArtist,
+          albumArtist: mainArtist,
+          album: 'Full 12 Album',
+          durationMs: 180000,
+        ),
+      );
+
+      // 2. 5 tracks = EPs
+      final ep5Tracks = List.generate(
+        5,
+        (i) => makeTrack(
+          path: '/ep_$i.mp3',
+          artist: mainArtist,
+          albumArtist: mainArtist,
+          album: 'Mini EP 5',
+          durationMs: 180000,
+        ),
+      );
+
+      // 3. 2 short tracks = Singles
+      final single2Tracks = [
+        makeTrack(
+          path: '/single_1.mp3',
+          artist: mainArtist,
+          albumArtist: mainArtist,
+          album: 'Two Short Tracks Single',
+          durationMs: 150000,
+        ),
+        makeTrack(
+          path: '/single_2.mp3',
+          artist: mainArtist,
+          albumArtist: mainArtist,
+          album: 'Two Short Tracks Single',
+          durationMs: 150000,
+        ),
+      ];
+
+      // 4. Various Artists = Compilations
+      final compilationTracks = [
+        makeTrack(
+          path: '/va_comp.mp3',
+          artist: mainArtist,
+          albumArtist: 'Various Artists',
+          album: 'Summer Hits 2026',
+          durationMs: 200000,
+        ),
+      ];
+
+      // 5. Featured only = Appears on
+      final featuredTracks = [
+        makeTrack(
+          path: '/featured.mp3',
+          artist: mainArtist,
+          albumArtist: 'Headlining Superstar',
+          album: 'Superstar LP',
+          durationMs: 210000,
+        ),
+      ];
+
+      // 6. No album = Singles
+      final noAlbumTracks = [
+        makeTrack(
+          path: '/loose_single.mp3',
+          artist: mainArtist,
+          albumArtist: null,
+          album: null,
+          durationMs: 180000,
+        ),
+      ];
+
+      final allTracks = [
+        ...album12Tracks,
+        ...ep5Tracks,
+        ...single2Tracks,
+        ...compilationTracks,
+        ...featuredTracks,
+        ...noAlbumTracks,
+      ];
+
+      final classification = ReleaseKindClassifier.classify(
+        tracks: allTracks,
+        artistName: mainArtist,
+      );
+
+      // Verify category classifications
+      expect(classification.tracks[ReleaseCategory.albums]?.length, equals(12));
+      expect(classification.tracks[ReleaseCategory.eps]?.length, equals(5));
+      expect(classification.tracks[ReleaseCategory.singles]?.length, equals(3)); // 2 short + 1 no album
+      expect(classification.tracks[ReleaseCategory.compilations]?.length, equals(1));
+      expect(classification.tracks[ReleaseCategory.appearsOn]?.length, equals(1));
+      expect(classification.tracks[ReleaseCategory.all]?.length, equals(22));
+
+      // Verify release counts
+      final counts = classification.releaseCounts;
+      expect(counts[ReleaseCategory.albums], equals(1));
+      expect(counts[ReleaseCategory.eps], equals(1));
+      expect(counts[ReleaseCategory.singles], equals(2));
+      expect(counts[ReleaseCategory.compilations], equals(1));
+      expect(counts[ReleaseCategory.appearsOn], equals(1));
+      expect(counts[ReleaseCategory.all], equals(6));
+
+      // Verify countReleases helper returns identical counts
+      final helperCounts = ReleaseKindClassifier.countReleases(
+        tracks: allTracks,
+        artistName: mainArtist,
+      );
+      expect(helperCounts, equals(counts));
+    });
   });
 }

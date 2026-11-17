@@ -126,11 +126,11 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
         case 'mostPlayed':
           final aCount = _playCounts[a.path] ?? 0;
           final bCount = _playCounts[b.path] ?? 0;
-          cmp = bCount.compareTo(aCount);
+          cmp = aCount.compareTo(bCount);
           if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
           break;
         case 'recentlyAdded':
-          cmp = b.addedAt.compareTo(a.addedAt);
+          cmp = a.addedAt.compareTo(b.addedAt);
           if (cmp == 0) cmp = compareLocaleAware(a.title ?? '', b.title ?? '');
           break;
         case 'duration':
@@ -184,11 +184,13 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
     final gradient = _gradientForArtist(widget.artist.name);
     final initial = _initialForArtist(widget.artist.name);
 
-    final classified = ReleaseKindClassifier.classifyTracks(
+    final classification = ReleaseKindClassifier.classify(
       tracks: _tracks,
       artistName: widget.artist.name,
       artistKey: widget.artist.key,
     );
+    final classified = classification.tracks;
+    final releaseCounts = classification.releaseCounts;
     final nonAllCategoriesWithTracks = [
       ReleaseCategory.albums,
       ReleaseCategory.singles,
@@ -337,7 +339,7 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                   GlassPillButton(
                     key: const Key('artist_category_chip_all'),
                     label:
-                        '${context.t('artist.category.all')} (${context.localizeDigitsText(_tracks.length.toString())})',
+                        '${context.t('artist.category.all')} - ${context.localizeDigitsText(_tracks.length.toString())} ${context.t('tracks.count')}',
                     variant: _selectedCategory == ReleaseCategory.all
                         ? GlassButtonVariant.selected
                         : GlassButtonVariant.normal,
@@ -350,7 +352,18 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
                     GlassPillButton(
                       key: Key('artist_category_chip_${cat.name}'),
                       label:
-                          '${context.t(_categoryLabelKey(cat))} (${context.localizeDigitsText((classified[cat]?.length ?? 0).toString())})',
+                          '${context.t(_categoryLabelKey(cat))} - ${context.localizeDigitsText((releaseCounts[cat] ?? 0).toString())} ${context.t('artist.category.releases')}',
+                      trailing: Text(
+                        '- ${context.localizeDigitsText((classified[cat]?.length ?? 0).toString())} ${context.t('tracks.count')}',
+                        style: AppTypography.caption.copyWith(
+                          fontSize: 11,
+                          color: _selectedCategory == cat
+                              ? AppColors.accent.withValues(alpha: 0.8)
+                              : AppColors.textMuted,
+                        ),
+                      ),
+                      semanticLabel:
+                          '${context.t(_categoryLabelKey(cat))} - ${context.localizeDigitsText((releaseCounts[cat] ?? 0).toString())} ${context.t('artist.category.releases')} - ${context.localizeDigitsText((classified[cat]?.length ?? 0).toString())} ${context.t('tracks.count')}',
                       variant: _selectedCategory == cat
                           ? GlassButtonVariant.selected
                           : GlassButtonVariant.normal,
@@ -364,21 +377,28 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
             ),
           ],
 
-          LibraryViewControls(
-            sortOptions: const ['title', 'album', 'mostPlayed', 'recentlyAdded', 'duration'],
-            currentSort: settings.artistDetailTrackSort,
-            onSortChanged: (newSort) {
-              widget.settingsStore.update(
-                (s) => s.copyWith(artistDetailTrackSort: newSort),
-              );
-            },
-            sortDirection: SortDirection.fromReversed(settings.artistDetailTrackSortReversed),
-            onSortDirectionChanged: (newDir) {
-              widget.settingsStore.update(
-                (s) => s.copyWith(artistDetailTrackSortReversed: newDir.isReversed),
-              );
-            },
-            reduceMotion: reduceMotion,
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: LibraryViewControls(
+              sortOptions: const ['title', 'album', 'mostPlayed', 'recentlyAdded', 'duration'],
+              currentSort: settings.artistDetailTrackSort,
+              onSortChanged: (newSort) {
+                final newReversed = SortDirection.defaultReversedFor(newSort);
+                widget.settingsStore.update(
+                  (s) => s.copyWith(
+                    artistDetailTrackSort: newSort,
+                    artistDetailTrackSortReversed: newReversed,
+                  ),
+                );
+              },
+              sortDirection: SortDirection.fromReversed(settings.artistDetailTrackSortReversed),
+              onSortDirectionChanged: (newDir) {
+                widget.settingsStore.update(
+                  (s) => s.copyWith(artistDetailTrackSortReversed: newDir.isReversed),
+                );
+              },
+              reduceMotion: reduceMotion,
+            ),
           ),
           const SizedBox(height: 12),
 
