@@ -270,3 +270,112 @@ class EngineCapabilities {
       'EngineCapabilities(exclusive: $exclusiveMode, gapless: $gapless, '
       'eq: $equalizer, replayGain: $replayGain)';
 }
+
+// ── Fade profile ────────────────────────────────────────────────────────
+
+/// Immutable configuration of volume fade durations used for smooth audio transitions.
+class FadeProfile {
+  /// Fade-in duration when starting playback from silence or after a switch.
+  final Duration startFadeIn;
+
+  /// Fade-in duration when resuming a paused track.
+  final Duration resumeFadeIn;
+
+  /// Fade-out duration before switching tracks while actively playing.
+  final Duration switchFadeOut;
+
+  /// Silent gap held at zero gain between outgoing fade-out and incoming open.
+  final Duration switchGap;
+
+  /// Fade-in duration after opening a new track during a switch while playing.
+  final Duration switchFadeIn;
+
+  /// Fade-out duration before pausing an actively playing track.
+  final Duration pauseFadeOut;
+
+  /// Fade-out duration before stopping an actively playing track.
+  final Duration stopFadeOut;
+
+  /// Creates an immutable [FadeProfile].
+  const FadeProfile({
+    required this.startFadeIn,
+    required this.resumeFadeIn,
+    required this.switchFadeOut,
+    required this.switchGap,
+    required this.switchFadeIn,
+    required this.pauseFadeOut,
+    required this.stopFadeOut,
+  });
+
+  /// All zero: instant transitions with no volume fades.
+  static const FadeProfile off = FadeProfile(
+    startFadeIn: Duration.zero,
+    resumeFadeIn: Duration.zero,
+    switchFadeOut: Duration.zero,
+    switchGap: Duration.zero,
+    switchFadeIn: Duration.zero,
+    pauseFadeOut: Duration.zero,
+    stopFadeOut: Duration.zero,
+  );
+
+  /// Standard gentle profile: 100-250ms curves.
+  static const FadeProfile soft = FadeProfile(
+    startFadeIn: Duration(milliseconds: 250),
+    resumeFadeIn: Duration(milliseconds: 120),
+    switchFadeOut: Duration(milliseconds: 120),
+    switchGap: Duration(milliseconds: 60),
+    switchFadeIn: Duration(milliseconds: 250),
+    pauseFadeOut: Duration(milliseconds: 100),
+    stopFadeOut: Duration(milliseconds: 100),
+  );
+
+  /// Extended smoothness: 260-450ms curves for seamless listening.
+  static const FadeProfile smooth = FadeProfile(
+    startFadeIn: Duration(milliseconds: 450),
+    resumeFadeIn: Duration(milliseconds: 280),
+    switchFadeOut: Duration(milliseconds: 300),
+    switchGap: Duration(milliseconds: 90),
+    switchFadeIn: Duration(milliseconds: 450),
+    pauseFadeOut: Duration(milliseconds: 260),
+    stopFadeOut: Duration(milliseconds: 260),
+  );
+
+  /// Whether all fade durations are zero (no volume ramps applied).
+  bool get isOff =>
+      startFadeIn == Duration.zero &&
+      resumeFadeIn == Duration.zero &&
+      switchFadeOut == Duration.zero &&
+      switchGap == Duration.zero &&
+      switchFadeIn == Duration.zero &&
+      pauseFadeOut == Duration.zero &&
+      stopFadeOut == Duration.zero;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FadeProfile &&
+          other.startFadeIn == startFadeIn &&
+          other.resumeFadeIn == resumeFadeIn &&
+          other.switchFadeOut == switchFadeOut &&
+          other.switchGap == switchGap &&
+          other.switchFadeIn == switchFadeIn &&
+          other.pauseFadeOut == pauseFadeOut &&
+          other.stopFadeOut == stopFadeOut;
+
+  @override
+  int get hashCode => Object.hash(
+        startFadeIn,
+        resumeFadeIn,
+        switchFadeOut,
+        switchGap,
+        switchFadeIn,
+        pauseFadeOut,
+        stopFadeOut,
+      );
+
+  @override
+  String toString() =>
+      'FadeProfile(startIn: $startFadeIn, resumeIn: $resumeFadeIn, '
+      'switchOut: $switchFadeOut, gap: $switchGap, switchIn: $switchFadeIn, '
+      'pauseOut: $pauseFadeOut, stopOut: $stopFadeOut)';
+}

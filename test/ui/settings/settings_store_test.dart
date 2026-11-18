@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
@@ -331,6 +332,71 @@ void main() {
       expect(controller.reduceMotion, isFalse);
 
       store.dispose();
+    });
+
+    test('transitionSmoothness defaults to smooth for new users', () {
+      const settings = AppSettings();
+      expect(settings.transitionSmoothness, equals('smooth'));
+      expect(settings.smoothTransitions, isTrue);
+      expect(settings.fadeProfile, equals(FadeProfile.smooth));
+    });
+
+    test('migration: old boolean smoothTransitions maps true to smooth and false to off', () {
+      final jsonTrue = <String, Object?>{
+        'smoothTransitions': true,
+      };
+      final migratedTrue = AppSettings.fromJson(jsonTrue);
+      expect(migratedTrue.transitionSmoothness, equals('smooth'));
+      expect(migratedTrue.smoothTransitions, isTrue);
+      expect(migratedTrue.fadeProfile, equals(FadeProfile.smooth));
+
+      final jsonFalse = <String, Object?>{
+        'smoothTransitions': false,
+      };
+      final migratedFalse = AppSettings.fromJson(jsonFalse);
+      expect(migratedFalse.transitionSmoothness, equals('off'));
+      expect(migratedFalse.smoothTransitions, isFalse);
+      expect(migratedFalse.fadeProfile, equals(FadeProfile.off));
+    });
+
+    test('transitionSmoothness tolerant fallback on invalid values', () {
+      final jsonUnknown = <String, Object?>{
+        'transitionSmoothness': 'hyper_speed',
+      };
+      final settingsUnknown = AppSettings.fromJson(jsonUnknown);
+      expect(settingsUnknown.transitionSmoothness, equals('smooth'));
+
+      const invalidConstructor = AppSettings(
+        transitionSmoothness: 'invalid_mode',
+      );
+      expect(invalidConstructor.transitionSmoothness, equals('smooth'));
+    });
+
+    test('round trip writes both transitionSmoothness and smoothTransitions keys', () async {
+      final store1 = SettingsStore(directory: tempDir);
+      await store1.init();
+      store1.update((s) => s.copyWith(transitionSmoothness: 'soft'));
+      await store1.flush();
+      store1.dispose();
+
+      final file = File(p.join(tempDir.path, 'ui_settings.json'));
+      final raw = jsonDecode(await file.readAsString()) as Map<String, Object?>;
+      expect(raw['transitionSmoothness'], equals('soft'));
+      expect(raw['smoothTransitions'], isTrue);
+
+      final store2 = SettingsStore(directory: tempDir);
+      await store2.init();
+      expect(store2.settings.transitionSmoothness, equals('soft'));
+      expect(store2.settings.smoothTransitions, isTrue);
+      expect(store2.settings.fadeProfile, equals(FadeProfile.soft));
+
+      store2.update((s) => s.copyWith(transitionSmoothness: 'off'));
+      await store2.flush();
+      final rawOff = jsonDecode(await file.readAsString()) as Map<String, Object?>;
+      expect(rawOff['transitionSmoothness'], equals('off'));
+      expect(rawOff['smoothTransitions'], isFalse);
+      expect(store2.settings.fadeProfile, equals(FadeProfile.off));
+      store2.dispose();
     });
   });
 }

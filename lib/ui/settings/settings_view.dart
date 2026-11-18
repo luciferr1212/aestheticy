@@ -819,13 +819,26 @@ class _SettingsViewState extends State<SettingsView> {
         _SettingsRow(
           title: context.t('settings.smoothTransitions'),
           description: context.t('settings.smoothTransitionsHint'),
-          control: Switch(
-            key: const Key('settings_smooth_transitions_switch'),
-            value: settings.smoothTransitions,
-            activeThumbColor: AppColors.accent,
+          control: _SegmentedControl<String>(
+            key: const Key('settings_transition_smoothness_segmented'),
+            value: settings.transitionSmoothness,
+            options: [
+              _SegmentedOption(
+                value: 'off',
+                label: context.t('settings.transitionSmoothness.off'),
+              ),
+              _SegmentedOption(
+                value: 'soft',
+                label: context.t('settings.transitionSmoothness.soft'),
+              ),
+              _SegmentedOption(
+                value: 'smooth',
+                label: context.t('settings.transitionSmoothness.smooth'),
+              ),
+            ],
             onChanged: (val) {
               widget.settingsStore
-                  .update((s) => s.copyWith(smoothTransitions: val));
+                  .update((s) => s.copyWith(transitionSmoothness: val));
             },
           ),
         ),

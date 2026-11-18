@@ -759,8 +759,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
   }
 
   void _syncPlaybackTransitionSetting() {
-    _playbackController.smoothTransitions =
-        _settingsStore.settings.smoothTransitions;
+    _playbackController.fadeProfile = _settingsStore.settings.fadeProfile;
   }
 
   @override

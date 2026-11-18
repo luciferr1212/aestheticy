@@ -708,18 +708,34 @@ void main() {
 
     final scrollFinder = find.byType(Scrollable).first;
 
-    // 1. Smooth transitions switch and Seek step selector
-    final smoothSwitch =
-        find.byKey(const Key('settings_smooth_transitions_switch'));
-    await tester.scrollUntilVisible(smoothSwitch, 100.0, scrollable: scrollFinder);
-    await tester.ensureVisible(smoothSwitch);
+    // 1. Smooth transitions selector and Seek step selector
+    final segmentedFinder =
+        find.byKey(const Key('settings_transition_smoothness_segmented'));
+    await tester.scrollUntilVisible(segmentedFinder, 100.0, scrollable: scrollFinder);
+    await tester.ensureVisible(segmentedFinder);
     await tester.pumpAndSettle();
 
+    expect(settingsStore.settings.transitionSmoothness, equals('smooth'));
     expect(settingsStore.settings.smoothTransitions, isTrue);
     expect(find.text('Smooth audio transitions'), findsOneWidget);
-    await tester.tap(smoothSwitch);
+
+    final offOption = find.descendant(
+      of: segmentedFinder,
+      matching: find.text('Off'),
+    );
+    await tester.tap(offOption);
     await tester.pumpAndSettle();
+    expect(settingsStore.settings.transitionSmoothness, equals('off'));
     expect(settingsStore.settings.smoothTransitions, isFalse);
+
+    final softOption = find.descendant(
+      of: segmentedFinder,
+      matching: find.text('Soft'),
+    );
+    await tester.tap(softOption);
+    await tester.pumpAndSettle();
+    expect(settingsStore.settings.transitionSmoothness, equals('soft'));
+    expect(settingsStore.settings.smoothTransitions, isTrue);
 
     final seek5s = find.text('5 seconds');
     await tester.scrollUntilVisible(seek5s, 100.0, scrollable: scrollFinder);
@@ -998,15 +1014,23 @@ void main() {
 
       // Smooth audio transitions remain active even when reduceMotion is true.
       expect(ctrl.smoothTransitions, isTrue);
+      expect(ctrl.fadeProfile, equals(FadeProfile.smooth));
 
       // Toggling setting updates PlaybackController live in both directions.
-      store.update((s) => s.copyWith(smoothTransitions: false));
+      store.update((s) => s.copyWith(transitionSmoothness: 'off'));
       await tester.pump();
       expect(ctrl.smoothTransitions, isFalse);
+      expect(ctrl.fadeProfile, equals(FadeProfile.off));
 
-      store.update((s) => s.copyWith(smoothTransitions: true));
+      store.update((s) => s.copyWith(transitionSmoothness: 'soft'));
       await tester.pump();
       expect(ctrl.smoothTransitions, isTrue);
+      expect(ctrl.fadeProfile, equals(FadeProfile.soft));
+
+      store.update((s) => s.copyWith(transitionSmoothness: 'smooth'));
+      await tester.pump();
+      expect(ctrl.smoothTransitions, isTrue);
+      expect(ctrl.fadeProfile, equals(FadeProfile.smooth));
 
       await tester.pump(const Duration(milliseconds: 500));
     },
@@ -1067,4 +1091,40 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'Playback transition smoothness selector builds in RTL without overflow',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      settingsStore.update((s) => s.copyWith(language: 'ar'));
+
+      await tester.pumpWidget(
+        _buildTestSettingsApp(
+          engine: engine,
+          repository: repository,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          audioSettingsApplier: audioSettingsApplier,
+          artistNameStore: artistNameStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scrollFinder = find.byType(Scrollable).first;
+      final arabicTitle = find.text('الانتقالات الصوتية السلسة');
+      await tester.scrollUntilVisible(arabicTitle, 100.0, scrollable: scrollFinder);
+      await tester.ensureVisible(arabicTitle);
+      await tester.pumpAndSettle();
+
+      expect(arabicTitle, findsOneWidget);
+      expect(find.text('إيقاف'), findsOneWidget);
+      expect(find.text('ناعم'), findsOneWidget);
+      expect(find.text('سلس'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
 }

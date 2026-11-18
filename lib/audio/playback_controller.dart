@@ -48,7 +48,7 @@ class PlaybackController {
   /// Timer cadence used for fade gain interpolation.
   final Duration fadeTickInterval;
 
-  bool _smoothTransitions = false;
+  FadeProfile _fadeProfile = FadeProfile.off;
 
   final List<StreamSubscription<dynamic>> _subs = [];
 
@@ -78,28 +78,44 @@ class PlaybackController {
 
   /// Creates a controller wired to [engine] and [queue].
   ///
-  /// Defaults [smoothTransitions] to `false` for zero-delay standalone callers;
-  /// app startup synchronizes this flag from `AppSettings.smoothTransitions`.
+  /// Defaults [fadeProfile] to [FadeProfile.off] for zero-delay standalone callers;
+  /// app startup synchronizes this flag from `AppSettings.fadeProfile`.
   /// Call [init] before using.
   PlaybackController({
     required this.engine,
     required this.queue,
+    FadeProfile? fadeProfile,
     bool smoothTransitions = false,
     this.fadeTickInterval = kDefaultFadeTickInterval,
   }) {
-    _smoothTransitions = smoothTransitions;
+    _fadeProfile = fadeProfile ??
+        (smoothTransitions ? FadeProfile.soft : FadeProfile.off);
+  }
+
+  /// The active transition fade profile.
+  FadeProfile get fadeProfile => _fadeProfile;
+
+  /// Updates the active transition fade profile.
+  ///
+  /// Takes effect on the next transition, never in the middle of a running fade.
+  set fadeProfile(FadeProfile value) {
+    if (_fadeProfile == value) return;
+    _fadeProfile = value;
   }
 
   /// Whether smooth volume fade transitions are applied on transport actions.
-  bool get smoothTransitions => _smoothTransitions;
+  bool get smoothTransitions => !_fadeProfile.isOff;
 
   /// Updates whether smooth volume fade transitions are enabled.
   ///
-  /// When disabled mid-fade, cancels active fade timers and restores full gain.
+  /// Thin adapter over [fadeProfile] for backward compatibility:
+  /// `true` maps to [FadeProfile.soft], `false` maps to [FadeProfile.off].
+  /// When setting to `false`, immediately cancels active fade waiters and restores unity gain.
   set smoothTransitions(bool value) {
-    if (_smoothTransitions == value) return;
-    _smoothTransitions = value;
-    if (!value) {
+    if (value) {
+      fadeProfile = FadeProfile.soft;
+    } else {
+      fadeProfile = FadeProfile.off;
       _abortPendingWaiters();
       unawaited(_setFadeGain(1.0));
     }
@@ -233,20 +249,25 @@ class PlaybackController {
     final source = queue.current;
     if (source == null) return Future<void>.value();
     final gen = _beginTransition();
-    return _enqueueTransition(() => _playOrResumeInternal(source, gen));
+    final profile = _fadeProfile;
+    return _enqueueTransition(() => _playOrResumeInternal(source, gen, profile));
   }
 
-  Future<void> _playOrResumeInternal(AudioSource source, int gen) async {
+  Future<void> _playOrResumeInternal(
+    AudioSource source,
+    int gen,
+    FadeProfile profile,
+  ) async {
     if (_isStale(gen)) return;
 
     // When paused on the same track, resume playback without re-opening.
     if (_currentState == PlaybackState.paused && _openedUri == source.uri) {
-      if (_smoothTransitions) {
+      if (!profile.isOff && profile.resumeFadeIn > Duration.zero) {
         await _setFadeGain(0.0);
         if (_isStale(gen)) return;
         await engine.play();
         if (_isStale(gen)) return;
-        _startFadeIn(kResumeFadeInDuration, gen);
+        _startFadeIn(profile.resumeFadeIn, gen, profile);
       } else {
         await _ensureUnityFadeGain();
         if (_isStale(gen)) return;
@@ -257,15 +278,15 @@ class PlaybackController {
 
     // Resuming while already playing the same track (e.g. aborted pause fade).
     if (_currentState == PlaybackState.playing && _openedUri == source.uri) {
-      if (_smoothTransitions) {
-        _startFadeIn(kResumeFadeInDuration, gen);
+      if (!profile.isOff && profile.resumeFadeIn > Duration.zero) {
+        _startFadeIn(profile.resumeFadeIn, gen, profile);
       } else {
         await _ensureUnityFadeGain();
       }
       return;
     }
 
-    await _switchTrackInternal(source, gen);
+    await _switchTrackInternal(source, gen, profile);
   }
 
   /// Toggles between play and pause.
@@ -297,7 +318,8 @@ class PlaybackController {
     final source = queue.current;
     if (source == null) return Future<void>.value();
     final gen = _beginTransition();
-    return _enqueueTransition(() => _switchTrackInternal(source, gen));
+    final profile = _fadeProfile;
+    return _enqueueTransition(() => _switchTrackInternal(source, gen, profile));
   }
 
   /// Replaces the queue with [sources], starts playback at [startIndex],
@@ -312,7 +334,10 @@ class PlaybackController {
     if (sources.isEmpty) {
       queue.clear();
       final gen = _beginTransition();
-      return _enqueueTransition(() => _stopInternal(gen, clearResume: false));
+      final profile = _fadeProfile;
+      return _enqueueTransition(
+        () => _stopInternal(gen, clearResume: false, profile: profile),
+      );
     }
 
     final survivingUserEntries = <QueueEntry>[];
@@ -343,13 +368,17 @@ class PlaybackController {
 
     notifyQueueChanged();
     final source = queue.current;
+    final gen = _beginTransition();
+    final profile = _fadeProfile;
     if (source == null) {
-      final gen = _beginTransition();
-      return _enqueueTransition(() => _stopInternal(gen, clearResume: false));
+      return _enqueueTransition(
+        () => _stopInternal(gen, clearResume: false, profile: profile),
+      );
     }
 
-    final gen = _beginTransition();
-    return _enqueueTransition(() => _switchTrackInternal(source, gen));
+    return _enqueueTransition(
+      () => _switchTrackInternal(source, gen, profile),
+    );
   }
 
   /// Removes upcoming items from the queue while keeping the currently
@@ -433,7 +462,10 @@ class PlaybackController {
       _armedResumeUri = null;
       notifyQueueChanged();
       final gen = _beginTransition();
-      await _enqueueTransition(() => _stopInternal(gen, clearResume: false));
+      final profile = _fadeProfile;
+      await _enqueueTransition(
+        () => _stopInternal(gen, clearResume: false, profile: profile),
+      );
       await _preloadNext();
       return;
     }
@@ -453,11 +485,12 @@ class PlaybackController {
     _armedResumeUri = null;
     final nextSource = queue.current;
     final gen = _beginTransition();
+    final profile = _fadeProfile;
     await _enqueueTransition(() async {
       if (nextSource != null) {
-        await _switchTrackInternal(nextSource, gen);
+        await _switchTrackInternal(nextSource, gen, profile);
       } else {
-        await _stopInternal(gen, clearResume: false);
+        await _stopInternal(gen, clearResume: false, profile: profile);
       }
     });
     await _preloadNext();
@@ -477,13 +510,16 @@ class PlaybackController {
   /// Pauses playback.
   Future<void> pause() {
     final gen = _beginTransition();
-    return _enqueueTransition(() => _pauseInternal(gen));
+    final profile = _fadeProfile;
+    return _enqueueTransition(() => _pauseInternal(gen, profile));
   }
 
-  Future<void> _pauseInternal(int gen) async {
+  Future<void> _pauseInternal(int gen, FadeProfile profile) async {
     if (_isStale(gen)) return;
-    if (_smoothTransitions && _currentState == PlaybackState.playing) {
-      await _rampOut(kPauseFadeOutDuration, gen);
+    if (!profile.isOff &&
+        profile.pauseFadeOut > Duration.zero &&
+        _currentState == PlaybackState.playing) {
+      await _rampOut(profile.pauseFadeOut, gen);
       if (_isStale(gen)) return;
       await engine.pause();
       if (!_disposed && !_isStale(gen)) {
@@ -502,20 +538,31 @@ class PlaybackController {
     _armedResumePosition = null;
     _armedResumeUri = null;
     final gen = _beginTransition();
-    return _enqueueTransition(() => _stopInternal(gen));
+    final profile = _fadeProfile;
+    return _enqueueTransition(() => _stopInternal(gen, profile: profile));
   }
 
-  Future<void> _stopInternal(int gen, {bool clearResume = true}) async {
+  Future<void> _stopInternal(
+    int gen, {
+    bool clearResume = true,
+    required FadeProfile profile,
+  }) async {
     if (_isStale(gen)) return;
     if (clearResume) {
       _armedResumePosition = null;
       _armedResumeUri = null;
     }
-    if (_smoothTransitions && _currentState == PlaybackState.playing) {
+    if (!profile.isOff &&
+        profile.stopFadeOut > Duration.zero &&
+        _currentState == PlaybackState.playing) {
+      final stopMax = Duration(
+        milliseconds:
+            (profile.stopFadeOut.inMilliseconds * 1.3).round().clamp(10, 10000),
+      );
       await _rampOut(
-        kStopFadeOutDuration,
+        profile.stopFadeOut,
         gen,
-        maxDuration: kStopMaxFadeOutDuration,
+        maxDuration: stopMax,
       );
       if (_isStale(gen)) return;
     }
@@ -536,10 +583,11 @@ class PlaybackController {
     _armedResumeUri = null;
     final next = queue.next();
     final gen = _beginTransition();
+    final profile = _fadeProfile;
     if (next == null) {
-      return _enqueueTransition(() => _stopInternal(gen));
+      return _enqueueTransition(() => _stopInternal(gen, profile: profile));
     }
-    return _enqueueTransition(() => _switchTrackInternal(next, gen));
+    return _enqueueTransition(() => _switchTrackInternal(next, gen, profile));
   }
 
   /// Skips to the previous track, or restarts current track if played past 3 seconds.
@@ -554,14 +602,15 @@ class PlaybackController {
     }
 
     final prev = queue.previous();
+    final gen = _beginTransition();
+    final profile = _fadeProfile;
     if (prev == null) {
       _currentPosition = Duration.zero;
       await engine.seek(Duration.zero);
       return;
     }
     _currentPosition = Duration.zero;
-    final gen = _beginTransition();
-    await _enqueueTransition(() => _switchTrackInternal(prev, gen));
+    await _enqueueTransition(() => _switchTrackInternal(prev, gen, profile));
   }
 
   // ── Internal transition & fade helpers ──────────────────────────────
@@ -709,12 +758,12 @@ class PlaybackController {
     await completer.future;
   }
 
-  void _startFadeIn(Duration duration, int gen) {
+  void _startFadeIn(Duration duration, int gen, FadeProfile profile) {
     if (_isStale(gen)) return;
     _fadeTimer?.cancel();
     _fadeTimer = null;
 
-    if (!_smoothTransitions || duration <= Duration.zero) {
+    if (profile.isOff || duration <= Duration.zero) {
       if ((_currentFadeGain - 1.0).abs() > 1e-6) {
         unawaited(_setFadeGain(1.0));
       }
@@ -733,7 +782,7 @@ class PlaybackController {
     var step = 0;
 
     _fadeTimer = Timer.periodic(fadeTickInterval, (timer) {
-      if (_isStale(gen) || !_smoothTransitions) {
+      if (_isStale(gen)) {
         timer.cancel();
         if (identical(_fadeTimer, timer)) {
           _fadeTimer = null;
@@ -753,16 +802,24 @@ class PlaybackController {
     });
   }
 
-  Future<void> _switchTrackInternal(AudioSource source, int gen) async {
+  Future<void> _switchTrackInternal(
+    AudioSource source,
+    int gen,
+    FadeProfile profile,
+  ) async {
     if (_isStale(gen)) return;
 
     final wasPlaying = _currentState == PlaybackState.playing;
-    if (_smoothTransitions) {
+    if (!profile.isOff) {
       if (wasPlaying) {
-        await _rampOut(kSwitchFadeOutDuration, gen);
-        if (_isStale(gen)) return;
-        await _waitGap(kSwitchGapDuration, gen);
-        if (_isStale(gen)) return;
+        if (profile.switchFadeOut > Duration.zero) {
+          await _rampOut(profile.switchFadeOut, gen);
+          if (_isStale(gen)) return;
+        }
+        if (profile.switchGap > Duration.zero) {
+          await _waitGap(profile.switchGap, gen);
+          if (_isStale(gen)) return;
+        }
       } else {
         await _setFadeGain(0.0);
         if (_isStale(gen)) return;
@@ -786,7 +843,9 @@ class PlaybackController {
     _checkArmedResume();
     _emitCurrent(source);
     unawaited(_preloadNext());
-    _startFadeIn(kStartFadeInDuration, gen);
+    final fadeInDuration =
+        wasPlaying ? profile.switchFadeIn : profile.startFadeIn;
+    _startFadeIn(fadeInDuration, gen, profile);
   }
 
   // ── Internal listeners ──────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../audio/audio_models.dart';
 import '../glass/glass_quality.dart';
 
 /// Immutable model representing persistent user preferences and UI configuration.
@@ -145,8 +146,24 @@ class AppSettings {
   /// Whether compact lyrics are displayed in the mini player window.
   final bool miniPlayerShowLyrics;
 
+  /// Transition smoothness mode for audio playback ('off', 'soft', or 'smooth').
+  final String transitionSmoothness;
+
   /// Whether smooth volume fade transitions are enabled around playback changes.
-  final bool smoothTransitions;
+  bool get smoothTransitions => transitionSmoothness != 'off';
+
+  /// Resolves the active [FadeProfile] for this configuration.
+  FadeProfile get fadeProfile {
+    switch (transitionSmoothness) {
+      case 'off':
+        return FadeProfile.off;
+      case 'soft':
+        return FadeProfile.soft;
+      case 'smooth':
+      default:
+        return FadeProfile.smooth;
+    }
+  }
 
   /// Creates an [AppSettings] instance with strict defaults.
   const AppSettings({
@@ -197,7 +214,8 @@ class AppSettings {
     this.miniPlayerLastX,
     this.miniPlayerLastY,
     this.miniPlayerShowLyrics = false,
-    this.smoothTransitions = true,
+    String transitionSmoothness = 'smooth',
+    bool? smoothTransitions,
   })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
@@ -216,7 +234,14 @@ class AppSettings {
         miniPlayerPosition = (miniPlayerPosition == 'topCenter' ||
                 miniPlayerPosition == 'remember')
             ? miniPlayerPosition
-            : 'bottomRight';
+            : 'bottomRight',
+        transitionSmoothness = (transitionSmoothness == 'off' ||
+                transitionSmoothness == 'soft' ||
+                transitionSmoothness == 'smooth')
+            ? (smoothTransitions == false && transitionSmoothness == 'smooth'
+                ? 'off'
+                : transitionSmoothness)
+            : 'smooth';
 
   static double _clampPreamp(num? value) {
     if (value == null) return 0.0;
@@ -281,8 +306,19 @@ class AppSettings {
     double? miniPlayerLastX,
     double? miniPlayerLastY,
     bool? miniPlayerShowLyrics,
+    String? transitionSmoothness,
     bool? smoothTransitions,
   }) {
+    String resolvedSmoothness = this.transitionSmoothness;
+    if (transitionSmoothness != null) {
+      resolvedSmoothness = (transitionSmoothness == 'off' ||
+              transitionSmoothness == 'soft' ||
+              transitionSmoothness == 'smooth')
+          ? transitionSmoothness
+          : 'smooth';
+    } else if (smoothTransitions != null) {
+      resolvedSmoothness = smoothTransitions ? 'smooth' : 'off';
+    }
     return AppSettings(
       language: language ?? this.language,
       userName: userName ?? this.userName,
@@ -341,7 +377,7 @@ class AppSettings {
       miniPlayerLastX: miniPlayerLastX ?? this.miniPlayerLastX,
       miniPlayerLastY: miniPlayerLastY ?? this.miniPlayerLastY,
       miniPlayerShowLyrics: miniPlayerShowLyrics ?? this.miniPlayerShowLyrics,
-      smoothTransitions: smoothTransitions ?? this.smoothTransitions,
+      transitionSmoothness: resolvedSmoothness,
     );
   }
 
@@ -395,6 +431,7 @@ class AppSettings {
       'miniPlayerLastX': miniPlayerLastX,
       'miniPlayerLastY': miniPlayerLastY,
       'miniPlayerShowLyrics': miniPlayerShowLyrics,
+      'transitionSmoothness': transitionSmoothness,
       'smoothTransitions': smoothTransitions,
     };
   }
@@ -662,9 +699,22 @@ class AppSettings {
     final rawMiniLyrics = json['miniPlayerShowLyrics'];
     final miniPlayerShowLyrics = rawMiniLyrics is bool ? rawMiniLyrics : false;
 
+    final rawTransitionSmoothness = json['transitionSmoothness'];
     final rawSmoothTransitions = json['smoothTransitions'];
-    final smoothTransitions =
-        rawSmoothTransitions is bool ? rawSmoothTransitions : true;
+    final String transitionSmoothness;
+    if (rawTransitionSmoothness is String) {
+      if (rawTransitionSmoothness == 'off' ||
+          rawTransitionSmoothness == 'soft' ||
+          rawTransitionSmoothness == 'smooth') {
+        transitionSmoothness = rawTransitionSmoothness;
+      } else {
+        transitionSmoothness = 'smooth';
+      }
+    } else if (rawSmoothTransitions is bool) {
+      transitionSmoothness = rawSmoothTransitions ? 'smooth' : 'off';
+    } else {
+      transitionSmoothness = 'smooth';
+    }
 
     return AppSettings(
       language: language,
@@ -714,7 +764,7 @@ class AppSettings {
       miniPlayerLastX: miniPlayerLastX,
       miniPlayerLastY: miniPlayerLastY,
       miniPlayerShowLyrics: miniPlayerShowLyrics,
-      smoothTransitions: smoothTransitions,
+      transitionSmoothness: transitionSmoothness,
     );
   }
 
@@ -771,7 +821,7 @@ class AppSettings {
           miniPlayerLastX == other.miniPlayerLastX &&
           miniPlayerLastY == other.miniPlayerLastY &&
           miniPlayerShowLyrics == other.miniPlayerShowLyrics &&
-          smoothTransitions == other.smoothTransitions;
+          transitionSmoothness == other.transitionSmoothness;
 
   @override
   int get hashCode => Object.hashAll([
@@ -822,6 +872,6 @@ class AppSettings {
         miniPlayerLastX,
         miniPlayerLastY,
         miniPlayerShowLyrics,
-        smoothTransitions,
+        transitionSmoothness,
       ]);
 }
