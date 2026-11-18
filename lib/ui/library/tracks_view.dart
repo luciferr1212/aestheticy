@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_models.dart';
@@ -9,7 +10,9 @@ import '../l10n/app_strings.dart';
 import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'library_header.dart';
+import 'library_placeholders.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 import 'track_table.dart';
@@ -26,12 +29,16 @@ class TracksView extends StatefulWidget {
   /// The settings store for persisting trackSort.
   final SettingsStore settingsStore;
 
+  /// Optional in-memory library data cache.
+  final LibraryDataCache? dataCache;
+
   /// Creates a [TracksView].
   const TracksView({
     super.key,
     required this.repository,
     required this.controller,
     required this.settingsStore,
+    this.dataCache,
   });
 
   @override
@@ -43,11 +50,63 @@ class _TracksViewState extends State<TracksView> {
   List<Track> _searchResults = [];
   String _searchQuery = '';
   bool _isLoading = true;
+  LibraryDataCache? _activeCache;
 
   @override
   void initState() {
     super.initState();
+    if (widget.dataCache?.tracks != null) {
+      _tracks = List.from(widget.dataCache!.tracks!);
+      final sortKey = widget.settingsStore.settings.trackSort;
+      final reversed = widget.settingsStore.settings.tracksSortReversed;
+      _applySort(_tracks, sortKey, reversed);
+      _isLoading = false;
+    }
     _loadTracks();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      if (_isLoading && cache != null && cache.tracks != null) {
+        _tracks = List.from(cache.tracks!);
+        final sortKey = widget.settingsStore.settings.trackSort;
+        final reversed = widget.settingsStore.settings.tracksSortReversed;
+        _applySort(_tracks, sortKey, reversed);
+        _isLoading = false;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    final cache = _activeCache;
+    if (cache == null) return;
+    if (cache.tracks != null) {
+      final sorted = List<Track>.from(cache.tracks!);
+      final sortKey = widget.settingsStore.settings.trackSort;
+      final reversed = widget.settingsStore.settings.tracksSortReversed;
+      _applySort(sorted, sortKey, reversed);
+      if (!listEquals(_tracks, sorted) || _isLoading) {
+        setState(() {
+          _tracks = sorted;
+          _isLoading = false;
+        });
+      }
+    } else {
+      _loadTracks();
+    }
   }
 
   TrackSort _resolveSort(String key) {
@@ -71,10 +130,13 @@ class _TracksViewState extends State<TracksView> {
     _applySort(tracks, sortKey, reversed);
 
     if (mounted) {
-      setState(() {
-        _tracks = tracks;
-        _isLoading = false;
-      });
+      final changed = !listEquals(_tracks, tracks) || _isLoading;
+      if (changed) {
+        setState(() {
+          _tracks = tracks;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -145,7 +207,7 @@ class _TracksViewState extends State<TracksView> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return TracksViewPlaceholder(settingsStore: widget.settingsStore);
     }
 
     final tracks = _searchQuery.isNotEmpty ? _searchResults : _tracks;

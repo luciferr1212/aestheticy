@@ -20,6 +20,7 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import '../theme/interactive_cursor.dart';
 
 /// Full-page interactive playback queue view.
 ///
@@ -701,6 +702,7 @@ class _QueueRowState extends State<_QueueRow> {
     final coverKey = extras?['coverKey'];
 
     return MouseRegion(
+      cursor: isHistory ? SystemMouseCursors.basic : SystemMouseCursors.click,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: GestureDetector(
@@ -729,6 +731,9 @@ class _QueueRowState extends State<_QueueRow> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
+                mouseCursor:
+                    isHistory ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                hoverColor: const Color(0x14FFFFFF),
                 borderRadius: BorderRadius.circular(AppSpacing.r10),
                 onTap: () {
                   widget.onSelect();
@@ -741,9 +746,11 @@ class _QueueRowState extends State<_QueueRow> {
                       // Drag handle
                       ReorderableDragStartListener(
                         index: widget.index,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(Icons.drag_indicator, size: 18, color: AppColors.textMuted),
+                        child: const DragHandleCursor(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4),
+                            child: Icon(Icons.drag_indicator, size: 18, color: AppColors.textMuted),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),

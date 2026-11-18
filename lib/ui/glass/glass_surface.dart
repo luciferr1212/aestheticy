@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
+import '../theme/dither_noise.dart';
 import 'glass_blur_budget.dart';
 import 'glass_quality.dart';
 import 'glass_scope.dart';
@@ -45,6 +46,9 @@ class GlassSurface extends StatefulWidget {
   /// Density mode affecting blur sigma and tint opacity.
   final GlassDensity density;
 
+  /// Whether to include the dither noise overlay on the glass inner fill (defaults to true).
+  final bool enableDither;
+
   /// Creates a [GlassSurface].
   const GlassSurface({
     super.key,
@@ -55,6 +59,7 @@ class GlassSurface extends StatefulWidget {
     this.width,
     this.height,
     this.density = GlassDensity.regular,
+    this.enableDither = true,
   });
 
   @override
@@ -160,7 +165,16 @@ class _GlassSurfaceState extends State<GlassSurface> {
                       stops: const [0.0, 0.18, 1.0],
                     ),
                   ),
-                  child: content,
+                  child: Stack(
+                    fit: StackFit.passthrough,
+                    children: [
+                      if (widget.enableDither)
+                        const Positioned.fill(
+                          child: DitherOverlay(),
+                        ),
+                      content,
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -198,7 +212,19 @@ class _GlassSurfaceState extends State<GlassSurface> {
                 ),
               ],
             ),
-            child: content,
+            child: ClipRRect(
+              borderRadius: rrect,
+              child: Stack(
+                fit: StackFit.passthrough,
+                children: [
+                  if (widget.enableDither)
+                    const Positioned.fill(
+                      child: DitherOverlay(),
+                    ),
+                  content,
+                ],
+              ),
+            ),
           ),
         );
       case GlassQuality.off:

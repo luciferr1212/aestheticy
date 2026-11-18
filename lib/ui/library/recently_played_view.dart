@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_models.dart';
@@ -12,6 +13,8 @@ import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
+import 'library_placeholders.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 import 'track_table.dart';
@@ -30,6 +33,9 @@ class RecentlyPlayedView extends StatefulWidget {
   /// User collections store.
   final UserCollections collections;
 
+  /// Optional in-memory library data cache.
+  final LibraryDataCache? dataCache;
+
   /// Creates a [RecentlyPlayedView].
   const RecentlyPlayedView({
     super.key,
@@ -37,6 +43,7 @@ class RecentlyPlayedView extends StatefulWidget {
     required this.controller,
     required this.settingsStore,
     required this.collections,
+    this.dataCache,
   });
 
   @override
@@ -46,20 +53,65 @@ class RecentlyPlayedView extends StatefulWidget {
 class _RecentlyPlayedViewState extends State<RecentlyPlayedView> {
   List<Track> _tracks = [];
   bool _isLoading = true;
+  LibraryDataCache? _activeCache;
 
   @override
   void initState() {
     super.initState();
+    if (widget.dataCache?.recentTracks != null) {
+      _tracks = List.from(widget.dataCache!.recentTracks!);
+      _isLoading = false;
+    }
     _loadRecentTracks();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      if (_isLoading && cache != null && cache.recentTracks != null) {
+        _tracks = List.from(cache.recentTracks!);
+        _isLoading = false;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    final cache = _activeCache;
+    if (cache == null) return;
+    if (cache.recentTracks != null) {
+      if (!listEquals(_tracks, cache.recentTracks) || _isLoading) {
+        setState(() {
+          _tracks = List.from(cache.recentTracks!);
+          _isLoading = false;
+        });
+      }
+    } else {
+      _loadRecentTracks();
+    }
   }
 
   Future<void> _loadRecentTracks() async {
     final tracks = await widget.repository.recentlyPlayedTracks(limit: 200);
     if (mounted) {
-      setState(() {
-        _tracks = tracks;
-        _isLoading = false;
-      });
+      final changed = !listEquals(_tracks, tracks) || _isLoading;
+      if (changed) {
+        setState(() {
+          _tracks = tracks;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -100,6 +152,10 @@ class _RecentlyPlayedViewState extends State<RecentlyPlayedView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return RecentlyPlayedViewPlaceholder(settingsStore: widget.settingsStore);
+    }
+
     final settings = widget.settingsStore.settings;
     final reduceMotion = settings.reduceMotion;
     final sortedTracks = _sortRecent(
@@ -163,9 +219,7 @@ class _RecentlyPlayedViewState extends State<RecentlyPlayedView> {
 
           // TrackTable
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : StreamBuilder<AudioSource?>(
+            child: StreamBuilder<AudioSource?>(
                     stream: widget.controller.currentStream,
                     initialData: widget.controller.queue.current,
                     builder: (context, trackSnapshot) {

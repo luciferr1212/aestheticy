@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../library/cover_cache.dart';
@@ -15,7 +16,9 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import 'albums_artist_chips.dart';
+import 'library_data_cache.dart';
 import 'library_header.dart';
+import 'library_placeholders.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 
@@ -90,12 +93,16 @@ class AlbumsView extends StatefulWidget {
   /// The application navigation coordinator.
   final AppNavigator navigator;
 
+  /// Optional in-memory library data cache.
+  final LibraryDataCache? dataCache;
+
   /// Creates an [AlbumsView].
   const AlbumsView({
     super.key,
     required this.repository,
     required this.settingsStore,
     required this.navigator,
+    this.dataCache,
   });
 
   @override
@@ -110,11 +117,58 @@ class _AlbumsViewState extends State<AlbumsView> {
   String? _selectedArtistKey;
   String _searchQuery = '';
   bool _isLoading = true;
+  LibraryDataCache? _activeCache;
 
   @override
   void initState() {
     super.initState();
+    if (widget.dataCache?.albums != null) {
+      _albums = widget.dataCache!.albums!;
+      _rawArtists = widget.dataCache!.artists ?? [];
+      _isLoading = false;
+    }
     _loadAlbums();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      if (_isLoading && cache != null && cache.albums != null) {
+        _albums = cache.albums!;
+        _rawArtists = cache.artists ?? [];
+        _isLoading = false;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    final cache = _activeCache;
+    if (cache == null) return;
+    if (_selectedArtistKey == null && cache.albums != null) {
+      if (!listEquals(_albums, cache.albums) ||
+          !listEquals(_rawArtists, cache.artists) ||
+          _isLoading) {
+        setState(() {
+          _albums = cache.albums!;
+          _rawArtists = cache.artists ?? _rawArtists;
+          _isLoading = false;
+        });
+      }
+    } else {
+      _loadAlbums();
+    }
   }
 
   Future<void> _loadAlbums() async {
@@ -126,12 +180,18 @@ class _AlbumsViewState extends State<AlbumsView> {
           await widget.repository.listAlbumsByArtistKey(_selectedArtistKey!);
     }
     if (mounted) {
-      setState(() {
-        _albums = albums;
-        _rawArtists = artists;
-        _artistAlbums = artistAlbums;
-        _isLoading = false;
-      });
+      final changed = !listEquals(_albums, albums) ||
+          !listEquals(_rawArtists, artists) ||
+          !listEquals(_artistAlbums, artistAlbums) ||
+          _isLoading;
+      if (changed) {
+        setState(() {
+          _albums = albums;
+          _rawArtists = artists;
+          _artistAlbums = artistAlbums;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -337,7 +397,7 @@ class _AlbumsViewState extends State<AlbumsView> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return AlbumsViewPlaceholder(settingsStore: widget.settingsStore);
     }
 
     final sortedAlbums = _getSortedAlbums();
@@ -600,6 +660,8 @@ class _SquareAlbumTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        hoverColor: const Color(0x14FFFFFF),
         borderRadius: BorderRadius.circular(AppSpacing.r12),
         onTap: onTap,
         child: Column(
@@ -657,6 +719,8 @@ class _WideAlbumTile extends StatelessWidget {
           border: Border.all(color: AppColors.borderSubtle),
         ),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
+          hoverColor: const Color(0x14FFFFFF),
           borderRadius: BorderRadius.circular(AppSpacing.r12),
           onTap: onTap,
           child: Padding(
@@ -735,6 +799,8 @@ class _ListAlbumTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        hoverColor: const Color(0x14FFFFFF),
         borderRadius: BorderRadius.circular(AppSpacing.r10),
         onTap: onTap,
         child: Padding(

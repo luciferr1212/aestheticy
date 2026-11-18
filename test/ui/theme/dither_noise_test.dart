@@ -1,4 +1,8 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aestheticy/audio/fake_audio_engine.dart';
@@ -8,7 +12,7 @@ import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
-import 'package:aestheticy/ui/library/albums_view.dart';
+import 'package:aestheticy/ui/glass/glass_surface.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
@@ -20,10 +24,10 @@ import 'package:aestheticy/ui/theme/app_theme.dart';
 import 'package:aestheticy/ui/theme/dither_noise.dart';
 
 void main() {
-  group('DitherNoise & DitherOverlay (HOTFIX 5H)', () {
-    test('(a) every tile pixel has r, g, b <= a and a <= 12, and the average alpha is under 6 of 255', () {
-      final bytes = generateDitherNoiseBytes(width: 128, height: 128, seed: 42);
-      expect(bytes.length, equals(128 * 128 * 4));
+  group('DitherNoise & DitherOverlay (S1 Banding Fix)', () {
+    test('(a) every tile pixel has r, g, b <= a and a <= $kDitherMaxAlpha, and is either white or black', () {
+      final bytes = generateDitherNoiseBytes(width: 256, height: 256, seed: 42);
+      expect(bytes.length, equals(256 * 256 * 4));
 
       var totalAlpha = 0;
       var hasWhite = false;
@@ -38,8 +42,7 @@ void main() {
         expect(r, lessThanOrEqualTo(a), reason: 'Premultiplied Red exceeds Alpha at index $i');
         expect(g, lessThanOrEqualTo(a), reason: 'Premultiplied Green exceeds Alpha at index $i');
         expect(b, lessThanOrEqualTo(a), reason: 'Premultiplied Blue exceeds Alpha at index $i');
-        expect(a, lessThanOrEqualTo(12), reason: 'Alpha exceeds 12 at index $i');
-        expect(a, lessThanOrEqualTo(10), reason: 'Alpha exceeds maximum 10 at index $i');
+        expect(a, lessThanOrEqualTo(kDitherMaxAlpha), reason: 'Alpha exceeds kDitherMaxAlpha at index $i');
 
         totalAlpha += a;
         if (a > 0 && r == a && g == a && b == a) {
@@ -48,25 +51,29 @@ void main() {
         if (a > 0 && r == 0 && g == 0 && b == 0) {
           hasBlack = true;
         }
+
+        final isWhite = (r == a && g == a && b == a);
+        final isBlack = (r == 0 && g == 0 && b == 0);
+        expect(isWhite || isBlack, isTrue, reason: 'Pixel must be either white or black at index $i');
       }
 
-      final avgAlpha = totalAlpha / (128 * 128);
-      expect(avgAlpha, lessThan(6.0), reason: 'Average alpha must be under 6 of 255');
+      final avgAlpha = totalAlpha / (256 * 256);
+      expect(avgAlpha, lessThanOrEqualTo(kDitherMaxAlpha.toDouble()), reason: 'Average alpha must be under kDitherMaxAlpha');
       expect(hasWhite, isTrue, reason: 'Tile must contain white dither specks (r = g = b = a)');
-      expect(hasBlack, isTrue, reason: 'Tile must contain black-ish dither specks (r = g = b = 0)');
+      expect(hasBlack, isTrue, reason: 'Tile must contain black dither specks (r = g = b = 0)');
     });
 
     test('(b) the tile is deterministic', () async {
-      final bytes1 = generateDitherNoiseBytes(width: 128, height: 128, seed: 42);
-      final bytes2 = generateDitherNoiseBytes(width: 128, height: 128, seed: 42);
+      final bytes1 = generateDitherNoiseBytes(width: 256, height: 256, seed: 42);
+      final bytes2 = generateDitherNoiseBytes(width: 256, height: 256, seed: 42);
       expect(bytes1, equals(bytes2));
 
       DitherNoise.resetForTest();
       final image1 = await DitherNoise.image;
       final image2 = await DitherNoise.image;
 
-      expect(image1.width, equals(128));
-      expect(image1.height, equals(128));
+      expect(image1.width, equals(256));
+      expect(image1.height, equals(256));
       expect(identical(image1, image2), isTrue);
     });
 
@@ -186,7 +193,7 @@ void main() {
               await tester.pumpWidget(buildApp());
               await tester.pumpAndSettle();
 
-              // 1. DitherOverlay exists exactly once, inside AmbientBackground
+              // 1. DitherOverlay exists inside AmbientBackground
               expect(
                 find.descendant(
                   of: find.byType(AmbientBackground),
@@ -196,25 +203,23 @@ void main() {
                 reason: 'DitherOverlay must be a descendant of AmbientBackground for ${destination.name}',
               );
 
-              // 2. No DitherOverlay inside page content (SettingsView, AlbumsView, etc.)
+              // 2. Any DitherOverlay inside page content (e.g. GlassSurface) is strictly behind content
               if (destination == AppDestination.settings) {
-                expect(
-                  find.descendant(
-                    of: find.byType(SettingsView),
-                    matching: find.byType(DitherOverlay),
-                  ),
-                  findsNothing,
-                  reason: 'SettingsView must not contain DitherOverlay',
+                final ditherInSettings = find.descendant(
+                  of: find.byType(SettingsView),
+                  matching: find.byType(DitherOverlay),
                 );
-              } else if (destination == AppDestination.albums) {
-                expect(
-                  find.descendant(
-                    of: find.byType(AlbumsView),
-                    matching: find.byType(DitherOverlay),
-                  ),
-                  findsNothing,
-                  reason: 'AlbumsView must not contain DitherOverlay',
-                );
+                for (final ditherElement in ditherInSettings.evaluate()) {
+                  final parentStack = find.ancestor(
+                    of: find.byWidget(ditherElement.widget),
+                    matching: find.byType(Stack),
+                  ).first;
+                  final stackWidget = tester.widget<Stack>(parentStack);
+                  final ditherPos = stackWidget.children.indexWhere(
+                    (w) => w is Positioned && w.child is DitherOverlay,
+                  );
+                  expect(ditherPos, equals(0), reason: 'DitherOverlay must be behind content in z-order');
+                }
               }
 
               // 3. AmbientBackground is at index 0 of the Scaffold Stack, and content comes after it in z-order
@@ -277,5 +282,132 @@ void main() {
         );
       });
     }
+
+    testWidgets(
+      'gradient banding test: longest run of identical color values is clearly shorter with dither than without it',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        // Preload dither image tile
+        await tester.runAsync(() async {
+          await DitherNoise.image;
+        });
+
+        int longestRun(ByteData data, int width, int y) {
+          final pixels = data.buffer.asUint32List(data.offsetInBytes, width * width);
+          final start = y * width;
+          var maxRun = 1;
+          var curRun = 1;
+          for (var x = 1; x < width; x++) {
+            if (pixels[start + x] == pixels[start + x - 1]) {
+              curRun++;
+              if (curRun > maxRun) maxRun = curRun;
+            } else {
+              curRun = 1;
+            }
+          }
+          return maxRun;
+        }
+
+        // 1. Render ambient background and GlassSurface fill without dither
+        final noDitherKey = GlobalKey();
+        await tester.pumpWidget(
+          GlassScope(
+            controller: GlassController(quality: GlassQuality.light),
+            child: Directionality(
+              textDirection: TextDirection.ltr,
+              child: RepaintBoundary(
+                key: noDitherKey,
+                child: const SizedBox(
+                  width: 256,
+                  height: 256,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: AmbientBackground(enableDither: false),
+                      ),
+                      Positioned(
+                        left: 20,
+                        right: 20,
+                        top: 20,
+                        bottom: 20,
+                        child: GlassSurface(
+                          borderRadius: 16,
+                          enableDither: false,
+                          child: SizedBox.expand(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final noDitherBoundary = tester.renderObject(find.byKey(noDitherKey)) as RenderRepaintBoundary;
+        final ui.Image imgNoDither = await tester.runAsync(() async {
+          return await noDitherBoundary.toImage(pixelRatio: 1.0);
+        }) as ui.Image;
+        final ByteData bdNoDither = await tester.runAsync(() async {
+          return await imgNoDither.toByteData(format: ui.ImageByteFormat.rawRgba);
+        }) as ByteData;
+
+        // 2. Render ambient background and GlassSurface fill with dither
+        final withDitherKey = GlobalKey();
+        await tester.pumpWidget(
+          GlassScope(
+            controller: GlassController(quality: GlassQuality.light),
+            child: Directionality(
+              textDirection: TextDirection.ltr,
+              child: RepaintBoundary(
+                key: withDitherKey,
+                child: const SizedBox(
+                  width: 256,
+                  height: 256,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: AmbientBackground(enableDither: true),
+                      ),
+                      Positioned(
+                        left: 20,
+                        right: 20,
+                        top: 20,
+                        bottom: 20,
+                        child: GlassSurface(
+                          borderRadius: 16,
+                          enableDither: true,
+                          child: SizedBox.expand(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final withDitherBoundary = tester.renderObject(find.byKey(withDitherKey)) as RenderRepaintBoundary;
+        final ui.Image imgWithDither = await tester.runAsync(() async {
+          return await withDitherBoundary.toImage(pixelRatio: 1.0);
+        }) as ui.Image;
+        final ByteData bdWithDither = await tester.runAsync(() async {
+          return await imgWithDither.toByteData(format: ui.ImageByteFormat.rawRgba);
+        }) as ByteData;
+
+        // Scan row y = 128 through ambient background and GlassSurface fill
+        final noDitherRun = longestRun(bdNoDither, 256, 128);
+        final withDitherRun = longestRun(bdWithDither, 256, 128);
+
+        expect(
+          withDitherRun,
+          lessThan(noDitherRun),
+          reason: 'Run with dither ($withDitherRun) must be clearly shorter than without dither ($noDitherRun)',
+        );
+      },
+    );
   });
 }

@@ -9,35 +9,45 @@ import '../glass/glass_quality.dart';
 import '../glass/glass_scope.dart';
 import '../settings/settings_scope.dart';
 
-/// Generates deterministic grayscale premultiplied RGBA noise bytes (~3% average opacity).
+/// Maximum alpha value (0..255) for the deterministic dither noise tile.
+///
+/// Alpha is bounded to [kDitherMaxAlpha] (16 / 255 ≈ 6.3% maximum opacity)
+/// to break 8-bit quantization steps in dark gradients without introducing
+/// visible gray washing or grainy noise artifacts.
+const int kDitherMaxAlpha = 16;
+
+/// Generates deterministic zero-mean premultiplied RGBA noise bytes.
 ///
 /// In premultiplied RGBA, color channels must never exceed alpha.
-/// Alpha is capped at 10 (max ~3.9% opacity), with an average alpha under 6 of 255.
+/// Each pixel is either white (r=g=b=a) or black (r=g=b=0) with alpha
+/// between 0 and [kDitherMaxAlpha], giving a zero-mean perturbation that
+/// breaks 8-bit color banding.
 Uint8List generateDitherNoiseBytes({
-  int width = 128,
-  int height = 128,
+  int width = 256,
+  int height = 256,
   int seed = 42,
 }) {
   final random = math.Random(seed);
   final totalBytes = width * height * 4;
   final bytes = Uint8List(totalBytes);
   for (var i = 0; i < totalBytes; i += 4) {
-    // Valid premultiplied alpha: max alpha <= 10, average under 6
-    final a = random.nextInt(11); // 0..10 (average ~5.0)
-    // Premultiplied grayscale: 0 <= v <= a (white when v == a, black when v == 0)
-    final v = a == 0 ? 0 : random.nextInt(a + 1);
+    // Random premultiplied alpha: 0 <= a <= kDitherMaxAlpha
+    final a = random.nextInt(kDitherMaxAlpha + 1);
+    // Either white (v == a) or black (v == 0) for zero-mean noise
+    final isWhite = random.nextBool();
+    final v = isWhite ? a : 0;
     bytes[i] = v; // Red <= a
     bytes[i + 1] = v; // Green <= a
     bytes[i + 2] = v; // Blue <= a
-    bytes[i + 3] = a; // Alpha <= 10
+    bytes[i + 3] = a; // Alpha <= kDitherMaxAlpha
   }
   return bytes;
 }
 
 /// Asynchronously decodes deterministic dither noise bytes into a [ui.Image] tile.
 Future<ui.Image> createDitherNoiseImage({
-  int width = 128,
-  int height = 128,
+  int width = 256,
+  int height = 256,
   int seed = 42,
 }) {
   final completer = Completer<ui.Image>();
@@ -165,6 +175,9 @@ class _DitherOverlayState extends State<DitherOverlay> {
 
     final image = DitherNoise.currentImage;
     if (image == null) {
+      DitherNoise.image.then((_) {
+        if (mounted) setState(() {});
+      });
       return const SizedBox.shrink();
     }
 

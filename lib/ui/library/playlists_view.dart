@@ -370,6 +370,8 @@ class _PlaylistWideCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      hoverColor: const Color(0x14FFFFFF),
       borderRadius: BorderRadius.circular(AppSpacing.r12),
       onTap: onTap,
       child: Container(
@@ -453,6 +455,8 @@ class _PlaylistListRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      hoverColor: const Color(0x14FFFFFF),
       borderRadius: BorderRadius.circular(AppSpacing.r10),
       onTap: onTap,
       child: Container(
@@ -530,6 +534,8 @@ class _PlaylistCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      hoverColor: const Color(0x14FFFFFF),
       borderRadius: BorderRadius.circular(AppSpacing.r12),
       onTap: onTap,
       child: Container(

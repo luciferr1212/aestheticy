@@ -255,7 +255,7 @@ All library screens consume the existing `LibraryRepository` and `ScanService` i
 
 ### Full Screen View (`FullScreenView`)
 - **Immersive Window Fill:** Completely fills the application window; hides sidebar and bottom bar, freeing blur budget slots.
-- **Ambient Animated Blobs:** 3 large drifting color blobs driven by extracted `CoverPalette` and painted by `_BlobPainter` with `MaskFilter.blur(120-130)`. Throttled to ~30 fps and observed by `WidgetsBindingObserver` to pause when minimized or out of focus.
+- **Ambient Animated Blobs:** 3 large drifting color blobs driven by extracted `CoverPalette` and painted by `_BlobPainter` with smooth `RadialGradient` falloff without per-frame `MaskFilter`. Throttled to ~30 fps and observed by `WidgetsBindingObserver` to pause when minimized or out of focus.
 - **Floating Glass Shapes:** 2 clear decorative `GlassSurface` panels (2 blur slots) drifting across the background, toggled on/off via top bar button and persisted in `AppSettings.fullScreenGlassShapes`.
 - **Slender Progress Line:** 2dp high progress line spanning the entire bottom edge with hover time labels.
 - **Auto-Fading Top Controls:** Top bar with "by mido" credit, glass shapes toggle, and exit button fades out after 3 seconds of mouse inactivity, reappearing on mouse motion. Keyboard navigation supports `Space` (toggle play/pause), `ArrowLeft`/`ArrowRight` (seek -5s/+5s), and `Esc` (exit to previous view).

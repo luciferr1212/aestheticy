@@ -426,6 +426,8 @@ class _AllArtistsDialogState extends State<_AllArtistsDialog> {
                           final isSelected = widget.selectedArtistKey == artist.key;
                           return InkWell(
                             key: Key('all_artists_item_${artist.key}'),
+                            mouseCursor: SystemMouseCursors.click,
+                            hoverColor: const Color(0x14FFFFFF),
                             borderRadius: BorderRadius.circular(AppSpacing.r10),
                             onTap: () => widget.onArtistSelected(artist.key),
                             child: Container(

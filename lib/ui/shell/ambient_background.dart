@@ -10,14 +10,21 @@ import '../theme/dither_noise.dart';
 ///
 /// Adapts live to active [GlassQuality] tier:
 /// * [GlassQuality.full]: static radial gradient + dither noise overlay.
-/// * [GlassQuality.light]: cheap static radial gradient, no dither.
+/// * [GlassQuality.light]: cheap static radial gradient + dither noise overlay.
 /// * [GlassQuality.off]: flat opaque surface, no gradients, no dither, no blur.
 class AmbientBackground extends StatelessWidget {
   /// Optional settings store for direct quality inspection in tests or shell.
   final SettingsStore? settingsStore;
 
+  /// Whether to include the dither noise overlay (defaults to true).
+  final bool enableDither;
+
   /// Creates an [AmbientBackground].
-  const AmbientBackground({super.key, this.settingsStore});
+  const AmbientBackground({
+    super.key,
+    this.settingsStore,
+    this.enableDither = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -28,16 +35,17 @@ class AmbientBackground extends StatelessWidget {
       return const ColoredBox(color: AppColors.base);
     }
 
-    return const Stack(
+    return Stack(
+      alignment: Alignment.center,
       fit: StackFit.expand,
       children: [
-        RepaintBoundary(
+        const RepaintBoundary(
           child: CustomPaint(
             painter: _AmbientBackgroundPainter(),
             size: Size.infinite,
           ),
         ),
-        DitherOverlay(),
+        if (enableDither) const DitherOverlay(),
       ],
     );
   }

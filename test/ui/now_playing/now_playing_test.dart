@@ -9,6 +9,7 @@ import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
+import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/features/collections/user_collections.dart';
@@ -434,6 +435,47 @@ void main() {
         await tester.tap(find.byKey(const Key('rating_star_4')));
         await tester.pumpAndSettle();
         expect(collections.ratingOf('track1.flac'), 0);
+      },
+    );
+
+    testWidgets(
+      'S1: Cover art in NowPlayingView has cacheWidth 1024 and gaplessPlayback true',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        setupDesktopViewport(tester);
+        final tempDir = Directory.systemTemp.createTempSync('np_cover_test');
+        addTearDown(() {
+          CoverCache.setCustomDirectory(null);
+          try {
+            tempDir.deleteSync(recursive: true);
+          } catch (_) {}
+        });
+        CoverCache.setCustomDirectory(tempDir.path);
+        final coverKey = CoverCache.saveCoverSync(
+          album: 'Album One',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        );
+
+        final sourceWithCover = AudioSource(
+          'track1.flac',
+          extras: {
+            'title': 'Track One',
+            'artist': 'Artist One',
+            'coverKey': coverKey,
+          },
+        );
+        await controller.playQueue([sourceWithCover], startIndex: 0);
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        final imageFinder = find.byType(Image);
+        expect(imageFinder, findsOneWidget);
+        final image = tester.widget<Image>(imageFinder);
+        expect(image.image, isA<ResizeImage>());
+        final resizeImage = image.image as ResizeImage;
+        expect(resizeImage.width, equals(1024));
+        expect(image.gaplessPlayback, isTrue);
       },
     );
   });

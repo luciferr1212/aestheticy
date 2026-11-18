@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../features/library/artist_rules_sheet.dart';
@@ -10,7 +11,9 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'library_header.dart';
+import 'library_placeholders.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 
@@ -47,12 +50,16 @@ class ArtistsView extends StatefulWidget {
   /// The application navigation coordinator.
   final AppNavigator navigator;
 
+  /// Optional in-memory library data cache.
+  final LibraryDataCache? dataCache;
+
   /// Creates an [ArtistsView].
   const ArtistsView({
     super.key,
     required this.repository,
     required this.settingsStore,
     required this.navigator,
+    this.dataCache,
   });
 
   @override
@@ -65,11 +72,60 @@ class _ArtistsViewState extends State<ArtistsView> {
   Set<String> _mergedCanonicalKeys = <String>{};
   String _searchQuery = '';
   bool _isLoading = true;
+  LibraryDataCache? _activeCache;
 
   @override
   void initState() {
     super.initState();
+    if (widget.dataCache?.artists != null) {
+      _artists = widget.dataCache!.artists!;
+      _mergedCanonicalKeys =
+          widget.dataCache!.mergedCanonicalKeys ?? <String>{};
+      _isLoading = false;
+    }
     _loadArtists();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      if (_isLoading && cache != null && cache.artists != null) {
+        _artists = cache.artists!;
+        _mergedCanonicalKeys = cache.mergedCanonicalKeys ?? <String>{};
+        _isLoading = false;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    final cache = _activeCache;
+    if (cache == null) return;
+    if (cache.artists != null) {
+      final newMerged = cache.mergedCanonicalKeys ?? <String>{};
+      if (!listEquals(_artists, cache.artists) ||
+          !setEquals(_mergedCanonicalKeys, newMerged) ||
+          _isLoading) {
+        setState(() {
+          _artists = cache.artists!;
+          _mergedCanonicalKeys = newMerged;
+          _isLoading = false;
+        });
+      }
+    } else {
+      _loadArtists();
+    }
   }
 
   Future<void> _loadArtists() async {
@@ -78,11 +134,16 @@ class _ArtistsViewState extends State<ArtistsView> {
     final mergedKeys = aliases.map((a) => a.canonicalKey).toSet();
 
     if (mounted) {
-      setState(() {
-        _artists = artists;
-        _mergedCanonicalKeys = mergedKeys;
-        _isLoading = false;
-      });
+      final changed = !listEquals(_artists, artists) ||
+          !setEquals(_mergedCanonicalKeys, mergedKeys) ||
+          _isLoading;
+      if (changed) {
+        setState(() {
+          _artists = artists;
+          _mergedCanonicalKeys = mergedKeys;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -310,7 +371,7 @@ class _ArtistsViewState extends State<ArtistsView> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return ArtistsViewPlaceholder(settingsStore: widget.settingsStore);
     }
 
     final rawArtists = _searchQuery.isNotEmpty ? _searchResults : _artists;
@@ -465,6 +526,8 @@ class _ArtistListTile extends StatelessWidget {
     final displayName = context.displayArtist(artist.name);
 
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      hoverColor: const Color(0x14FFFFFF),
       borderRadius: BorderRadius.circular(AppSpacing.r10),
       onTap: onTap,
       child: Container(
@@ -581,6 +644,8 @@ class _ArtistTile extends StatelessWidget {
 
     return RepaintBoundary(
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        hoverColor: const Color(0x14FFFFFF),
         borderRadius: BorderRadius.circular(AppSpacing.r12),
         onTap: onTap,
         child: Column(

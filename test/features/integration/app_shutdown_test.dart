@@ -78,6 +78,7 @@ void main() {
       const track = AudioSource('file:///music/song.mp3');
       await controller.playQueue([track], startIndex: 0);
       await controller.seek(const Duration(seconds: 42));
+      await Future<void>.delayed(Duration.zero);
 
       final testCoordinator = AppShutdownCoordinator(
         sessionSaver: sessionSaver,

@@ -195,9 +195,9 @@ class TrackTable extends StatelessWidget {
                       userCollections: userCollections,
                       playlistId: playlistId,
                       totalCount: rows.length,
-                      onPlay: row.isMissing
+                      onPlay: (row.isMissing || onPlay == null)
                           ? null
-                          : () => onPlay?.call(index, row),
+                          : () => onPlay!(index, row),
                       actionWidget: rowActionsBuilder?.call(context, row, index),
                       onPlayNext: onPlayNext != null
                           ? () => onPlayNext!(index, row)
@@ -412,6 +412,10 @@ class TrackTableRowTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppSpacing.r10),
         ),
         child: InkWell(
+          mouseCursor: onPlay != null
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
+          hoverColor: const Color(0x14FFFFFF),
           borderRadius: BorderRadius.circular(AppSpacing.r10),
           onTap: onPlay,
           onDoubleTap: onPlay,

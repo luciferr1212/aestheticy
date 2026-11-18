@@ -153,6 +153,7 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
       image = Image.file(
         file,
         fit: BoxFit.cover,
+        cacheWidth: 320,
         gaplessPlayback: true,
         errorBuilder: (_, _, _) => _buildFallbackCover(size),
       );
@@ -707,10 +708,9 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
                               ),
                             ),
                           ),
-                          if (quality == GlassQuality.full)
-                            const Positioned.fill(
-                              child: DitherOverlay(),
-                            ),
+                          const Positioned.fill(
+                            child: DitherOverlay(),
+                          ),
                         ],
                         Positioned.fill(
                           child: isWide

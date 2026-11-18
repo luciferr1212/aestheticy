@@ -395,6 +395,9 @@ class _SidebarTile extends StatelessWidget {
         message: title,
         waitDuration: isCompact ? const Duration(milliseconds: 300) : const Duration(seconds: 1),
         child: InkWell(
+          mouseCursor:
+              isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          hoverColor: const Color(0x14FFFFFF),
           borderRadius: BorderRadius.circular(AppSpacing.r10),
           onTap: isEnabled ? onTap : null,
           child: tileContent,

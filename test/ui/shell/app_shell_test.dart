@@ -13,6 +13,9 @@ import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
+import 'package:aestheticy/ui/library/albums_view.dart';
+import 'package:aestheticy/ui/library/artists_view.dart';
+import 'package:aestheticy/ui/library/tracks_view.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
@@ -668,41 +671,229 @@ void main() {
         navigator.navigateTo(AppDestination.artists);
         // Pump halfway through transition
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
+        await tester.pump(const Duration(milliseconds: 60));
 
         final switcherFinder = find.byWidgetPredicate(
           (w) =>
               w is AnimatedSwitcher &&
-              w.duration == const Duration(milliseconds: 100),
+              w.duration == const Duration(milliseconds: 120),
         );
         expect(switcherFinder, findsOneWidget);
         final switcherSize = tester.getSize(switcherFinder);
 
-        // The transition Stack inside AnimatedSwitcher has fit: StackFit.expand
-        final stackFinder = find.descendant(
-          of: switcherFinder,
-          matching: find.byWidgetPredicate(
-            (w) =>
-                w is Stack &&
-                w.fit == StackFit.expand &&
-                w.alignment == AlignmentDirectional.topStart,
-          ),
-        );
-        expect(stackFinder, findsWidgets);
-        final stackWidget = tester.widget<Stack>(stackFinder.first);
-        expect(stackWidget.fit, equals(StackFit.expand));
-        expect(stackWidget.alignment, equals(AlignmentDirectional.topStart));
-
-        final stackElement = stackFinder.evaluate().first;
-        stackElement.visitChildren((childElement) {
-          final box = childElement.findRenderObject() as RenderBox?;
-          if (box != null && box.hasSize) {
-            expect(box.size.width, equals(switcherSize.width));
-            expect(box.size.height, equals(switcherSize.height));
-          }
-        });
+        // Active page under switcher fills available space
+        final artistsFinder = find.byType(ArtistsView);
+        expect(artistsFinder, findsOneWidget);
+        final artistsSize = tester.getSize(artistsFinder);
+        expect(artistsSize.width, equals(switcherSize.width));
+        expect(artistsSize.height, equals(switcherSize.height));
 
         await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'S3: only one page in the tree after a switch starts; outgoing removed immediately',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await repository.addFolder('C:\\Music');
+        await tester.pumpWidget(createTestShell());
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlbumsView), findsOneWidget);
+        expect(find.byType(ArtistsView), findsNothing);
+
+        // Navigate to artists
+        navigator.navigateTo(AppDestination.artists);
+
+        // Pump 1 frame into the switch
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 30));
+
+        // The outgoing page (AlbumsView) is removed immediately (no overlapping heavy pages)
+        expect(find.byType(AlbumsView), findsNothing);
+        // The incoming page (ArtistsView) is the only active page
+        expect(find.byType(ArtistsView), findsOneWidget);
+
+        await tester.pumpAndSettle();
+        expect(find.byType(AlbumsView), findsNothing);
+        expect(find.byType(ArtistsView), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'S3: the new page fades in by opacity only over ~120ms',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await repository.addFolder('C:\\Music');
+        await tester.pumpWidget(createTestShell());
+        await tester.pumpAndSettle();
+
+        navigator.navigateTo(AppDestination.artists);
+        await tester.pump();
+
+        // At start of transition (t=0)
+        final switcherFinder =
+            find.byKey(const ValueKey('content_animated_switcher'));
+        final fadeFinder = find.descendant(
+          of: switcherFinder,
+          matching: find.byType(FadeTransition),
+        );
+        expect(fadeFinder, findsWidgets);
+        final fadeWidgetInitial =
+            tester.widget<FadeTransition>(fadeFinder.first);
+        expect(fadeWidgetInitial.opacity.value, equals(0.0));
+
+        // Halfway through (~60ms)
+        await tester.pump(const Duration(milliseconds: 60));
+        final fadeWidgetMid = tester.widget<FadeTransition>(fadeFinder.first);
+        expect(fadeWidgetMid.opacity.value, greaterThan(0.0));
+        expect(fadeWidgetMid.opacity.value, lessThan(1.0));
+
+        // No SlideTransition or ScaleTransition
+        expect(
+          find.descendant(
+            of: switcherFinder,
+            matching: find.byType(SlideTransition),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: switcherFinder,
+            matching: find.byType(ScaleTransition),
+          ),
+          findsNothing,
+        );
+
+        // After completion (120ms)
+        await tester.pump(const Duration(milliseconds: 60));
+        await tester.pumpAndSettle();
+        final fadeWidgetFinal =
+            tester.widget<FadeTransition>(fadeFinder.first);
+        expect(fadeWidgetFinal.opacity.value, equals(1.0));
+      },
+    );
+
+    testWidgets(
+      'S3: reduceMotion switches instantly without animation',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        settingsStore.update((s) => s.copyWith(reduceMotion: true));
+        await tester.pump(const Duration(milliseconds: 500));
+
+        await repository.addFolder('C:\\Music');
+        await tester.pumpWidget(createTestShell());
+        await tester.pumpAndSettle();
+
+        final switcherBefore = tester.widget<AnimatedSwitcher>(
+          find.byKey(const ValueKey('content_animated_switcher')),
+        );
+        expect(switcherBefore.duration, equals(Duration.zero));
+
+        navigator.navigateTo(AppDestination.artists);
+        // Instant switch on very first frame
+        await tester.pump();
+
+        expect(find.byType(AlbumsView), findsNothing);
+        expect(find.byType(ArtistsView), findsOneWidget);
+
+        final fadeFinder = find.descendant(
+          of: find.byKey(const ValueKey('content_animated_switcher')),
+          matching: find.byType(FadeTransition),
+        );
+        if (fadeFinder.evaluate().isNotEmpty) {
+          final fadeWidget = tester.widget<FadeTransition>(fadeFinder.first);
+          expect(fadeWidget.opacity.value, equals(1.0));
+        }
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'S3: scroll offset is captured and restored on back navigation without jump',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        // Seed 100 tracks so the tracks view is scrollable
+        final now = DateTime.now();
+        final tracks = List.generate(
+          100,
+          (i) => Track(
+            path: 'C:\\Music\\track_$i.mp3',
+            folderId: 1,
+            title: 'Track Title $i',
+            artist: 'Artist $i',
+            album: 'Album $i',
+            durationMs: 180000,
+            mtimeMs: 1000,
+            sizeBytes: 2000,
+            addedAt: now,
+          ),
+        );
+        await repository.addFolder('C:\\Music');
+        await repository.upsertTracks(tracks);
+
+        navigator.navigateTo(AppDestination.tracks);
+        await tester.pumpWidget(createTestShell());
+        await tester.pumpAndSettle();
+
+        final tracksScrollable = find.descendant(
+          of: find.byKey(const Key('tracks_list_view')),
+          matching: find.byType(Scrollable),
+        );
+        expect(tracksScrollable, findsOneWidget);
+
+        // Scroll down
+        final scrollableState =
+            tester.state<ScrollableState>(tracksScrollable);
+        scrollableState.position.jumpTo(250.0);
+        await tester.pump();
+
+        // Navigate to artists
+        navigator.navigateTo(AppDestination.artists);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TracksView), findsNothing);
+        expect(find.byType(ArtistsView), findsOneWidget);
+
+        // Navigate back to tracks
+        navigator.goBack();
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TracksView), findsOneWidget);
+        final restoredScrollable =
+            tester.state<ScrollableState>(tracksScrollable);
+        expect(restoredScrollable.position.pixels, equals(250.0));
       },
     );
   });

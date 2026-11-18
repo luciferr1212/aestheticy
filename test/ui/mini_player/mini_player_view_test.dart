@@ -15,6 +15,7 @@ import 'package:aestheticy/features/lyrics/lrc_parser.dart';
 import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
 import 'package:aestheticy/features/lyrics/lyrics_models.dart';
 import 'package:aestheticy/features/lyrics/lyrics_repository.dart';
+import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/main.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
@@ -228,6 +229,49 @@ void main() {
         ));
         await tester.pump();
         expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'S1: Cover art in MiniPlayerView has cacheWidth 320 and gaplessPlayback true',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final tempDir = Directory.systemTemp.createTempSync('mini_cover_test');
+        addTearDown(() {
+          CoverCache.setCustomDirectory(null);
+          try {
+            tempDir.deleteSync(recursive: true);
+          } catch (_) {}
+        });
+        CoverCache.setCustomDirectory(tempDir.path);
+        final coverKey = CoverCache.saveCoverSync(
+          album: 'Album One',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        );
+
+        await playbackController.playQueue([
+          AudioSource(
+            'file:///track1.mp3',
+            extras: {
+              'title': 'Stargazing Ambient',
+              'artist': 'Luna',
+              'path': 'C:/music/track1.mp3',
+              'coverKey': coverKey,
+            },
+          ),
+        ]);
+        await tester.pump();
+
+        await tester.pumpWidget(buildTestHarness(windowSize: const Size(480, 170)));
+        await tester.pump();
+
+        final imageFinder = find.byType(Image);
+        expect(imageFinder, findsOneWidget);
+        final image = tester.widget<Image>(imageFinder);
+        expect(image.image, isA<ResizeImage>());
+        final resizeImage = image.image as ResizeImage;
+        expect(resizeImage.width, equals(320));
+        expect(image.gaplessPlayback, isTrue);
       },
     );
 

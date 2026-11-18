@@ -157,16 +157,23 @@ class FullScreenViewState extends State<FullScreenView>
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncTickerWithSettings();
+  }
+
   void _syncTickerWithSettings() {
     final reduceMotion = widget.settingsStore.settings.reduceMotion;
-    if (reduceMotion) {
+    final isVisible = TickerMode.valuesOf(context).enabled;
+    if (reduceMotion || !_isAppResumed || !isVisible) {
       if (_ticker.isActive) {
         _ticker.stop();
       }
-      if (_phaseNotifier.value != 0.0) {
+      if (reduceMotion && _phaseNotifier.value != 0.0) {
         _phaseNotifier.value = 0.0;
       }
-    } else if (_isAppResumed && !_ticker.isActive) {
+    } else if (_isAppResumed && isVisible && !_ticker.isActive) {
       _ticker.start();
     }
   }
@@ -383,6 +390,11 @@ class FullScreenViewState extends State<FullScreenView>
                         ),
                       ),
                     ),
+                  ),
+                ),
+                const Positioned.fill(
+                  child: IgnorePointer(
+                    child: DitherOverlay(),
                   ),
                 ),
               ],
@@ -749,6 +761,8 @@ class FullScreenViewState extends State<FullScreenView>
             ? Image.file(
                 File(CoverCache.pathFor(coverKey)),
                 fit: BoxFit.cover,
+                cacheWidth: 1024,
+                gaplessPlayback: true,
                 errorBuilder: (_, _, _) => _placeholderIcon(),
               )
             : _placeholderIcon(),
@@ -790,30 +804,54 @@ class _BlobPainter extends CustomPainter {
       w * (0.32 + 0.10 * math.sin(phase * 0.3)),
       h * (0.38 + 0.10 * math.cos(phase * 0.2)),
     );
+    final r1 = w * 0.35;
     final paint1 = Paint()
-      ..color = palette.primary.withValues(alpha: 0.20)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 120.0);
-    canvas.drawCircle(p1, w * 0.35, paint1);
+      ..shader = RadialGradient(
+        colors: [
+          palette.primary.withValues(alpha: 0.20),
+          palette.primary.withValues(alpha: 0.14),
+          palette.primary.withValues(alpha: 0.07),
+          palette.primary.withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 0.45, 0.75, 1.0],
+      ).createShader(Rect.fromCircle(center: p1, radius: r1));
+    canvas.drawCircle(p1, r1, paint1);
 
     // Blob 2: secondary color
     final p2 = Offset(
       w * (0.68 + 0.12 * math.cos(phase * 0.25)),
       h * (0.55 + 0.08 * math.sin(phase * 0.35)),
     );
+    final r2 = w * 0.38;
     final paint2 = Paint()
-      ..color = palette.secondary.withValues(alpha: 0.20)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 130.0);
-    canvas.drawCircle(p2, w * 0.38, paint2);
+      ..shader = RadialGradient(
+        colors: [
+          palette.secondary.withValues(alpha: 0.20),
+          palette.secondary.withValues(alpha: 0.14),
+          palette.secondary.withValues(alpha: 0.07),
+          palette.secondary.withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 0.45, 0.75, 1.0],
+      ).createShader(Rect.fromCircle(center: p2, radius: r2));
+    canvas.drawCircle(p2, r2, paint2);
 
     // Blob 3: tertiary color
     final p3 = Offset(
       w * (0.48 + 0.10 * math.sin(phase * 0.18)),
       h * (0.75 + 0.08 * math.cos(phase * 0.22)),
     );
+    final r3 = w * 0.34;
     final paint3 = Paint()
-      ..color = palette.tertiary.withValues(alpha: 0.20)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 120.0);
-    canvas.drawCircle(p3, w * 0.34, paint3);
+      ..shader = RadialGradient(
+        colors: [
+          palette.tertiary.withValues(alpha: 0.20),
+          palette.tertiary.withValues(alpha: 0.14),
+          palette.tertiary.withValues(alpha: 0.07),
+          palette.tertiary.withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 0.45, 0.75, 1.0],
+      ).createShader(Rect.fromCircle(center: p3, radius: r3));
+    canvas.drawCircle(p3, r3, paint3);
   }
 
   @override
@@ -1164,7 +1202,7 @@ class _SlenderProgressLineState extends State<_SlenderProgressLine> {
                     child: MouseRegion(
                       cursor: total > Duration.zero
                           ? SystemMouseCursors.click
-                          : MouseCursor.defer,
+                          : SystemMouseCursors.basic,
                       onEnter: (_) => _setHover(true),
                       onExit: (_) => _setHover(false),
                       child: GestureDetector(

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter/semantics.dart';
@@ -8,6 +9,7 @@ import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
+import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/features/collections/user_collections.dart';
@@ -473,6 +475,121 @@ void main() {
       expect(state.isTickerActive, isFalse);
 
       settingsStore.update((s) => s.copyWith(reduceMotion: false));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(state.isTickerActive, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 4));
+      await settingsStore.flush();
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    test('S1: _BlobPainter and per-frame painters do not use MaskFilter', () {
+      final file = File('lib/ui/now_playing/full_screen_view.dart');
+      final source = file.readAsStringSync();
+      expect(source.contains('MaskFilter'), isFalse);
+    });
+
+    testWidgets('S1: Cover art in FullScreenView has cacheWidth 1024 and gaplessPlayback true', (tester) async {
+      setupDesktopViewport(tester);
+      final tempDir = Directory.systemTemp.createTempSync('fs_cover_test');
+      addTearDown(() {
+        CoverCache.setCustomDirectory(null);
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+      CoverCache.setCustomDirectory(tempDir.path);
+      final coverKey = CoverCache.saveCoverSync(
+        album: 'Album One',
+        bytes: Uint8List.fromList([1, 2, 3]),
+      );
+
+      final sourceWithCover = AudioSource(
+        'track1.flac',
+        extras: {
+          'title': 'Track One',
+          'artist': 'Artist One',
+          'coverKey': coverKey,
+        },
+      );
+      await controller.playQueue([sourceWithCover], startIndex: 0);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final imageFinder = find.byType(Image);
+      expect(imageFinder, findsOneWidget);
+      final image = tester.widget<Image>(imageFinder);
+      expect(image.image, isA<ResizeImage>());
+      final resizeImage = image.image as ResizeImage;
+      expect(resizeImage.width, equals(1024));
+      expect(image.gaplessPlayback, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 4));
+      await settingsStore.flush();
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    testWidgets('S1: Ticker stops when app lifecycle is not resumed', (tester) async {
+      setupDesktopViewport(tester);
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final state = tester.state<FullScreenViewState>(find.byType(FullScreenView));
+      expect(state.isTickerActive, isTrue);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(state.isTickerActive, isFalse);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(state.isTickerActive, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 4));
+      await settingsStore.flush();
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    testWidgets('S1: Ticker stops when view is not visible (TickerMode disabled)', (tester) async {
+      setupDesktopViewport(tester);
+      final tickerEnabled = ValueNotifier<bool>(true);
+      addTearDown(() => tickerEnabled.dispose());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UserCollectionsScope(
+            collections: collections,
+            child: GlassScope(
+              controller: GlassController(quality: GlassQuality.full),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: tickerEnabled,
+                builder: (context, enabled, child) {
+                  return TickerMode(
+                    enabled: enabled,
+                    child: FullScreenView(
+                      controller: controller,
+                      engine: engine,
+                      navigator: navigator,
+                      settingsStore: settingsStore,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final state = tester.state<FullScreenViewState>(find.byType(FullScreenView));
+      expect(state.isTickerActive, isTrue);
+
+      tickerEnabled.value = false;
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(state.isTickerActive, isFalse);
+
+      tickerEnabled.value = true;
       await tester.pump(const Duration(milliseconds: 50));
       expect(state.isTickerActive, isTrue);
 

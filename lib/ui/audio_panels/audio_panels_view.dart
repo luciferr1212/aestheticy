@@ -465,6 +465,8 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
     VoidCallback? onDelete,
   }) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      hoverColor: const Color(0x14FFFFFF),
       borderRadius: BorderRadius.circular(AppSpacing.pill),
       onTap: onTap,
       child: Container(
@@ -489,6 +491,8 @@ class _AudioPanelsViewState extends State<AudioPanelsView> {
             if (onDelete != null) ...[
               const SizedBox(width: 6),
               InkWell(
+                mouseCursor: SystemMouseCursors.click,
+                hoverColor: const Color(0x14FFFFFF),
                 onTap: onDelete,
                 child: const Icon(Icons.close,
                     size: 12, color: AppColors.textMuted),

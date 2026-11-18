@@ -448,6 +448,8 @@ class _SettingsViewState extends State<SettingsView> {
       children: [
         for (final font in _fontOptions) ...[
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
+            hoverColor: const Color(0x14FFFFFF),
             borderRadius: BorderRadius.circular(AppSpacing.r10),
             onTap: () {
               widget.settingsStore.update((s) => s.copyWith(uiFont: font.id));
@@ -1511,6 +1513,8 @@ class _SegmentedControl<T> extends StatelessWidget {
         children: options.map((opt) {
           final isSelected = opt.value == value;
           return InkWell(
+            mouseCursor: SystemMouseCursors.click,
+            hoverColor: const Color(0x14FFFFFF),
             borderRadius: BorderRadius.circular(AppSpacing.r10 - 2),
             onTap: () => onChanged(opt.value),
             child: Container(

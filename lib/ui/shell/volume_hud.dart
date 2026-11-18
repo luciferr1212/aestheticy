@@ -380,7 +380,7 @@ class _VolumeHudOverlayState extends State<VolumeHudOverlay> {
                                       child: MouseRegion(
                                         cursor: widget.engine != null
                                             ? SystemMouseCursors.click
-                                            : MouseCursor.defer,
+                                            : SystemMouseCursors.basic,
                                         child: GestureDetector(
                                           key: const Key(
                                             'volume_hud_mute_button',
@@ -418,7 +418,7 @@ class _VolumeHudOverlayState extends State<VolumeHudOverlay> {
                                         child: MouseRegion(
                                           cursor: widget.engine != null
                                               ? SystemMouseCursors.click
-                                              : MouseCursor.defer,
+                                              : SystemMouseCursors.basic,
                                           child: GestureDetector(
                                             key: const Key('volume_hud_bar'),
                                             behavior: HitTestBehavior.opaque,

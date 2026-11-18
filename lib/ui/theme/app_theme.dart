@@ -86,5 +86,34 @@ ThemeData buildAppTheme({String uiFont = 'system'}) {
       textStyle: AppTypography.caption.copyWith(color: AppColors.text),
       waitDuration: const Duration(milliseconds: 500),
     ),
+    switchTheme: SwitchThemeData(
+      mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return SystemMouseCursors.basic;
+        }
+        return SystemMouseCursors.click;
+      }),
+    ),
+    sliderTheme: SliderThemeData(
+      mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return SystemMouseCursors.basic;
+        }
+        return SystemMouseCursors.click;
+      }),
+    ),
+    menuButtonTheme: MenuButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return SystemMouseCursors.basic;
+          }
+          return SystemMouseCursors.click;
+        }),
+      ),
+    ),
+    popupMenuTheme: const PopupMenuThemeData(
+      mouseCursor: WidgetStatePropertyAll<MouseCursor>(SystemMouseCursors.click),
+    ),
   );
 }

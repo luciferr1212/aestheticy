@@ -19,6 +19,7 @@ import '../library/albums_view.dart';
 import '../library/artist_detail_view.dart';
 import '../library/artists_view.dart';
 import '../library/favorites_view.dart';
+import '../library/library_data_cache.dart';
 import '../library/playlist_detail_view.dart';
 import '../library/playlists_view.dart';
 import '../library/recently_played_view.dart';
@@ -92,6 +93,9 @@ class AppShell extends StatefulWidget {
   /// Optional mini player window controller.
   final MiniPlayerController? miniPlayerController;
 
+  /// Optional in-memory library data cache.
+  final LibraryDataCache? dataCache;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -109,6 +113,7 @@ class AppShell extends StatefulWidget {
     this.lyricsController,
     this.windowService,
     this.miniPlayerController,
+    this.dataCache,
   });
 
   @override
@@ -118,7 +123,9 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UserCollections _userCollections;
   late final LyricsController _lyricsController;
+  late final LibraryDataCache _dataCache;
   bool _createdLyricsControllerLocally = false;
+  bool _createdDataCacheLocally = false;
   List<LibraryFolder> _folders = [];
   bool _isLoadingFolders = true;
 
@@ -135,6 +142,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _playbackKeysHandler = _createPlaybackKeysHandler();
+    if (widget.dataCache != null) {
+      _dataCache = widget.dataCache!;
+    } else {
+      _dataCache = LibraryDataCache(
+        repository: widget.repository,
+        scanService: widget.scanService,
+      );
+      _createdDataCacheLocally = true;
+      unawaited(_dataCache.refresh());
+    }
     if (widget.lyricsController != null) {
       _lyricsController = widget.lyricsController!;
     } else {
@@ -207,6 +224,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _playbackKeysHandler.dispose();
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
+    }
+    if (_createdDataCacheLocally) {
+      _dataCache.dispose();
     }
     if (_wasFullScreen && !_isSyncingFullScreen) {
       _wasFullScreen = false;
@@ -307,6 +327,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _folders = folders;
         _isLoadingFolders = false;
       });
+      unawaited(_dataCache.refresh());
     }
   }
 
@@ -359,6 +380,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           repository: widget.repository,
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
+          dataCache: _dataCache,
         );
       case AppDestination.artists:
         return ArtistsView(
@@ -366,6 +388,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           repository: widget.repository,
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
+          dataCache: _dataCache,
         );
       case AppDestination.tracks:
         return TracksView(
@@ -373,6 +396,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           repository: widget.repository,
           controller: widget.controller,
           settingsStore: widget.settingsStore,
+          dataCache: _dataCache,
         );
       case AppDestination.albumDetail:
         final album = widget.navigator.selectedAlbum ??
@@ -466,6 +490,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           controller: widget.controller,
           settingsStore: widget.settingsStore,
           collections: _userCollections,
+          dataCache: _dataCache,
         );
       case AppDestination.queue:
         return QueueView(
@@ -591,23 +616,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 // Active destination view (no blur)
                                 Expanded(
                                   child: AnimatedSwitcher(
+                                    key: const ValueKey('content_animated_switcher'),
                                     duration: reduceMotion
                                         ? Duration.zero
-                                        : const Duration(milliseconds: 100),
-                                    layoutBuilder: (currentChild, previousChildren) {
-                                      return Stack(
-                                        fit: StackFit.expand,
-                                        alignment: AlignmentDirectional.topStart,
-                                        children: <Widget>[
-                                          ...previousChildren.map(
-                                            (child) => IgnorePointer(child: child),
-                                          ),
-                                          ?currentChild,
-                                        ],
+                                        : const Duration(milliseconds: 120),
+                                    switchInCurve: Curves.easeOut,
+                                    switchOutCurve: Curves.easeOut,
+                                    layoutBuilder:
+                                        (currentChild, previousChildren) {
+                                      return currentChild ??
+                                          const SizedBox.shrink();
+                                    },
+                                    transitionBuilder: (child, animation) {
+                                      return FadeTransition(
+                                        opacity: CurvedAnimation(
+                                          parent: animation,
+                                          curve: Curves.easeOut,
+                                        ),
+                                        child: child,
                                       );
                                     },
                                     child: _ViewStateRestorer(
-                                      key: ValueKey('view_state_${widget.navigator.currentEntry.id}'),
+                                      key: ValueKey(
+                                          'view_state_${widget.navigator.currentEntry.id}'),
                                       entry: widget.navigator.currentEntry,
                                       navigator: widget.navigator,
                                       child: _buildContent(currentDestination),
@@ -667,7 +698,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           },
           child: UserCollectionsScope(
             collections: _userCollections,
-            child: rootScaffold,
+            child: LibraryDataCacheScope(
+              cache: _dataCache,
+              child: rootScaffold,
+            ),
           ),
         ),
       ),
@@ -693,7 +727,9 @@ class _ViewStateRestorer extends StatefulWidget {
 
 class _ViewStateRestorerState extends State<_ViewStateRestorer> {
   late ScrollController _scrollController;
-  bool _needsRestore = false;
+  bool _restored = false;
+
+  bool get _isActive => widget.navigator.currentEntry.id == widget.entry.id;
 
   @override
   void initState() {
@@ -701,13 +737,38 @@ class _ViewStateRestorerState extends State<_ViewStateRestorer> {
     final savedOffset =
         (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
     _scrollController = ScrollController(initialScrollOffset: savedOffset);
-    _needsRestore = savedOffset > 0;
-    widget.navigator.onCaptureViewState = _captureOffset;
+    _restored = savedOffset == 0.0;
+    if (_isActive) {
+      widget.navigator.onCaptureViewState = _captureOffset;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_isActive) {
+        widget.navigator.onCaptureViewState = _captureOffset;
+        _restoreScrollIfNeeded();
+      }
+    });
   }
 
   void _captureOffset(Map<String, Object?> state) {
-    if (_scrollController.hasClients) {
+    if (_isActive && _scrollController.hasClients) {
       state['scrollOffset'] = _scrollController.offset;
+    }
+  }
+
+  void _restoreScrollIfNeeded() {
+    if (_restored || !_isActive) return;
+    final savedOffset =
+        (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
+    if (savedOffset > 0 && _scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      if (maxScroll > 0) {
+        _scrollController.jumpTo(savedOffset.clamp(0.0, maxScroll));
+        _restored = true;
+      }
+    } else if (savedOffset == 0.0) {
+      _restored = true;
     }
   }
 
@@ -717,19 +778,21 @@ class _ViewStateRestorerState extends State<_ViewStateRestorer> {
     if (oldWidget.entry.id != widget.entry.id) {
       final savedOffset =
           (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
-      _needsRestore = savedOffset > 0;
+      _restored = savedOffset == 0.0;
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(savedOffset);
       }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isActive) {
+          widget.navigator.onCaptureViewState = _captureOffset;
+          _restoreScrollIfNeeded();
+        }
+      });
     }
-    widget.navigator.onCaptureViewState = _captureOffset;
   }
 
   @override
   void dispose() {
-    if (_scrollController.hasClients) {
-      widget.entry.viewState['scrollOffset'] = _scrollController.offset;
-    }
     if (widget.navigator.onCaptureViewState == _captureOffset) {
       widget.navigator.onCaptureViewState = null;
     }
@@ -744,15 +807,19 @@ class _ViewStateRestorerState extends State<_ViewStateRestorer> {
       automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
       child: NotificationListener<ScrollNotification>(
         onNotification: (notif) {
+          if (!_isActive) return false;
           if (notif.depth == 0) {
-            if (_needsRestore && notif.metrics.maxScrollExtent > 0) {
+            if (!_restored && notif.metrics.maxScrollExtent > 0) {
               final savedOffset =
-                  (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
+                  (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ??
+                      0.0;
               if (savedOffset > 0 && _scrollController.hasClients) {
-                _scrollController.jumpTo(savedOffset.clamp(0.0, notif.metrics.maxScrollExtent));
+                _scrollController.jumpTo(
+                  savedOffset.clamp(0.0, notif.metrics.maxScrollExtent),
+                );
               }
-              _needsRestore = false;
-            } else {
+              _restored = true;
+            } else if (_restored) {
               widget.entry.viewState['scrollOffset'] = notif.metrics.pixels;
             }
           }

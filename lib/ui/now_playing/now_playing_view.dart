@@ -240,6 +240,9 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                   ),
                 ),
               ),
+              const Positioned.fill(
+                child: DitherOverlay(),
+              ),
             ],
 
             // 2. Dark scrim ensuring text contrast >= 4.5:1
@@ -394,6 +397,8 @@ class _NowPlayingViewState extends State<NowPlayingView> {
             ? Image.file(
                 File(CoverCache.pathFor(coverKey)),
                 fit: BoxFit.cover,
+                cacheWidth: 1024,
+                gaplessPlayback: true,
                 errorBuilder: (_, _, _) => _placeholderIcon(),
               )
             : _placeholderIcon(),
@@ -717,6 +722,8 @@ class _NowPlayingViewState extends State<NowPlayingView> {
           child: Material(
             color: Colors.transparent,
             child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
+              hoverColor: const Color(0x14FFFFFF),
               borderRadius: BorderRadius.circular(AppSpacing.r12),
               onTap: () => _playUpcoming(queueIndex),
               child: Padding(
@@ -1059,13 +1066,17 @@ class _NowPlayingSeekBarState extends State<NowPlayingSeekBar> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: SliderTheme(
-                        data: const SliderThemeData(
-                          thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5.0),
-                          overlayShape: RoundSliderOverlayShape(overlayRadius: 10.0),
+                        data: SliderThemeData(
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.0),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
                           trackHeight: 3.5,
                           activeTrackColor: AppColors.accent,
                           inactiveTrackColor: AppColors.border,
                           thumbColor: AppColors.accent,
+                          mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) =>
+                              states.contains(WidgetState.disabled)
+                                  ? SystemMouseCursors.basic
+                                  : SystemMouseCursors.click),
                         ),
                         child: Slider(
                           value: maxMs > 0 ? currentMs : 0.0,

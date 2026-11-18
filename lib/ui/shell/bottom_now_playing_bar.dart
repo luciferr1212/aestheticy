@@ -461,13 +461,17 @@ class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
                   ),
                   Expanded(
                     child: SliderTheme(
-                      data: const SliderThemeData(
-                        thumbShape: RoundSliderThumbShape(enabledThumbRadius: 4.0),
-                        overlayShape: RoundSliderOverlayShape(overlayRadius: 8.0),
+                      data: SliderThemeData(
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4.0),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 8.0),
                         trackHeight: 3.0,
                         activeTrackColor: AppColors.accent,
                         inactiveTrackColor: AppColors.border,
                         thumbColor: AppColors.accent,
+                        mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) =>
+                            states.contains(WidgetState.disabled)
+                                ? SystemMouseCursors.basic
+                                : SystemMouseCursors.click),
                       ),
                       child: Slider(
                         value: maxMs > 0 ? currentMs : 0.0,
@@ -551,13 +555,17 @@ class _EndControlsArea extends StatelessWidget {
                           ),
                           Expanded(
                             child: SliderTheme(
-                              data: const SliderThemeData(
+                              data: SliderThemeData(
                                 thumbShape:
-                                    RoundSliderThumbShape(enabledThumbRadius: 5.0),
+                                    const RoundSliderThumbShape(enabledThumbRadius: 5.0),
                                 trackHeight: 3.0,
                                 activeTrackColor: AppColors.accent,
                                 inactiveTrackColor: AppColors.border,
                                 thumbColor: AppColors.accent,
+                                mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) =>
+                                    states.contains(WidgetState.disabled)
+                                        ? SystemMouseCursors.basic
+                                        : SystemMouseCursors.click),
                               ),
                               child: Slider(
                                 value: vol,
