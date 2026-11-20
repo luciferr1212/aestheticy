@@ -1216,4 +1216,160 @@ void main() {
       expect(albums, isEmpty);
     });
   });
+
+  group('listAlbumsByArtistKeys Tests (S1)', () {
+    late SqliteLibraryRepository repo;
+    late LibraryFolder folder;
+    final now = DateTime.now();
+
+    setUp(() async {
+      repo = SqliteLibraryRepository.inMemory();
+      folder = await repo.addFolder('C:\\Music\\MultiS1');
+    });
+
+    tearDown(() async {
+      await repo.close();
+    });
+
+    test('empty artist keys returns empty list', () async {
+      final albums = await repo.listAlbumsByArtistKeys(const []);
+      expect(albums, isEmpty);
+    });
+
+    test('returns deduplicated union across multiple artists including shared albums', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\MultiS1\\a1.mp3',
+          folderId: folder.id!,
+          title: 'Solo A',
+          artist: 'Artist A',
+          album: 'Album A',
+          albumArtist: 'Artist A',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\b1.mp3',
+          folderId: folder.id!,
+          title: 'Solo B',
+          artist: 'Artist B',
+          album: 'Album B',
+          albumArtist: 'Artist B',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\c1.mp3',
+          folderId: folder.id!,
+          title: 'Solo C',
+          artist: 'Artist C',
+          album: 'Album C',
+          albumArtist: 'Artist C',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\va1.mp3',
+          folderId: folder.id!,
+          title: 'Collab 1',
+          artist: 'Artist A',
+          album: 'Shared VA',
+          albumArtist: 'Various Artists',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\va2.mp3',
+          folderId: folder.id!,
+          title: 'Collab 2',
+          artist: 'Artist B',
+          album: 'Shared VA',
+          albumArtist: 'Various Artists',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\va3.mp3',
+          folderId: folder.id!,
+          title: 'Collab 3',
+          artist: 'Artist C',
+          album: 'Shared VA',
+          albumArtist: 'Various Artists',
+          durationMs: 180000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final albums = await repo.listAlbumsByArtistKeys(['artist a', 'artist b']);
+      expect(
+        albums.map((a) => a.album).toList(),
+        equals(['Album A', 'Album B', 'Shared VA']),
+      );
+      final shared = albums.firstWhere((a) => a.album == 'Shared VA');
+      expect(shared.trackCount, 3);
+    });
+
+    test('honors aliases and diacritic normalization across multiple keys', () async {
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\MultiS1\\fairouz.mp3',
+          folderId: folder.id!,
+          title: 'Kifak Inta',
+          artist: 'فيروز',
+          album: 'Kifak Album',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\fairouz_en.mp3',
+          folderId: folder.id!,
+          title: 'Li Beirut',
+          artist: 'Fairouz',
+          album: 'Beirut Album',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+        Track(
+          path: 'C:\\Music\\MultiS1\\amr.mp3',
+          folderId: folder.id!,
+          title: 'Tamally',
+          artist: 'عَمْرُو دِيَاب',
+          album: 'El Lilady',
+          durationMs: 200000,
+          mtimeMs: 10,
+          sizeBytes: 10,
+          addedAt: now,
+        ),
+      ]);
+      await repo.rebuildArtistLinks();
+
+      final artists = await repo.listArtists();
+      final arArtist = artists.firstWhere((a) => a.name == 'فيروز');
+      final enArtist = artists.firstWhere((a) => a.name == 'Fairouz');
+      await repo.mergeArtists(arArtist.key, enArtist.key);
+
+      final albums = await repo.listAlbumsByArtistKeys(['fairouz', 'عمرو دياب']);
+      expect(
+        albums.map((a) => a.album).toList(),
+        equals(['Beirut Album', 'El Lilady', 'Kifak Album']),
+      );
+    });
+  });
 }

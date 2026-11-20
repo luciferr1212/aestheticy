@@ -711,11 +711,13 @@ void main() {
       'mini player close button restores window frame and handles tray vs quit closeBehavior',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
-        // 1. tray mode: exits mini (restoring frame) and hides without destroying
+        // 1. tray mode with visible tray: exits mini (restoring frame) and hides without destroying
+        final visibleTray = FakeTrayService()..isVisible = true;
         settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
         final shutdownTray = AppShutdownCoordinator(
           settingsStore: settingsStore,
           windowService: fakeWindow,
+          trayService: visibleTray,
           logger: AppLogger(customSink: StringBuffer()),
         );
         await tester.pumpWidget(
@@ -723,6 +725,7 @@ void main() {
             engine: engine,
             controller: playbackController,
             settingsStore: settingsStore,
+            trayService: visibleTray,
             windowService: fakeWindow,
             miniPlayerController: miniController,
             shutdownCoordinator: shutdownTray,
@@ -783,6 +786,55 @@ void main() {
         expect(fakeWindow.calls, contains('destroy'));
         expect(shutdownQuit.hasShutdown, isTrue);
         expect(fakeWindow.isDestroyed, isTrue);
+
+        // 3. tray mode when tray is NOT visible: never hides window, runs quit path
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        final unavailableTray = FakeTrayService()..isVisible = false;
+        final fakeWindowFallback = FakeWindowService();
+        final miniControllerFallback = MiniPlayerController(
+          windowService: fakeWindowFallback,
+          settingsStore: settingsStore,
+        );
+        addTearDown(() async {
+          miniControllerFallback.dispose();
+          await fakeWindowFallback.dispose();
+          await unavailableTray.dispose();
+        });
+        settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+        final shutdownFallback = AppShutdownCoordinator(
+          settingsStore: SettingsStore(),
+          windowService: fakeWindowFallback,
+          trayService: unavailableTray,
+          logger: AppLogger(customSink: StringBuffer()),
+        );
+        await tester.pumpWidget(
+          AestheticyApp(
+            engine: engine,
+            controller: playbackController,
+            settingsStore: settingsStore,
+            trayService: unavailableTray,
+            windowService: fakeWindowFallback,
+            miniPlayerController: miniControllerFallback,
+            shutdownCoordinator: shutdownFallback,
+          ),
+        );
+        await tester.pump();
+
+        await tester.runAsync(() => miniControllerFallback.enter());
+        await tester.pump();
+        expect(fakeWindowFallback.isFramelessState, isTrue);
+
+        await tester.tap(find.byKey(const Key('mini_player_close')));
+        await tester.runAsync(() async {
+          await waitFor(() => shutdownFallback.hasShutdown);
+        });
+        await tester.pumpAndSettle();
+
+        expect(miniControllerFallback.isMini, isFalse);
+        expect(fakeWindowFallback.isFramelessState, isFalse);
+        expect(shutdownFallback.hasShutdown, isTrue);
+        expect(fakeWindowFallback.isDestroyed, isTrue);
 
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(seconds: 2));

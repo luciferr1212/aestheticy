@@ -8,9 +8,12 @@ import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
+import 'package:aestheticy/features/integration/app_shutdown.dart';
+import 'package:aestheticy/features/integration/tray_window_controller.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/main.dart';
+import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
@@ -76,6 +79,8 @@ Widget _buildTestSettingsApp({
   VoidCallback? onOpenFolders,
   Size size = const Size(1280, 800),
   bool isWindowsOverride = true,
+  TrayWindowController? trayWindowController,
+  bool? trayUnavailableOverride,
 }) {
   return ListenableBuilder(
     listenable: settingsStore,
@@ -115,6 +120,8 @@ Widget _buildTestSettingsApp({
             artistNameStore: artistNameStore,
             onOpenFolders: onOpenFolders ?? () {},
             isWindowsOverride: isWindowsOverride,
+            trayWindowController: trayWindowController,
+            trayUnavailableOverride: trayUnavailableOverride,
           ),
         ),
       );
@@ -1126,5 +1133,85 @@ void main() {
       expect(tester.takeException(), isNull);
     },
     timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  testWidgets(
+    'Shows localized tray unavailable hint in English and Arabic RTL only when tray creation fails',
+    timeout: const Timeout(Duration(seconds: 30)),
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final fakeWindow = FakeWindowService();
+      final fakeTray = FakeTrayService()..failShow = true;
+      final playbackCtrl = PlaybackController(
+        engine: engine,
+        queue: PlaybackQueue(),
+      );
+      await playbackCtrl.init();
+      final shutdown = AppShutdownCoordinator(
+        settingsStore: settingsStore,
+        trayService: fakeTray,
+        windowService: fakeWindow,
+      );
+      final trayController = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackCtrl,
+        settingsStore: settingsStore,
+        shutdownCoordinator: shutdown,
+      );
+      await trayController.init();
+      addTearDown(() async {
+        await trayController.dispose();
+        await playbackCtrl.dispose();
+        await fakeTray.dispose();
+        await fakeWindow.dispose();
+      });
+
+      await tester.pumpWidget(
+        _buildTestSettingsApp(
+          engine: engine,
+          repository: repository,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          audioSettingsApplier: audioSettingsApplier,
+          artistNameStore: artistNameStore,
+          trayWindowController: trayController,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Initially available / quit mode -> hint is hidden
+      expect(find.byKey(const Key('settings_tray_unavailable_hint')), findsNothing);
+
+      // Switch to tray mode -> fakeTray.failShow causes hint to appear live
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await tester.pumpAndSettle();
+
+      final scrollFinder = find.byType(Scrollable).first;
+      final hintFinder = find.byKey(const Key('settings_tray_unavailable_hint'));
+      await tester.scrollUntilVisible(hintFinder, 120.0, scrollable: scrollFinder);
+      await tester.ensureVisible(hintFinder);
+      await tester.pumpAndSettle();
+
+      expect(hintFinder, findsOneWidget);
+      expect(
+        find.text('Tray is not available, the app will quit when closed'),
+        findsOneWidget,
+      );
+
+      // Switch to Arabic RTL and verify Arabic hint renders cleanly without overflow
+      settingsStore.update((s) => s.copyWith(language: 'ar'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('أيقونة شريط المهام غير متاحة، سيتم إنهاء التطبيق عند إغلاقه'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(milliseconds: 500));
+    },
   );
 }

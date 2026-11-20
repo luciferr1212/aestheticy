@@ -78,6 +78,11 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
   Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async => [];
 
   @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKeys(
+    List<String> artistKeys,
+  ) async => [];
+
+  @override
   Future<List<Track>> listTracks({
     TrackSort sort = TrackSort.titleAsc,
     int? limit,

@@ -723,6 +723,9 @@ class _AestheticyAppState extends State<AestheticyApp> {
     _mediaSessionController = widget.mediaSessionController;
     _sleepController = widget.sleepController;
     _trayWindowController = widget.trayWindowController;
+    // TrayWindowController is the single owner of main-window close handling.
+    // This listener only ensures the mini-player frame restores cleanly when
+    // a close arrives while mini mode is active.
     _windowCloseSub = _miniPlayerController.windowService.closeRequested.listen(
       (_) {
         if (_miniPlayerController.isMini) {
@@ -731,17 +734,89 @@ class _AestheticyAppState extends State<AestheticyApp> {
       },
     );
 
+    // Root cause fix: Flutter's WindowsLifecycleManager intercepts WM_CLOSE
+    // before WindowManagerPlugin (because FlutterViewController is constructed
+    // before RegisterPlugins() in windows/runner/flutter_window.cpp). Previously
+    // this callback always paused, shut down, destroyed the window, and exited
+    // even when closeBehavior == 'tray'. Delegate close handling to the single
+    // owner (_trayWindowController) and cancel exit when hiding to tray.
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
+        AppLogger.instance.info(
+          'Lifecycle',
+          'App exit requested (onExitRequested)',
+        );
         try {
           await _miniPlayerController.restoreFrameForClose();
-        } catch (_) {}
+        } catch (e, st) {
+          AppLogger.instance.warning(
+            'Lifecycle',
+            'Failed restoring mini player frame on exit (exceptionType=${e.runtimeType})',
+            e,
+            st,
+          );
+        }
+
+        final trayController = _trayWindowController;
+        if (trayController != null) {
+          final hiddenToTray = await trayController.handleCloseRequested();
+          return hiddenToTray
+              ? AppExitResponse.cancel
+              : AppExitResponse.exit;
+        }
+
+        final behavior = _settingsStore.settings.closeBehavior;
+        final trayVisible = widget.trayService?.isVisible ?? false;
+        AppLogger.instance.info(
+          'Lifecycle',
+          'Close fallback check: behavior=$behavior, trayVisible=$trayVisible',
+        );
+        if (behavior == 'tray' && trayVisible) {
+          AppLogger.instance.info('Lifecycle', 'Final close action: hide');
+          try {
+            _sessionSaver?.saveSnapshotSync();
+          } catch (e, st) {
+            AppLogger.instance.warning(
+              'Lifecycle',
+              'Snapshot failed on hide (exceptionType=${e.runtimeType})',
+              e,
+              st,
+            );
+          }
+          try {
+            await _miniPlayerController.windowService.hide();
+          } catch (e, st) {
+            AppLogger.instance.warning(
+              'Lifecycle',
+              'Window hide failed (exceptionType=${e.runtimeType})',
+              e,
+              st,
+            );
+          }
+          return AppExitResponse.cancel;
+        }
+
+        AppLogger.instance.info('Lifecycle', 'Final close action: quit');
         try {
           await _playbackController.pause();
-        } catch (_) {}
+        } catch (e, st) {
+          AppLogger.instance.warning(
+            'Lifecycle',
+            'Playback pause failed on exit (exceptionType=${e.runtimeType})',
+            e,
+            st,
+          );
+        }
         try {
           await _miniPlayerController.windowService.hide();
-        } catch (_) {}
+        } catch (e, st) {
+          AppLogger.instance.warning(
+            'Lifecycle',
+            'Window hide failed on exit (exceptionType=${e.runtimeType})',
+            e,
+            st,
+          );
+        }
         await _effectiveShutdownCoordinator.shutdown();
         await _miniPlayerController.windowService.destroy();
         return AppExitResponse.exit;
@@ -794,20 +869,60 @@ class _AestheticyAppState extends State<AestheticyApp> {
       widget.shutdownCoordinator ?? _shutdownCoordinator;
 
   Future<void> _handleMiniCloseRequested() async {
+    AppLogger.instance.info('Lifecycle', 'Mini player close requested');
     final win = _miniPlayerController.windowService;
     await _miniPlayerController.restoreFrameForClose();
     if (!mounted) return;
-    if (_settingsStore.settings.closeBehavior == 'tray') {
-      _sessionSaver?.saveSnapshotSync();
+
+    final trayController = _trayWindowController;
+    if (trayController != null) {
+      await trayController.handleCloseRequested();
+      return;
+    }
+
+    final behavior = _settingsStore.settings.closeBehavior;
+    final trayVisible = widget.trayService?.isVisible ?? false;
+    AppLogger.instance.info(
+      'Lifecycle',
+      'Mini close fallback check: behavior=$behavior, trayVisible=$trayVisible',
+    );
+    if (behavior == 'tray' && trayVisible) {
+      AppLogger.instance.info('Lifecycle', 'Mini close final action: hide');
+      try {
+        _sessionSaver?.saveSnapshotSync();
+      } catch (e, st) {
+        AppLogger.instance.warning(
+          'Lifecycle',
+          'Snapshot failed on mini hide (exceptionType=${e.runtimeType})',
+          e,
+          st,
+        );
+      }
       await win.hide();
       return;
     }
+
+    AppLogger.instance.info('Lifecycle', 'Mini close final action: quit');
     try {
       await _playbackController.pause();
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.warning(
+        'Lifecycle',
+        'Playback pause failed on mini quit (exceptionType=${e.runtimeType})',
+        e,
+        st,
+      );
+    }
     try {
       await win.hide();
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.warning(
+        'Lifecycle',
+        'Window hide failed on mini quit (exceptionType=${e.runtimeType})',
+        e,
+        st,
+      );
+    }
     await _effectiveShutdownCoordinator.shutdown();
     await win.destroy();
   }
@@ -938,6 +1053,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         lyricsController: _lyricsController,
                         windowService: widget.windowService,
                         miniPlayerController: _miniPlayerController,
+                        trayWindowController: _trayWindowController,
                       ),
               ),
             ),

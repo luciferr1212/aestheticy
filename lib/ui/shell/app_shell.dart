@@ -11,6 +11,7 @@ import '../../features/library/folder_management_sheet.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../features/collections/user_collections.dart';
+import '../../features/integration/tray_window_controller.dart';
 import '../../library/scan_service.dart';
 import '../../platform/window_service.dart';
 import '../mini_player/mini_player_controller.dart';
@@ -93,6 +94,9 @@ class AppShell extends StatefulWidget {
   /// Optional mini player window controller.
   final MiniPlayerController? miniPlayerController;
 
+  /// Optional tray & window close controller.
+  final TrayWindowController? trayWindowController;
+
   /// Optional in-memory library data cache.
   final LibraryDataCache? dataCache;
 
@@ -113,6 +117,7 @@ class AppShell extends StatefulWidget {
     this.lyricsController,
     this.windowService,
     this.miniPlayerController,
+    this.trayWindowController,
     this.dataCache,
   });
 
@@ -443,6 +448,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           audioSettingsApplier: widget.audioSettingsApplier,
           artistNameStore: widget.artistNameStore,
           onOpenFolders: _openFolders,
+          trayWindowController: widget.trayWindowController,
         );
       case AppDestination.audioPanels:
         return AudioPanelsView(

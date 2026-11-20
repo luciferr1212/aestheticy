@@ -290,7 +290,54 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async {
+  Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) {
+    return listAlbumsByArtistKeys([artistKey]);
+  }
+
+  @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKeys(
+    List<String> artistKeys,
+  ) async {
+    if (artistKeys.isEmpty) return [];
+
+    // Deduplicate keys while keeping non-empty callers consistent with
+    // single-key lookups.
+    final uniqueKeys = artistKeys.toSet().toList(growable: false);
+    if (uniqueKeys.length <= 100) {
+      return _queryAlbumsByArtistKeyChunk(uniqueKeys);
+    }
+
+    // Batch queries to stay well below SQLite's bind parameter limit (7 params
+    // per key -> 700 params max per batch), then union/deduplicate albums.
+    final seen = <String, AlbumSummary>{};
+    for (var i = 0; i < uniqueKeys.length; i += 100) {
+      final end = (i + 100 < uniqueKeys.length) ? i + 100 : uniqueKeys.length;
+      final chunk = uniqueKeys.sublist(i, end);
+      final chunkAlbums = await _queryAlbumsByArtistKeyChunk(chunk);
+      for (final album in chunkAlbums) {
+        seen.putIfAbsent(
+          '${album.album}\u0000${album.albumArtist ?? ''}',
+          () => album,
+        );
+      }
+    }
+
+    final result = seen.values.toList()
+      ..sort((a, b) {
+        final cmp = a.album.toLowerCase().compareTo(b.album.toLowerCase());
+        if (cmp != 0) return cmp;
+        return a.album.compareTo(b.album);
+      });
+    return result;
+  }
+
+  Future<List<AlbumSummary>> _queryAlbumsByArtistKeyChunk(
+    List<String> artistKeys,
+  ) async {
+    final placeholders = List.filled(artistKeys.length, '?').join(', ');
+    final normalizedPlaceholders =
+        List.filled(artistKeys.length, 'normalize_text(?)').join(', ');
+
     final rows = _db.select(
       '''
       SELECT
@@ -310,21 +357,31 @@ class SqliteLibraryRepository implements LibraryRepository {
           WHERE COALESCE(NULLIF(t2.album, ''), 'Unknown Album') = COALESCE(NULLIF(t.album, ''), 'Unknown Album')
             AND NULLIF(t2.album_artist, '') IS NULLIF(t.album_artist, '')
             AND (
-              ta.artist_key = ?
-              OR ta.artist_key = normalize_text(?)
-              OR ta.artist_name = ?
+              ta.artist_key IN ($placeholders)
+              OR ta.artist_key IN ($normalizedPlaceholders)
+              OR ta.artist_name IN ($placeholders)
               OR ta.artist_key IN (
-                SELECT canonical_key FROM artist_aliases WHERE alias_key = ? OR alias_key = normalize_text(?)
+                SELECT canonical_key FROM artist_aliases
+                WHERE alias_key IN ($placeholders) OR alias_key IN ($normalizedPlaceholders)
               )
               OR ta.artist_key IN (
-                SELECT alias_key FROM artist_aliases WHERE canonical_key = ? OR canonical_key = normalize_text(?)
+                SELECT alias_key FROM artist_aliases
+                WHERE canonical_key IN ($placeholders) OR canonical_key IN ($normalizedPlaceholders)
               )
             )
         )
       GROUP BY album_name, t.album_artist
       ORDER BY album_name COLLATE NOCASE ASC;
       ''',
-      [artistKey, artistKey, artistKey, artistKey, artistKey, artistKey, artistKey],
+      [
+        ...artistKeys,
+        ...artistKeys,
+        ...artistKeys,
+        ...artistKeys,
+        ...artistKeys,
+        ...artistKeys,
+        ...artistKeys,
+      ],
     );
 
     return rows.map(_mapAlbumRow).toList();

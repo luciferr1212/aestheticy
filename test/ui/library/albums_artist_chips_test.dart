@@ -15,8 +15,8 @@ void main() {
 
     Widget buildChips({
       required List<ArtistChipItem> data,
-      String? selectedKey,
-      required ValueChanged<String?> onSelected,
+      Set<String> selectedKeys = const {},
+      required ValueChanged<Set<String>> onSelectionChanged,
       required ValueChanged<List<String>> onOrderChanged,
       required VoidCallback onResetOrder,
       TextDirection textDirection = TextDirection.ltr,
@@ -32,8 +32,8 @@ void main() {
               height: 100,
               child: AlbumsArtistChips(
                 artists: data,
-                selectedArtistKey: selectedKey,
-                onArtistSelected: onSelected,
+                selectedArtistKeys: selectedKeys,
+                onSelectionChanged: onSelectionChanged,
                 onOrderChanged: onOrderChanged,
                 onResetOrder: onResetOrder,
               ),
@@ -47,12 +47,12 @@ void main() {
       'renders "All" chip first, followed by artists in song count order',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
-        String? selected;
+        Set<String>? selected;
         await tester.pumpWidget(
           buildChips(
             data: artists,
-            selectedKey: null,
-            onSelected: (k) => selected = k,
+            selectedKeys: const {},
+            onSelectionChanged: (k) => selected = k,
             onOrderChanged: (_) {},
             onResetOrder: () {},
           ),
@@ -72,7 +72,7 @@ void main() {
 
         // Tap on Artist C
         await tester.tap(find.byKey(const Key('artist_chip_button_art_c')));
-        expect(selected, equals('art_c'));
+        expect(selected, equals({'art_c'}));
       },
     );
 
@@ -83,8 +83,8 @@ void main() {
         await tester.pumpWidget(
           buildChips(
             data: artists,
-            selectedKey: 'art_a',
-            onSelected: (_) {},
+            selectedKeys: const {'art_a'},
+            onSelectionChanged: (_) {},
             onOrderChanged: (_) {},
             onResetOrder: () {},
           ),
@@ -111,8 +111,8 @@ void main() {
         await tester.pumpWidget(
           buildChips(
             data: artists,
-            selectedKey: null,
-            onSelected: (_) {},
+            selectedKeys: const {},
+            onSelectionChanged: (_) {},
             onOrderChanged: (_) {},
             onResetOrder: () => resetCalled = true,
           ),
@@ -140,8 +140,8 @@ void main() {
               30,
               (i) => ArtistChipItem(key: 'art_$i', name: 'Artist $i', songCount: 50 - i),
             ),
-            selectedKey: null,
-            onSelected: (_) {},
+            selectedKeys: const {},
+            onSelectionChanged: (_) {},
             onOrderChanged: (_) {},
             onResetOrder: () {},
           ),
@@ -179,8 +179,8 @@ void main() {
         await tester.pumpWidget(
           buildChips(
             data: twentyArtists,
-            selectedKey: null,
-            onSelected: (_) {},
+            selectedKeys: const {},
+            onSelectionChanged: (_) {},
             onOrderChanged: (_) {},
             onResetOrder: () {},
             width: 2500,
@@ -215,13 +215,13 @@ void main() {
           20,
           (i) => ArtistChipItem(key: 'art_$i', name: 'Artist $i', songCount: 100 - i),
         );
-        String? selected;
+        Set<String>? selected;
 
         await tester.pumpWidget(
           buildChips(
             data: twentyArtists,
-            selectedKey: null,
-            onSelected: (k) => selected = k,
+            selectedKeys: const {},
+            onSelectionChanged: (k) => selected = k,
             onOrderChanged: (_) {},
             onResetOrder: () {},
           ),
@@ -242,15 +242,17 @@ void main() {
         expect(find.byKey(const Key('all_artists_item_art_15')), findsOneWidget);
         await tester.tap(find.byKey(const Key('all_artists_item_art_15')));
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_dialog_done')));
+        await tester.pumpAndSettle();
 
-        expect(selected, equals('art_15'));
+        expect(selected, equals({'art_15'}));
 
         // Now rebuild with art_15 selected
         await tester.pumpWidget(
           buildChips(
             data: twentyArtists,
-            selectedKey: 'art_15',
-            onSelected: (_) {},
+            selectedKeys: const {'art_15'},
+            onSelectionChanged: (_) {},
             onOrderChanged: (_) {},
             onResetOrder: () {},
           ),
@@ -283,8 +285,8 @@ void main() {
         await tester.pumpWidget(
           buildChips(
             data: artists,
-            selectedKey: null,
-            onSelected: (_) {},
+            selectedKeys: const {},
+            onSelectionChanged: (_) {},
             onOrderChanged: (o) => newOrder = o,
             onResetOrder: () => resetCalled = true,
           ),
@@ -328,8 +330,8 @@ void main() {
               15,
               (i) => ArtistChipItem(key: 'art_$i', name: 'فنان $i', songCount: 50 - i),
             ),
-            selectedKey: null,
-            onSelected: (_) {},
+            selectedKeys: const {'art_0', 'art_14'},
+            onSelectionChanged: (_) {},
             onOrderChanged: (_) {},
             onResetOrder: () {},
             textDirection: TextDirection.rtl,
@@ -340,6 +342,172 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.byKey(const Key('albums_artist_chip_all')), findsOneWidget);
         expect(find.byKey(const Key('albums_artist_chips_all_artists')), findsOneWidget);
+        expect(find.byKey(const Key('artist_chip_button_art_14')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'tapping chips toggles multi-select, All clears, deselecting last returns to All',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        var selected = <String>{};
+        await tester.pumpWidget(
+          StatefulBuilder(
+            builder: (context, setState) {
+              return buildChips(
+                data: artists,
+                selectedKeys: selected,
+                onSelectionChanged: (next) => setState(() => selected = next),
+                onOrderChanged: (_) {},
+                onResetOrder: () {},
+                width: 1200,
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Select art_c
+        await tester.tap(find.byKey(const Key('artist_chip_button_art_c')));
+        await tester.pumpAndSettle();
+        expect(selected, equals({'art_c'}));
+        expect(
+          tester.widget<GlassPillButton>(find.byKey(const Key('albums_artist_chip_all'))).variant,
+          equals(GlassButtonVariant.normal),
+        );
+        expect(
+          tester.widget<GlassPillButton>(find.byKey(const Key('artist_chip_button_art_c'))).variant,
+          equals(GlassButtonVariant.selected),
+        );
+
+        // Select art_a as well
+        await tester.tap(find.byKey(const Key('artist_chip_button_art_a')));
+        await tester.pumpAndSettle();
+        expect(selected, equals({'art_c', 'art_a'}));
+        expect(
+          tester.widget<GlassPillButton>(find.byKey(const Key('artist_chip_button_art_a'))).variant,
+          equals(GlassButtonVariant.selected),
+        );
+
+        // Deselect art_c
+        await tester.tap(find.byKey(const Key('artist_chip_button_art_c')));
+        await tester.pumpAndSettle();
+        expect(selected, equals({'art_a'}));
+
+        // Deselect last (art_a) -> returns to All
+        await tester.tap(find.byKey(const Key('artist_chip_button_art_a')));
+        await tester.pumpAndSettle();
+        expect(selected, isEmpty);
+        expect(
+          tester.widget<GlassPillButton>(find.byKey(const Key('albums_artist_chip_all'))).variant,
+          equals(GlassButtonVariant.selected),
+        );
+
+        // Select two and tap All -> clears selection
+        await tester.tap(find.byKey(const Key('artist_chip_button_art_c')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('artist_chip_button_art_b')));
+        await tester.pumpAndSettle();
+        expect(selected, equals({'art_c', 'art_b'}));
+
+        await tester.tap(find.byKey(const Key('albums_artist_chip_all')));
+        await tester.pumpAndSettle();
+        expect(selected, isEmpty);
+        expect(
+          tester.widget<GlassPillButton>(find.byKey(const Key('albums_artist_chip_all'))).variant,
+          equals(GlassButtonVariant.selected),
+        );
+      },
+    );
+
+    testWidgets(
+      'All artists popover supports multi-select with checkboxes, Clear, Cancel and Done, and inserts multiple extra chips after All',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1400, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final twentyArtists = List.generate(
+          20,
+          (i) => ArtistChipItem(key: 'art_$i', name: 'Artist $i', songCount: 100 - i),
+        );
+        var selected = <String>{'art_0'};
+
+        await tester.pumpWidget(
+          StatefulBuilder(
+            builder: (context, setState) {
+              return buildChips(
+                data: twentyArtists,
+                selectedKeys: selected,
+                onSelectionChanged: (next) => setState(() => selected = next),
+                onOrderChanged: (_) {},
+                onResetOrder: () {},
+                width: 1350,
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Open dialog, search + toggle art_14, then tap Cancel -> selection unchanged
+        await tester.tap(find.byKey(const Key('albums_artist_chips_all_artists')));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const Key('all_artists_search_input')), 'Artist 14');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_item_art_14')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_dialog_cancel')));
+        await tester.pumpAndSettle();
+        expect(selected, equals({'art_0'}));
+
+        // Reopen, toggle art_14 and art_16, tap Done -> applied
+        await tester.tap(find.byKey(const Key('albums_artist_chips_all_artists')));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const Key('all_artists_search_input')), 'Artist 14');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_item_art_14')));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byKey(const Key('all_artists_search_input')), 'Artist 16');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_checkbox_art_16')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('all_artists_dialog_done')));
+        await tester.pumpAndSettle();
+
+        expect(selected, equals({'art_0', 'art_14', 'art_16'}));
+
+        // Extra chips outside top 12 appear right after All without duplicating art_0
+        expect(find.byKey(const Key('artist_chip_button_art_14')), findsOneWidget);
+        expect(find.byKey(const Key('artist_chip_button_art_16')), findsOneWidget);
+        expect(find.byKey(const Key('artist_chip_button_art_0')), findsOneWidget);
+
+        final allDx = tester.getTopLeft(find.byKey(const Key('albums_artist_chip_all'))).dx;
+        final extra14Dx = tester.getTopLeft(find.byKey(const Key('artist_chip_button_art_14'))).dx;
+        final top0Dx = tester.getTopLeft(find.byKey(const Key('artist_chip_button_art_0'))).dx;
+        expect(allDx, lessThan(extra14Dx));
+        expect(extra14Dx, lessThan(top0Dx));
+
+        // Reopen, tap Clear then Done -> clears all
+        await tester.tap(find.byKey(const Key('albums_artist_chips_all_artists')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_dialog_clear')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('all_artists_dialog_done')));
+        await tester.pumpAndSettle();
+        expect(selected, isEmpty);
       },
     );
   });

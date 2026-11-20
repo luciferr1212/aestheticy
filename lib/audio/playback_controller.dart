@@ -445,6 +445,27 @@ class PlaybackController {
     await _preloadNext();
   }
 
+  /// Enables or disables shuffle mode, notifies queue listeners, and refreshes
+  /// the gapless preload target.
+  Future<void> setShuffle(bool enabled) async {
+    queue.setShuffle(enabled);
+    notifyQueueChanged();
+    await _preloadNext();
+  }
+
+  /// Cycles repeat mode (`off` -> `all` -> `one` -> `off`), notifies queue
+  /// listeners, and refreshes the gapless preload target.
+  Future<void> cycleRepeatMode() async {
+    final next = switch (queue.repeatMode) {
+      RepeatMode.off => RepeatMode.all,
+      RepeatMode.all => RepeatMode.one,
+      RepeatMode.one => RepeatMode.off,
+    };
+    queue.repeatMode = next;
+    notifyQueueChanged();
+    await _preloadNext();
+  }
+
   /// Safely removes the track at [index] in active playback order.
   ///
   /// - If [index] is invalid, this is a no-op.

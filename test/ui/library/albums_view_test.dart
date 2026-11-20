@@ -740,5 +740,144 @@ void main() {
         expect(settingsStore.settings.albumsArtistChipsOrder, isEmpty);
       },
     );
+
+    testWidgets(
+      'multi-select artist chips shows union without duplicates, survives shape/sort changes, and handles empty state + RTL without overflow',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        const sharedAlbum = AlbumSummary(
+          album: 'Shared Horizons',
+          albumArtist: 'Various Artists',
+          year: 2023,
+          trackCount: 6,
+        );
+        const auroraAlbum = AlbumSummary(
+          album: 'Aurora',
+          albumArtist: 'Aria',
+          year: 2024,
+          trackCount: 7,
+        );
+        const echoesAlbum = AlbumSummary(
+          album: 'Midnight Echoes',
+          albumArtist: 'Zed',
+          year: 2020,
+          trackCount: 9,
+        );
+        const thirdAlbum = AlbumSummary(
+          album: 'Third Wave',
+          albumArtist: 'Nova',
+          year: 2019,
+          trackCount: 5,
+        );
+
+        repo
+          ..albumsData = const [auroraAlbum, echoesAlbum, sharedAlbum, thirdAlbum]
+          ..artistsData = const [
+            ArtistSummary(key: 'aria', name: 'Aria', trackCount: 10, albumCount: 2),
+            ArtistSummary(key: 'zed', name: 'Zed', trackCount: 12, albumCount: 2),
+            ArtistSummary(key: 'nova', name: 'Nova', trackCount: 5, albumCount: 1),
+          ]
+          ..albumsByArtistData = const {
+            'aria': [auroraAlbum, sharedAlbum],
+            'zed': [echoesAlbum, sharedAlbum],
+            'nova': [thirdAlbum],
+          };
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+
+        expect(find.text('4 albums'), findsOneWidget);
+
+        // Select Aria -> 2 albums
+        await tester.tap(find.byKey(const Key('artist_chip_button_aria')));
+        await tester.pumpAndSettle();
+        expect(find.text('2 albums'), findsOneWidget);
+        expect(find.text('Aurora'), findsOneWidget);
+        expect(find.text('Shared Horizons'), findsOneWidget);
+        expect(find.text('Midnight Echoes'), findsNothing);
+
+        // Toggle Zed as well -> union of Aria + Zed (3 unique albums, Shared Horizons once)
+        await tester.tap(find.byKey(const Key('artist_chip_button_zed')));
+        await tester.pumpAndSettle();
+        expect(find.text('3 albums'), findsOneWidget);
+        expect(find.text('Aurora'), findsOneWidget);
+        expect(find.text('Midnight Echoes'), findsOneWidget);
+        expect(find.text('Shared Horizons'), findsOneWidget);
+        expect(find.text('Third Wave'), findsNothing);
+
+        // Change shape to square and sort reversed -> multi-selection survives in memory
+        settingsStore.update((s) => s.copyWith(libraryViewMode: 'square'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('albums_square_grid')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('albums_sort_direction')));
+        await tester.pumpAndSettle();
+        expect(find.text('3 albums'), findsOneWidget);
+        expect(find.text('Third Wave'), findsNothing);
+
+        // Deselect both -> returns to All (4 albums)
+        await tester.tap(find.byKey(const Key('artist_chip_button_aria')));
+        await tester.pumpAndSettle();
+        expect(find.text('2 albums'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('artist_chip_button_zed')));
+        await tester.pumpAndSettle();
+        expect(find.text('4 albums'), findsOneWidget);
+        expect(find.text('Third Wave'), findsOneWidget);
+
+        // Switch to Arabic RTL and verify multi-select + Show all empty state without overflow
+        settingsStore.update((s) => s.copyWith(language: 'ar'));
+        repo.artistsData = const [
+          ArtistSummary(key: 'empty1', name: 'فنان ١', trackCount: 2, albumCount: 1),
+          ArtistSummary(key: 'empty2', name: 'فنان ٢', trackCount: 2, albumCount: 1),
+          ArtistSummary(key: 'aria', name: 'آريا', trackCount: 10, albumCount: 2),
+        ];
+        repo.albumsByArtistData = const {
+          'empty1': [],
+          'empty2': [],
+          'aria': [auroraAlbum],
+        };
+        await tester.pumpWidget(
+          MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: buildAppTheme(),
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: SettingsScope(
+                store: settingsStore,
+                child: ArtistNameScope(
+                  store: artistNameStore,
+                  child: Scaffold(
+                    body: AlbumsView(
+                      repository: repo,
+                      settingsStore: settingsStore,
+                      navigator: navigator,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('artist_chip_button_empty1')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('artist_chip_button_empty2')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('albums_empty_show_all_button')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('albums_empty_show_all_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Aurora'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

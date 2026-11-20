@@ -114,7 +114,8 @@ class _AlbumsViewState extends State<AlbumsView> {
   List<AlbumSummary> _artistAlbums = [];
   List<AlbumSummary> _searchResults = [];
   List<ArtistSummary> _rawArtists = [];
-  String? _selectedArtistKey;
+  Set<String> _selectedArtistKeys = const {};
+  int _artistFilterRequestId = 0;
   String _searchQuery = '';
   bool _isLoading = true;
   LibraryDataCache? _activeCache;
@@ -156,7 +157,7 @@ class _AlbumsViewState extends State<AlbumsView> {
     if (!mounted) return;
     final cache = _activeCache;
     if (cache == null) return;
-    if (_selectedArtistKey == null && cache.albums != null) {
+    if (_selectedArtistKeys.isEmpty && cache.albums != null) {
       if (!listEquals(_albums, cache.albums) ||
           !listEquals(_rawArtists, cache.artists) ||
           _isLoading) {
@@ -172,41 +173,55 @@ class _AlbumsViewState extends State<AlbumsView> {
   }
 
   Future<void> _loadAlbums() async {
+    final selectedSnapshot = Set<String>.from(_selectedArtistKeys);
+    final reqId = ++_artistFilterRequestId;
     final albums = await widget.repository.listAlbums();
     final artists = await widget.repository.listArtists();
     List<AlbumSummary> artistAlbums = [];
-    if (_selectedArtistKey != null) {
-      artistAlbums =
-          await widget.repository.listAlbumsByArtistKey(_selectedArtistKey!);
+    if (selectedSnapshot.isNotEmpty) {
+      artistAlbums = await widget.repository.listAlbumsByArtistKeys(
+        selectedSnapshot.toList(),
+      );
     }
     if (mounted) {
+      final selectionMatches =
+          _artistFilterRequestId == reqId &&
+          setEquals(_selectedArtistKeys, selectedSnapshot);
       final changed = !listEquals(_albums, albums) ||
           !listEquals(_rawArtists, artists) ||
-          !listEquals(_artistAlbums, artistAlbums) ||
+          (selectionMatches && !listEquals(_artistAlbums, artistAlbums)) ||
           _isLoading;
       if (changed) {
         setState(() {
           _albums = albums;
           _rawArtists = artists;
-          _artistAlbums = artistAlbums;
+          if (selectionMatches) {
+            _artistAlbums = artistAlbums;
+          }
           _isLoading = false;
         });
       }
     }
   }
 
-  Future<void> _onArtistSelected(String? key) async {
-    if (_selectedArtistKey == key) return;
+  Future<void> _onArtistSelectionChanged(Set<String> keys) async {
+    final nextKeys = Set<String>.unmodifiable(keys);
+    if (setEquals(_selectedArtistKeys, nextKeys)) return;
+    final reqId = ++_artistFilterRequestId;
     setState(() {
-      _selectedArtistKey = key;
+      _selectedArtistKeys = nextKeys;
     });
-    if (key == null) {
+    if (nextKeys.isEmpty) {
       setState(() {
         _artistAlbums = [];
       });
     } else {
-      final albums = await widget.repository.listAlbumsByArtistKey(key);
-      if (mounted && _selectedArtistKey == key) {
+      final albums = await widget.repository.listAlbumsByArtistKeys(
+        nextKeys.toList(),
+      );
+      if (mounted &&
+          _artistFilterRequestId == reqId &&
+          setEquals(_selectedArtistKeys, nextKeys)) {
         setState(() {
           _artistAlbums = albums;
         });
@@ -316,7 +331,7 @@ class _AlbumsViewState extends State<AlbumsView> {
 
   List<AlbumSummary> _getSortedAlbums() {
     List<AlbumSummary> base;
-    if (_selectedArtistKey != null) {
+    if (_selectedArtistKeys.isNotEmpty) {
       base = _artistAlbums;
       if (_searchQuery.isNotEmpty) {
         final q = _searchQuery.toLowerCase();
@@ -448,8 +463,8 @@ class _AlbumsViewState extends State<AlbumsView> {
             AlbumsArtistChips(
               artists: artistChips,
               allArtists: allArtists,
-              selectedArtistKey: _selectedArtistKey,
-              onArtistSelected: _onArtistSelected,
+              selectedArtistKeys: _selectedArtistKeys,
+              onSelectionChanged: _onArtistSelectionChanged,
               onOrderChanged: _onChipsOrderChanged,
               onResetOrder: _onChipsResetOrder,
               reduceMotion: reduceMotion,
@@ -544,13 +559,16 @@ class _AlbumsViewState extends State<AlbumsView> {
     String currentSort,
   ) {
     if (albums.isEmpty) {
-      if (_selectedArtistKey != null) {
+      if (_selectedArtistKeys.isNotEmpty) {
+        final emptyMessage = _selectedArtistKeys.length == 1
+            ? context.t('albums.noAlbumsForArtist')
+            : context.t('albums.noAlbumsForArtists');
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                context.t('albums.noAlbumsForArtist'),
+                emptyMessage,
                 style: AppTypography.body.copyWith(color: AppColors.textMuted),
               ),
               const SizedBox(height: 12),
@@ -558,7 +576,7 @@ class _AlbumsViewState extends State<AlbumsView> {
                 key: const Key('albums_empty_show_all_button'),
                 label: context.t('albums.showAll'),
                 size: GlassButtonSize.small,
-                onPressed: () => _onArtistSelected(null),
+                onPressed: () => _onArtistSelectionChanged(const {}),
               ),
             ],
           ),

@@ -83,8 +83,14 @@ class TrayMenuLabels {
 
 /// Abstract contract for Windows system tray icon and context menu lifecycle.
 abstract interface class TrayService {
+  /// Whether the system tray icon is currently created and confirmed visible.
+  bool get isVisible;
+
   /// Displays the system tray icon with tooltip and initial menu.
-  Future<void> show({
+  ///
+  /// Returns `true` if the tray icon was created and is visible, or `false` if
+  /// tray creation is unsupported/unavailable.
+  Future<bool> show({
     required TrayMenuLabels labels,
     String tooltip = 'Aestheticy',
   });

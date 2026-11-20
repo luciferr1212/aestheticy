@@ -7,6 +7,7 @@ import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../diagnostics/app_logger.dart';
 import '../../diagnostics/diagnostic_report.dart';
+import '../../features/integration/tray_window_controller.dart';
 import '../../library/library_repository.dart';
 import '../../library/migrations.dart';
 import '../artist_names/artist_name_scope.dart';
@@ -53,6 +54,12 @@ class SettingsView extends StatefulWidget {
   /// Optional override for platform detection (for testing non-Windows behavior).
   final bool? isWindowsOverride;
 
+  /// Optional tray controller to observe tray icon creation failures.
+  final TrayWindowController? trayWindowController;
+
+  /// Optional test override for whether the tray icon is unavailable.
+  final bool? trayUnavailableOverride;
+
   /// Creates a [SettingsView].
   const SettingsView({
     super.key,
@@ -64,6 +71,8 @@ class SettingsView extends StatefulWidget {
     this.artistNameStore,
     this.onOpenFolders,
     this.isWindowsOverride,
+    this.trayWindowController,
+    this.trayUnavailableOverride,
   });
 
   @override
@@ -148,6 +157,14 @@ class _SettingsViewState extends State<SettingsView> {
 
   @override
   Widget build(BuildContext context) {
+    final trayController = widget.trayWindowController;
+    final Listenable listenable = trayController != null
+        ? Listenable.merge([
+            widget.settingsStore,
+            trayController.trayUnavailableListenable,
+          ])
+        : widget.settingsStore;
+
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         shortcutById(AppShortcutId.back).activator: () {
@@ -158,7 +175,7 @@ class _SettingsViewState extends State<SettingsView> {
         focusNode: _focusNode,
         autofocus: true,
         child: ListenableBuilder(
-          listenable: widget.settingsStore,
+          listenable: listenable,
           builder: (context, _) {
             final settings = widget.settingsStore.settings;
 
@@ -1052,6 +1069,30 @@ class _SettingsViewState extends State<SettingsView> {
             },
           ),
         ),
+        if (widget.trayUnavailableOverride ??
+            (widget.trayWindowController?.isTrayUnavailable ?? false))
+          Padding(
+            padding: const EdgeInsetsDirectional.only(top: AppSpacing.s8),
+            child: Row(
+              key: const Key('settings_tray_unavailable_hint'),
+              children: [
+                const Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
+                const SizedBox(width: AppSpacing.s8),
+                Expanded(
+                  child: Text(
+                    context.t('settings.trayUnavailableHint'),
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }

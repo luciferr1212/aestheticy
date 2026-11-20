@@ -88,12 +88,38 @@ class FakeLibraryRepository implements LibraryRepository {
   /// Optional hook for [listAlbumsByArtistKey].
   List<AlbumSummary> Function(String artistKey)? onListAlbumsByArtistKey;
 
+  /// Optional hook for [listAlbumsByArtistKeys].
+  List<AlbumSummary> Function(List<String> artistKeys)? onListAlbumsByArtistKeys;
+
   @override
   Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async {
     if (onListAlbumsByArtistKey != null) {
       return onListAlbumsByArtistKey!(artistKey);
     }
     return [];
+  }
+
+  @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKeys(
+    List<String> artistKeys,
+  ) async {
+    if (onListAlbumsByArtistKeys != null) {
+      return onListAlbumsByArtistKeys!(artistKeys);
+    }
+    if (artistKeys.isEmpty) return [];
+    final seen = <String, AlbumSummary>{};
+    for (final key in artistKeys) {
+      final albums = await listAlbumsByArtistKey(key);
+      for (final album in albums) {
+        seen.putIfAbsent(
+          '${album.album}\u0000${album.albumArtist ?? ''}',
+          () => album,
+        );
+      }
+    }
+    final result = seen.values.toList()
+      ..sort((a, b) => a.album.toLowerCase().compareTo(b.album.toLowerCase()));
+    return result;
   }
 
   @override

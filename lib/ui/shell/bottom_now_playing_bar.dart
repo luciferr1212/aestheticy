@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
+import '../../audio/playback_queue.dart';
 import '../../features/collections/user_collections.dart';
 import '../../library/cover_cache.dart';
 import '../mini_player/mini_player_controller.dart';
@@ -281,66 +282,155 @@ class _CenterTransportArea extends StatelessWidget {
 
   const _CenterTransportArea({required this.controller});
 
+  Widget _buildRepeatButton(BuildContext context, RepeatMode mode) {
+    final (variant, tooltip) = switch (mode) {
+      RepeatMode.off => (GlassButtonVariant.normal, context.t('player.repeatOff')),
+      RepeatMode.all => (GlassButtonVariant.selected, context.t('player.repeatAll')),
+      RepeatMode.one => (GlassButtonVariant.selected, context.t('player.repeatOne')),
+    };
+
+    if (mode == RepeatMode.one) {
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          GlassIconButton(
+            key: const Key('bottom_bar_repeat_button'),
+            icon: Icons.repeat_one,
+            tooltip: tooltip,
+            semanticLabel: tooltip,
+            size: GlassButtonSize.small,
+            variant: variant,
+            onPressed: () => unawaited(controller.cycleRepeatMode()),
+          ),
+          PositionedDirectional(
+            end: 2,
+            top: 2,
+            child: IgnorePointer(
+              child: Container(
+                key: const Key('bottom_bar_repeat_one_badge'),
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  color: AppColors.accent,
+                  shape: BoxShape.circle,
+                ),
+                child: const Text(
+                  '1',
+                  style: TextStyle(
+                    color: AppColors.base,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                    height: 1,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return GlassIconButton(
+      key: const Key('bottom_bar_repeat_button'),
+      icon: Icons.repeat,
+      tooltip: tooltip,
+      semanticLabel: tooltip,
+      size: GlassButtonSize.small,
+      variant: variant,
+      onPressed: () => unawaited(controller.cycleRepeatMode()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<PlaybackState>(
-      stream: controller.stateStream,
-      initialData: controller.currentState,
-      builder: (context, snapshot) {
-        final state = snapshot.data ?? PlaybackState.idle;
-        final isPlaying = state == PlaybackState.playing;
-        final hasTrack = controller.queue.current != null;
+    return StreamBuilder<void>(
+      stream: controller.queueChangeStream,
+      builder: (context, _) {
+        final isShuffled = controller.queue.isShuffled;
+        final repeatMode = controller.queue.repeatMode;
 
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Transport buttons row
-            Row(
+        return StreamBuilder<PlaybackState>(
+          stream: controller.stateStream,
+          initialData: controller.currentState,
+          builder: (context, snapshot) {
+            final state = snapshot.data ?? PlaybackState.idle;
+            final isPlaying = state == PlaybackState.playing;
+            final hasTrack = controller.queue.current != null;
+
+            return Column(
               mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                GlassIconButton(
-                  key: const Key('bottom_bar_prev_button'),
-                  icon: Icons.skip_previous,
-                  tooltip: context.t('common.previous'),
-                  semanticLabel: context.t('common.previous'),
-                  size: GlassButtonSize.small,
-                  onPressed: hasTrack ? () => controller.skipPrevious() : null,
+                // Transport buttons row: [shuffle] [prev] [play/pause] [next] [repeat]
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.center,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GlassIconButton(
+                        key: const Key('bottom_bar_shuffle_button'),
+                        icon: Icons.shuffle,
+                        tooltip: context.t('player.shuffle'),
+                        semanticLabel: context.t('player.shuffle'),
+                        size: GlassButtonSize.small,
+                        variant: isShuffled
+                            ? GlassButtonVariant.selected
+                            : GlassButtonVariant.normal,
+                        onPressed: () =>
+                            unawaited(controller.setShuffle(!isShuffled)),
+                      ),
+                      const SizedBox(width: 8),
+                      GlassIconButton(
+                        key: const Key('bottom_bar_prev_button'),
+                        icon: Icons.skip_previous,
+                        tooltip: context.t('common.previous'),
+                        semanticLabel: context.t('common.previous'),
+                        size: GlassButtonSize.small,
+                        onPressed:
+                            hasTrack ? () => controller.skipPrevious() : null,
+                      ),
+                      const SizedBox(width: 8),
+                      GlassIconButton(
+                        key: const Key('bottom_bar_play_pause_button'),
+                        icon: isPlaying ? Icons.pause : Icons.play_arrow,
+                        tooltip: isPlaying
+                            ? context.t('common.pause')
+                            : context.t('common.play'),
+                        semanticLabel: isPlaying
+                            ? context.t('common.pause')
+                            : context.t('common.play'),
+                        size: GlassButtonSize.medium,
+                        variant: GlassButtonVariant.primary,
+                        onPressed:
+                            hasTrack ? () => controller.togglePlayPause() : null,
+                      ),
+                      const SizedBox(width: 8),
+                      GlassIconButton(
+                        key: const Key('bottom_bar_next_button'),
+                        icon: Icons.skip_next,
+                        tooltip: context.t('common.next'),
+                        semanticLabel: context.t('common.next'),
+                        size: GlassButtonSize.small,
+                        onPressed:
+                            hasTrack ? () => controller.skipNext() : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _buildRepeatButton(context, repeatMode),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                GlassIconButton(
-                  key: const Key('bottom_bar_play_pause_button'),
-                  icon: isPlaying ? Icons.pause : Icons.play_arrow,
-                  tooltip: isPlaying
-                      ? context.t('common.pause')
-                      : context.t('common.play'),
-                  semanticLabel: isPlaying
-                      ? context.t('common.pause')
-                      : context.t('common.play'),
-                  size: GlassButtonSize.medium,
-                  variant: GlassButtonVariant.primary,
-                  onPressed: hasTrack ? () => controller.togglePlayPause() : null,
-                ),
-                const SizedBox(width: 8),
-                GlassIconButton(
-                  key: const Key('bottom_bar_next_button'),
-                  icon: Icons.skip_next,
-                  tooltip: context.t('common.next'),
-                  semanticLabel: context.t('common.next'),
-                  size: GlassButtonSize.small,
-                  onPressed: hasTrack ? () => controller.skipNext() : null,
+                const SizedBox(height: 2),
+
+                // Isolated Seek Bar Leaf (rebuilds on its own)
+                _NowPlayingSeekBarLeaf(
+                  engine: controller.engine,
+                  hasTrack: hasTrack,
+                  controller: controller,
                 ),
               ],
-            ),
-            const SizedBox(height: 2),
-
-            // Isolated Seek Bar Leaf (rebuilds on its own)
-            _NowPlayingSeekBarLeaf(
-              engine: controller.engine,
-              hasTrack: hasTrack,
-              controller: controller,
-            ),
-          ],
+            );
+          },
         );
       },
     );

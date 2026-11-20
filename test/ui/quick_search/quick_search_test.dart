@@ -73,6 +73,11 @@ class _FakeSearchRepo implements LibraryRepository {
   Future<List<AlbumSummary>> listAlbums({int? limit, int? offset}) async => [];
   @override
   Future<List<AlbumSummary>> listAlbumsByArtistKey(String artistKey) async => [];
+
+  @override
+  Future<List<AlbumSummary>> listAlbumsByArtistKeys(
+    List<String> artistKeys,
+  ) async => [];
   @override
   Future<List<ArtistSummary>> listArtists({int? limit, int? offset}) async => [];
   @override

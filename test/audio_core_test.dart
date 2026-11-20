@@ -1773,6 +1773,8 @@ void main() {
       });
     });
   });
+
+  _registerControllerShuffleRepeatTests();
 }
 
 // ── Test doubles ────────────────────────────────────────────────────────
@@ -1891,4 +1893,85 @@ class _ThrowingPreloadEngine extends _GaplessFakeEngine {
   Future<void> preloadNext(AudioSource? next) async {
     throw StateError('preload failed');
   }
+}
+
+/// A gapless-capable fake that records every [preloadNext] argument in order.
+class _PreloadSpyEngine extends _GaplessFakeEngine {
+  final List<String?> preloadedUris = [];
+
+  @override
+  Future<void> preloadNext(AudioSource? next) async {
+    preloadedUris.add(next?.uri);
+    await super.preloadNext(next);
+  }
+}
+
+void _registerControllerShuffleRepeatTests() {
+  group('PlaybackController setShuffle & cycleRepeatMode (S2)', () {
+    test('setShuffle updates queue, emits queueChangeStream, and refreshes preload', () async {
+      final engine = _PreloadSpyEngine();
+      await engine.init();
+      final ctrl = PlaybackController(engine: engine, queue: PlaybackQueue());
+      await ctrl.init();
+      await ctrl.playQueue([_src('a'), _src('b'), _src('c')]);
+      engine.preloadedUris.clear();
+
+      var notifications = 0;
+      final sub = ctrl.queueChangeStream.listen((_) => notifications++);
+
+      await ctrl.setShuffle(true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(ctrl.queue.isShuffled, isTrue);
+      expect(notifications, 1);
+      expect(engine.preloadedUris, [ctrl.queue.peekNext()?.uri]);
+
+      await ctrl.setShuffle(false);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(ctrl.queue.isShuffled, isFalse);
+      expect(notifications, 2);
+      expect(engine.preloadedUris.last, ctrl.queue.peekNext()?.uri);
+
+      await sub.cancel();
+      await ctrl.dispose();
+      await engine.dispose();
+    });
+
+    test('cycleRepeatMode cycles off -> all -> one -> off, notifies queue, and refreshes preload', () async {
+      final engine = _PreloadSpyEngine();
+      await engine.init();
+      final ctrl = PlaybackController(engine: engine, queue: PlaybackQueue());
+      await ctrl.init();
+      await ctrl.playQueue([_src('solo')]);
+      engine.preloadedUris.clear();
+
+      var notifications = 0;
+      final sub = ctrl.queueChangeStream.listen((_) => notifications++);
+
+      expect(ctrl.queue.repeatMode, RepeatMode.off);
+
+      await ctrl.cycleRepeatMode();
+      await Future<void>.delayed(Duration.zero);
+      expect(ctrl.queue.repeatMode, RepeatMode.all);
+      expect(notifications, 1);
+      expect(engine.preloadedUris.last, 'file:///solo.flac');
+
+      await ctrl.cycleRepeatMode();
+      await Future<void>.delayed(Duration.zero);
+      expect(ctrl.queue.repeatMode, RepeatMode.one);
+      expect(notifications, 2);
+      expect(engine.preloadedUris.last, 'file:///solo.flac');
+
+      await ctrl.cycleRepeatMode();
+      await Future<void>.delayed(Duration.zero);
+      expect(ctrl.queue.repeatMode, RepeatMode.off);
+      expect(notifications, 3);
+      expect(engine.preloadedUris.last, isNull);
+
+      await sub.cancel();
+      await ctrl.dispose();
+      await engine.dispose();
+    });
+  });
 }

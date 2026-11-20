@@ -76,6 +76,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
   late final LyricsController _lyricsController;
   bool _createdLyricsControllerLocally = false;
   StreamSubscription<AudioSource?>? _currentSub;
+  StreamSubscription<void>? _queueSub;
   CoverPalette _palette = CoverPalette.fallback;
   int _activeTabIndex = 0; // 0: Up next, 1: Lyrics
 
@@ -103,6 +104,10 @@ class _NowPlayingViewState extends State<NowPlayingView> {
       _updatePalette(source?.extras?['coverKey']);
       setState(() {});
     });
+    _queueSub = widget.controller.queueChangeStream.listen((_) {
+      if (!mounted) return;
+      setState(() {});
+    });
   }
 
   @override
@@ -111,6 +116,19 @@ class _NowPlayingViewState extends State<NowPlayingView> {
     if (oldWidget.settingsStore != widget.settingsStore) {
       oldWidget.settingsStore.removeListener(_onSettingsChanged);
       widget.settingsStore.addListener(_onSettingsChanged);
+    }
+    if (oldWidget.controller != widget.controller) {
+      _currentSub?.cancel();
+      _queueSub?.cancel();
+      _currentSub = widget.controller.currentStream.listen((source) {
+        if (!mounted) return;
+        _updatePalette(source?.extras?['coverKey']);
+        setState(() {});
+      });
+      _queueSub = widget.controller.queueChangeStream.listen((_) {
+        if (!mounted) return;
+        setState(() {});
+      });
     }
   }
 
@@ -133,23 +151,17 @@ class _NowPlayingViewState extends State<NowPlayingView> {
       _lyricsController.dispose();
     }
     _currentSub?.cancel();
+    _queueSub?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
 
   void _cycleRepeat() {
-    final next = switch (widget.controller.queue.repeatMode) {
-      RepeatMode.off => RepeatMode.all,
-      RepeatMode.all => RepeatMode.one,
-      RepeatMode.one => RepeatMode.off,
-    };
-    widget.controller.queue.repeatMode = next;
-    setState(() {});
+    unawaited(widget.controller.cycleRepeatMode());
   }
 
   void _toggleShuffle() {
-    widget.controller.queue.setShuffle(!widget.controller.queue.isShuffled);
-    setState(() {});
+    unawaited(widget.controller.setShuffle(!widget.controller.queue.isShuffled));
   }
 
   Future<void> _clearUpcoming() async {
@@ -432,6 +444,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
           children: [
             // Shuffle
             GlassIconButton(
+              key: const Key('now_playing_shuffle_button'),
               icon: Icons.shuffle,
               tooltip: context.t('player.shuffle'),
               semanticLabel: context.t('player.shuffle'),
@@ -502,6 +515,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
         alignment: Alignment.center,
         children: [
           GlassIconButton(
+            key: const Key('now_playing_repeat_button'),
             icon: Icons.repeat_one,
             tooltip: tooltip,
             semanticLabel: tooltip,
@@ -511,19 +525,21 @@ class _NowPlayingViewState extends State<NowPlayingView> {
           PositionedDirectional(
             end: 4,
             top: 4,
-            child: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(
-                color: AppColors.accent,
-                shape: BoxShape.circle,
-              ),
-              child: const Text(
-                '1',
-                style: TextStyle(
-                  color: AppColors.base,
-                  fontSize: 8,
-                  fontWeight: FontWeight.bold,
-                  height: 1,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  color: AppColors.accent,
+                  shape: BoxShape.circle,
+                ),
+                child: const Text(
+                  '1',
+                  style: TextStyle(
+                    color: AppColors.base,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                    height: 1,
+                  ),
                 ),
               ),
             ),
@@ -533,6 +549,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
     }
 
     return GlassIconButton(
+      key: const Key('now_playing_repeat_button'),
       icon: Icons.repeat,
       tooltip: tooltip,
       semanticLabel: tooltip,

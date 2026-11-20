@@ -38,11 +38,11 @@ class AlbumsArtistChips extends StatefulWidget {
   /// If null, defaults to [artists].
   final List<ArtistChipItem>? allArtists;
 
-  /// Currently selected artist key (null means "All").
-  final String? selectedArtistKey;
+  /// Currently selected artist keys (empty means "All").
+  final Set<String> selectedArtistKeys;
 
-  /// Callback when user taps a chip. Null key corresponds to "All".
-  final ValueChanged<String?> onArtistSelected;
+  /// Callback when the artist selection changes. Empty set corresponds to "All".
+  final ValueChanged<Set<String>> onSelectionChanged;
 
   /// Callback when user reorders the chips.
   final ValueChanged<List<String>> onOrderChanged;
@@ -58,8 +58,8 @@ class AlbumsArtistChips extends StatefulWidget {
     super.key,
     required this.artists,
     this.allArtists,
-    required this.selectedArtistKey,
-    required this.onArtistSelected,
+    required this.selectedArtistKeys,
+    required this.onSelectionChanged,
     required this.onOrderChanged,
     required this.onResetOrder,
     this.reduceMotion = false,
@@ -116,21 +116,31 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
 
   List<ArtistChipItem> get _displayedArtists {
     final top12 = widget.artists.take(12).toList();
-    final selectedKey = widget.selectedArtistKey;
-    if (selectedKey != null && !top12.any((a) => a.key == selectedKey)) {
-      final source = widget.allArtists ?? widget.artists;
-      ArtistChipItem? extraArtist;
-      for (final a in source) {
-        if (a.key == selectedKey) {
-          extraArtist = a;
-          break;
-        }
-      }
-      if (extraArtist != null) {
-        top12.insert(0, extraArtist);
+    if (widget.selectedArtistKeys.isEmpty) {
+      return top12;
+    }
+
+    final top12Keys = top12.map((a) => a.key).toSet();
+    final source = widget.allArtists ?? widget.artists;
+    final extraSelected = <ArtistChipItem>[];
+    final seenExtra = <String>{};
+    for (final artist in source) {
+      if (widget.selectedArtistKeys.contains(artist.key) &&
+          !top12Keys.contains(artist.key) &&
+          seenExtra.add(artist.key)) {
+        extraSelected.add(artist);
       }
     }
-    return top12;
+
+    return [...extraSelected, ...top12];
+  }
+
+  void _toggleArtist(String key) {
+    final next = Set<String>.from(widget.selectedArtistKeys);
+    if (!next.remove(key)) {
+      next.add(key);
+    }
+    widget.onSelectionChanged(next);
   }
 
   void _handleReorder(int oldIndex, int newIndex) {
@@ -147,10 +157,10 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
       builder: (dialogCtx) {
         return _AllArtistsDialog(
           artists: widget.allArtists ?? widget.artists,
-          selectedArtistKey: widget.selectedArtistKey,
-          onArtistSelected: (key) {
+          selectedArtistKeys: widget.selectedArtistKeys,
+          onApply: (selected) {
             Navigator.of(dialogCtx).pop();
-            widget.onArtistSelected(key);
+            widget.onSelectionChanged(selected);
           },
         );
       },
@@ -159,7 +169,7 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
 
   @override
   Widget build(BuildContext context) {
-    final isAllSelected = widget.selectedArtistKey == null;
+    final isAllSelected = widget.selectedArtistKeys.isEmpty;
     final displayed = _displayedArtists;
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateScrollFades());
@@ -178,7 +188,7 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
                   ? GlassButtonVariant.selected
                   : GlassButtonVariant.normal,
               size: GlassButtonSize.medium,
-              onPressed: () => widget.onArtistSelected(null),
+              onPressed: () => widget.onSelectionChanged(const {}),
             ),
 
             const SizedBox(width: AppSpacing.s8),
@@ -237,7 +247,7 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
                           itemBuilder: (context, index) {
                             final artist = displayed[index];
                             final isSelected =
-                                widget.selectedArtistKey == artist.key;
+                                widget.selectedArtistKeys.contains(artist.key);
 
                             return ReorderableDragStartListener(
                               key: ValueKey('artist_chip_${artist.key}'),
@@ -262,8 +272,7 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
                                       ? GlassButtonVariant.selected
                                       : GlassButtonVariant.normal,
                                   size: GlassButtonSize.medium,
-                                  onPressed: () =>
-                                      widget.onArtistSelected(artist.key),
+                                  onPressed: () => _toggleArtist(artist.key),
                                 ),
                               ),
                             );
@@ -327,13 +336,13 @@ class _AlbumsArtistChipsState extends State<AlbumsArtistChips> {
 
 class _AllArtistsDialog extends StatefulWidget {
   final List<ArtistChipItem> artists;
-  final String? selectedArtistKey;
-  final ValueChanged<String?> onArtistSelected;
+  final Set<String> selectedArtistKeys;
+  final ValueChanged<Set<String>> onApply;
 
   const _AllArtistsDialog({
     required this.artists,
-    required this.selectedArtistKey,
-    required this.onArtistSelected,
+    required this.selectedArtistKeys,
+    required this.onApply,
   });
 
   @override
@@ -342,6 +351,21 @@ class _AllArtistsDialog extends StatefulWidget {
 
 class _AllArtistsDialogState extends State<_AllArtistsDialog> {
   String _search = '';
+  late Set<String> _draftSelected;
+
+  @override
+  void initState() {
+    super.initState();
+    _draftSelected = Set<String>.from(widget.selectedArtistKeys);
+  }
+
+  void _toggleDraft(String key) {
+    setState(() {
+      if (!_draftSelected.remove(key)) {
+        _draftSelected.add(key);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -423,21 +447,31 @@ class _AllArtistsDialogState extends State<_AllArtistsDialog> {
                         itemCount: filtered.length,
                         itemBuilder: (context, index) {
                           final artist = filtered[index];
-                          final isSelected = widget.selectedArtistKey == artist.key;
+                          final isSelected = _draftSelected.contains(artist.key);
                           return InkWell(
                             key: Key('all_artists_item_${artist.key}'),
                             mouseCursor: SystemMouseCursors.click,
                             hoverColor: const Color(0x14FFFFFF),
                             borderRadius: BorderRadius.circular(AppSpacing.r10),
-                            onTap: () => widget.onArtistSelected(artist.key),
+                            onTap: () => _toggleDraft(artist.key),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(AppSpacing.r10),
                                 color: isSelected ? AppColors.accentFill : Colors.transparent,
                               ),
                               child: Row(
                                 children: [
+                                  Checkbox(
+                                    key: Key('all_artists_checkbox_${artist.key}'),
+                                    value: isSelected,
+                                    onChanged: (_) => _toggleDraft(artist.key),
+                                    activeColor: AppColors.accent,
+                                    checkColor: AppColors.base,
+                                    side: const BorderSide(color: AppColors.textMuted),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  const SizedBox(width: AppSpacing.s8),
                                   Expanded(
                                     child: Text(
                                       artist.name,
@@ -447,6 +481,7 @@ class _AllArtistsDialogState extends State<_AllArtistsDialog> {
                                       ),
                                     ),
                                   ),
+                                  const SizedBox(width: AppSpacing.s8),
                                   Text(
                                     '${context.localizeDigitsText(artist.songCount.toString())} ${context.t('tracks.count')}',
                                     style: AppTypography.caption.copyWith(color: AppColors.textMuted),
@@ -457,6 +492,35 @@ class _AllArtistsDialogState extends State<_AllArtistsDialog> {
                           );
                         },
                       ),
+              ),
+              const SizedBox(height: AppSpacing.s12),
+              Row(
+                children: [
+                  GlassPillButton(
+                    key: const Key('all_artists_dialog_clear'),
+                    label: context.t('common.clear'),
+                    size: GlassButtonSize.small,
+                    onPressed: _draftSelected.isEmpty
+                        ? null
+                        : () => setState(() => _draftSelected.clear()),
+                  ),
+                  const Spacer(),
+                  GlassPillButton(
+                    key: const Key('all_artists_dialog_cancel'),
+                    label: context.t('common.cancel'),
+                    size: GlassButtonSize.small,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: AppSpacing.s8),
+                  GlassPillButton(
+                    key: const Key('all_artists_dialog_done'),
+                    label: context.t('common.done'),
+                    variant: GlassButtonVariant.primary,
+                    size: GlassButtonSize.small,
+                    onPressed: () =>
+                        widget.onApply(Set<String>.unmodifiable(_draftSelected)),
+                  ),
+                ],
               ),
             ],
           ),

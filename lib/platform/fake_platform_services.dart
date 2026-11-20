@@ -120,20 +120,32 @@ class FakeTrayService implements TrayService {
   final StreamController<TrayEvent> _eventController =
       StreamController<TrayEvent>.broadcast();
 
+  @override
   bool isVisible = false;
+  bool failShow = false;
+  Object? showException;
   bool isDisposed = false;
   TrayMenuLabels? currentLabels;
   String? currentTooltip;
 
   @override
-  Future<void> show({
+  Future<bool> show({
     required TrayMenuLabels labels,
     String tooltip = 'Aestheticy',
   }) async {
     calls.add('show(show: "${labels.show}", playPause: "${labels.playPause}", quit: "${labels.quit}")');
+    if (showException != null) {
+      isVisible = false;
+      throw showException!;
+    }
+    if (failShow) {
+      isVisible = false;
+      return false;
+    }
     isVisible = true;
     currentLabels = labels;
     currentTooltip = tooltip;
+    return true;
   }
 
   @override

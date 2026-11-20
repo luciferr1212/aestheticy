@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -6,11 +7,32 @@ import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/features/integration/app_shutdown.dart';
 import 'package:aestheticy/features/integration/tray_window_controller.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/platform/tray_service.dart';
+import 'package:aestheticy/platform/windows/windows_tray_service.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
+
+class _CountingShutdownCoordinator extends AppShutdownCoordinator {
+  int shutdownCallCount = 0;
+
+  _CountingShutdownCoordinator({
+    required super.settingsStore,
+    super.mediaSessionService,
+    super.sleepInhibitor,
+    super.trayService,
+    super.windowService,
+    super.logger,
+  });
+
+  @override
+  Future<void> shutdown() {
+    shutdownCallCount++;
+    return super.shutdown();
+  }
+}
 
 void main() {
   group('TrayWindowController Tests', () {
@@ -248,6 +270,260 @@ void main() {
       expect(fakeTray.isVisible, isFalse);
 
       await controller.dispose();
+    });
+
+    test('tray created -> handleCloseRequested hides window and logs lifecycle without personal data', () async {
+      final logBuffer = StringBuffer();
+      final logger = AppLogger(customSink: logBuffer);
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await settingsStore.flush();
+
+      final controller = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackController,
+        settingsStore: settingsStore,
+        shutdownCoordinator: shutdownCoordinator,
+        logger: logger,
+      );
+      await controller.init();
+
+      expect(fakeTray.isVisible, isTrue);
+      expect(controller.isTrayUnavailable, isFalse);
+
+      final hidden = await controller.handleCloseRequested();
+      expect(hidden, isTrue);
+      expect(fakeWindow.isVisible, isFalse);
+      expect(fakeWindow.isDestroyed, isFalse);
+      expect(shutdownCoordinator.hasShutdown, isFalse);
+
+      final logs = logBuffer.toString();
+      expect(logs, contains('Tray show result: success (isVisible=true)'));
+      expect(logs, contains('Close requested'));
+      expect(logs, contains('Close behavior read: tray'));
+      expect(logs, contains('Final close action: hide'));
+
+      await controller.dispose();
+    });
+
+    test('tray creation failure (returns false) marks tray unavailable and close in tray mode quits instead of hiding', () async {
+      final logBuffer = StringBuffer();
+      final logger = AppLogger(customSink: logBuffer);
+      fakeTray.failShow = true;
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await settingsStore.flush();
+
+      final controller = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackController,
+        settingsStore: settingsStore,
+        shutdownCoordinator: shutdownCoordinator,
+        logger: logger,
+      );
+      await controller.init();
+
+      expect(fakeTray.isVisible, isFalse);
+      expect(controller.isTrayUnavailable, isTrue);
+
+      fakeWindow.emitCloseRequested();
+      await pumpEventQueue();
+      await controller.lastCloseFuture;
+
+      expect(shutdownCoordinator.hasShutdown, isTrue);
+      expect(fakeWindow.isDestroyed, isTrue);
+
+      final logs = logBuffer.toString();
+      expect(logs, contains('Tray show result: failure'));
+      expect(logs, contains('Final close action: quit'));
+
+      await controller.dispose();
+    });
+
+    test('tray creation throwing exception logs exceptionType, marks unavailable, and close quits cleanly', () async {
+      final logBuffer = StringBuffer();
+      final logger = AppLogger(customSink: logBuffer);
+      fakeTray.showException = StateError('Shell_NotifyIcon failed');
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await settingsStore.flush();
+
+      final controller = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackController,
+        settingsStore: settingsStore,
+        shutdownCoordinator: shutdownCoordinator,
+        logger: logger,
+      );
+      await controller.init();
+
+      expect(fakeTray.isVisible, isFalse);
+      expect(controller.isTrayUnavailable, isTrue);
+
+      final hidden = await controller.handleCloseRequested();
+      expect(hidden, isFalse);
+      expect(shutdownCoordinator.hasShutdown, isTrue);
+      expect(fakeWindow.isDestroyed, isTrue);
+
+      final logs = logBuffer.toString();
+      expect(logs, contains('exceptionType=StateError'));
+      expect(logs, contains('Final close action: quit'));
+
+      await controller.dispose();
+    });
+
+    test('switching closeBehavior at runtime: tray fail quits on close, later tray success hides on close', () async {
+      fakeTray.failShow = true;
+      final controller = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackController,
+        settingsStore: settingsStore,
+        shutdownCoordinator: shutdownCoordinator,
+      );
+      await controller.init();
+
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await pumpEventQueue();
+      expect(controller.isTrayUnavailable, isTrue);
+      expect(fakeTray.isVisible, isFalse);
+
+      // Toggle back to quit then allow tray creation and switch to tray again
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'quit'));
+      await pumpEventQueue();
+      fakeTray.failShow = false;
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await pumpEventQueue();
+
+      expect(controller.isTrayUnavailable, isFalse);
+      expect(fakeTray.isVisible, isTrue);
+
+      final hidden = await controller.handleCloseRequested();
+      expect(hidden, isTrue);
+      expect(fakeWindow.isDestroyed, isFalse);
+      expect(shutdownCoordinator.hasShutdown, isFalse);
+
+      await controller.dispose();
+    });
+
+    test('single close handler deduplicates overlapping closes and tray Quit runs shutdown once', () async {
+      final countingShutdown = _CountingShutdownCoordinator(
+        settingsStore: settingsStore,
+        mediaSessionService: FakeMediaSessionService(),
+        sleepInhibitor: FakeSleepInhibitor(),
+        trayService: fakeTray,
+        windowService: fakeWindow,
+        logger: AppLogger(customSink: StringBuffer()),
+      );
+
+      final controller = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackController,
+        settingsStore: settingsStore,
+        shutdownCoordinator: countingShutdown,
+      );
+      await controller.init();
+
+      // Overlapping close requests (e.g. window close + lifecycle exit)
+      fakeWindow.emitCloseRequested();
+      final secondClose = controller.handleCloseRequested();
+      await pumpEventQueue();
+      await controller.lastCloseFuture;
+      await secondClose;
+
+      // Subsequent Quit item from tray menu must still keep total shutdowns == 1
+      await controller.handleMenuItem(TrayMenuItemId.quit);
+
+      expect(countingShutdown.shutdownCallCount, equals(1));
+      expect(fakeWindow.calls.where((c) => c == 'destroy').length, equals(1));
+
+      await controller.dispose();
+    });
+
+    test('tray Quit menu item runs shutdown coordinator and window destroy exactly once', () async {
+      settingsStore.update((s) => s.copyWith(closeBehavior: 'tray'));
+      await settingsStore.flush();
+
+      final countingShutdown = _CountingShutdownCoordinator(
+        settingsStore: settingsStore,
+        mediaSessionService: FakeMediaSessionService(),
+        sleepInhibitor: FakeSleepInhibitor(),
+        trayService: fakeTray,
+        windowService: fakeWindow,
+        logger: AppLogger(customSink: StringBuffer()),
+      );
+
+      final controller = TrayWindowController(
+        windowService: fakeWindow,
+        trayService: fakeTray,
+        playbackController: playbackController,
+        settingsStore: settingsStore,
+        shutdownCoordinator: countingShutdown,
+      );
+      await controller.init();
+
+      fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.quit));
+      fakeTray.emitEvent(const TrayEvent.menuItem(TrayMenuItemId.quit));
+      await pumpEventQueue();
+      await controller.lastTrayEventFuture;
+
+      expect(countingShutdown.shutdownCallCount, equals(1));
+      expect(fakeWindow.calls.where((c) => c == 'destroy').length, equals(1));
+      expect(fakeTray.isVisible, isFalse);
+
+      await controller.dispose();
+    });
+
+    test('WindowsTrayService validates ICO header bytes and resolves release vs fallback icon paths', () async {
+      final projectIco = File('assets/tray/app_icon.ico');
+      expect(projectIco.existsSync(), isTrue);
+      final realBytes = await projectIco.readAsBytes();
+      expect(WindowsTrayService.isValidIcoBytes(realBytes), isTrue);
+
+      // Invalid/truncated headers must be rejected
+      expect(WindowsTrayService.isValidIcoBytes(Uint8List(0)), isFalse);
+      expect(
+        WindowsTrayService.isValidIcoBytes(Uint8List.fromList([0, 0, 2, 0, 1, 0, ...List.filled(16, 0)])),
+        isFalse,
+      );
+      expect(
+        WindowsTrayService.isValidIcoBytes(Uint8List.fromList([0, 0, 1, 0, 1, 0])),
+        isFalse,
+      );
+
+      // Simulate release layout: <exeDir>/data/flutter_assets/assets/tray/app_icon.ico
+      final releaseRoot = await Directory.systemTemp.createTemp('aestheticy_ico_rel_');
+      try {
+        final releaseIco = File(
+          '${releaseRoot.path}${Platform.pathSeparator}data${Platform.pathSeparator}flutter_assets${Platform.pathSeparator}assets${Platform.pathSeparator}tray${Platform.pathSeparator}app_icon.ico',
+        );
+        await releaseIco.parent.create(recursive: true);
+        await releaseIco.writeAsBytes(realBytes, flush: true);
+
+        final resolved = await WindowsTrayService.resolveIconFilePath(
+          resolvedExecutablePath: '${releaseRoot.path}${Platform.pathSeparator}aestheticy.exe',
+          currentDirectoryPath: releaseRoot.path,
+        );
+        expect(resolved, equals(releaseIco.path));
+      } finally {
+        await releaseRoot.delete(recursive: true);
+      }
+
+      // Simulate missing release + cwd assets -> extracts via loadAsset to supportDir
+      final fallbackRoot = await Directory.systemTemp.createTemp('aestheticy_ico_fb_');
+      try {
+        final resolved = await WindowsTrayService.resolveIconFilePath(
+          resolvedExecutablePath: '${fallbackRoot.path}${Platform.pathSeparator}missing${Platform.pathSeparator}aestheticy.exe',
+          currentDirectoryPath: '${fallbackRoot.path}${Platform.pathSeparator}nowhere',
+          loadAsset: (_) async => ByteData.sublistView(realBytes),
+          supportDirProvider: () async => fallbackRoot,
+        );
+        expect(resolved, isNotNull);
+        expect(File(resolved!).existsSync(), isTrue);
+      } finally {
+        await fallbackRoot.delete(recursive: true);
+      }
     });
   });
 }
