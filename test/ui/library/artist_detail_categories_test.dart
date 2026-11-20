@@ -83,14 +83,14 @@ void main() {
     }
 
     testWidgets(
-      'Chip row hides when only one category exists (e.g. only Albums)',
+      'Only non-empty sections render and old release category chips are absent',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         setupDesktopViewport(tester);
         final folder = await repository.addFolder('/music');
         final now = DateTime.now();
 
-        // 7 tracks in one album -> Albums category only
+        // 7 tracks in one album -> Albums section + Tracks section only
         final tracks = List.generate(
           7,
           (i) => Track(
@@ -118,13 +118,19 @@ void main() {
         await tester.pumpWidget(buildTestWidget(artist: artist));
         await tester.pumpAndSettle();
 
-        // Chip row should be hidden because only 1 category exists
+        // Old chip row is removed; only Albums and Tracks sections are visible
         expect(find.byKey(const Key('artist_category_chip_all')), findsNothing);
+        expect(find.byKey(const Key('artist_category_chips_scroll')), findsNothing);
+        expect(find.byKey(const Key('artist_section_albums')), findsOneWidget);
+        expect(find.byKey(const Key('artist_section_singlesAndEps')), findsNothing);
+        expect(find.byKey(const Key('artist_section_compilations')), findsNothing);
+        expect(find.byKey(const Key('artist_section_appearsOn')), findsNothing);
+        expect(find.byKey(const Key('artist_section_tracks')), findsOneWidget);
       },
     );
 
     testWidgets(
-      'Chip row displays categories with counts, filters track list, and clears on All',
+      'Albums and Singles & EPs sections display album cards while Tracks section displays all tracks',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         setupDesktopViewport(tester);
@@ -172,36 +178,55 @@ void main() {
         await tester.pumpWidget(buildTestWidget(artist: artist));
         await tester.pumpAndSettle();
 
-        // Chip row is visible
-        expect(find.byKey(const Key('artist_category_chip_all')), findsOneWidget);
-        expect(find.byKey(const Key('artist_category_chip_albums')), findsOneWidget);
-        expect(find.byKey(const Key('artist_category_chip_singles')), findsOneWidget);
+        // No category chips
+        expect(find.byKey(const Key('artist_category_chip_all')), findsNothing);
+        expect(find.byKey(const Key('artist_category_chip_albums')), findsNothing);
+        expect(find.byKey(const Key('artist_category_chip_singles')), findsNothing);
 
-        // Tap Singles chip -> filters to only Lone Single
-        await tester.tap(find.byKey(const Key('artist_category_chip_singles')));
+        // Sections and album cards are visible
+        expect(find.byKey(const Key('artist_section_albums')), findsOneWidget);
+        expect(find.byKey(const Key('artist_section_singlesAndEps')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey<String>('artist_album_card_albums_Big Album|Multi Cat Artist')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey<String>(
+            'artist_album_card_singlesAndEps_Lone Single - Single|Multi Cat Artist',
+          )),
+          findsOneWidget,
+        );
+
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('artist_section_tracks')),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
+        expect(find.byKey(const Key('artist_section_tracks')), findsOneWidget);
 
+        // Tracks section still displays tracks
+        await tester.scrollUntilVisible(
+          find.text('Lone Single'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
         expect(find.text('Lone Single'), findsOneWidget);
-        expect(find.text('Album Song 0'), findsNothing);
-
-        // Tap All chip -> restores all tracks (Album Song 0 visible)
-        await tester.tap(find.byKey(const Key('artist_category_chip_all')));
-        await tester.pumpAndSettle();
-
         expect(find.text('Album Song 0'), findsOneWidget);
       },
     );
 
     testWidgets(
-      'Category selection resets when artist changes in didUpdateWidget',
+      'Expanded sections and track search reset when artist changes in didUpdateWidget',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         setupDesktopViewport(tester);
         final folder = await repository.addFolder('/music');
         final now = DateTime.now();
 
-        // Artist One has a long album (>20 mins) and a single -> 2 categories
-        // Artist Two also has an album (>20 mins) and a single -> 2 categories
+        // Artist One has a long album (>20 mins) and a single
+        // Artist Two also has an album (>20 mins) and a single
         await repository.upsertTracks([
           Track(
             path: '/music/a1.mp3',
@@ -268,17 +293,39 @@ void main() {
         await tester.pumpWidget(buildTestWidget(artist: artist1));
         await tester.pumpAndSettle();
 
-        // Select singles
-        await tester.tap(find.byKey(const Key('artist_category_chip_singles')));
+        // Filter tracks for artist1
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('artist_tracks_search_field')),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
-        expect(find.text('Single A2'), findsOneWidget);
+        await tester.enterText(
+          find.byKey(const Key('artist_tracks_search_field')),
+          'Single A2',
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('artist_tracks_list')),
+            matching: find.text('Single A2'),
+          ),
+          findsOneWidget,
+        );
         expect(find.text('Song A1'), findsNothing);
 
         // Update widget with artist2
         await tester.pumpWidget(buildTestWidget(artist: artist2));
         await tester.pumpAndSettle();
 
-        // Reset to All -> both tracks of Artist Two are visible
+        await tester.scrollUntilVisible(
+          find.text('Single B2'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+
+        // Search filter cleared -> both tracks of Artist Two are visible
         expect(find.text('Single B2'), findsOneWidget);
         expect(find.text('Song B1'), findsOneWidget);
       },
@@ -331,7 +378,16 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.byKey(const Key('artist_category_chip_all')), findsOneWidget);
+        expect(find.byKey(const Key('artist_category_chip_all')), findsNothing);
+        expect(find.byKey(const Key('artist_section_albums')), findsOneWidget);
+        expect(find.byKey(const Key('artist_section_singlesAndEps')), findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('artist_section_tracks')),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('artist_section_tracks')), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
@@ -428,14 +484,14 @@ void main() {
     );
 
     testWidgets(
-      'Category chips show track count for All and release count with track count for categories',
+      'Header stats and section count badges show album and track counts',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
         setupDesktopViewport(tester);
         final folder = await repository.addFolder('/music');
         final now = DateTime.now();
 
-        // 8 tracks in Album, 1 Single -> 2 categories
+        // 8 tracks in Album, 1 Single -> 2 releases, 9 tracks
         final albumTracks = List.generate(
           8,
           (i) => Track(
@@ -476,16 +532,34 @@ void main() {
         await tester.pumpWidget(buildTestWidget(artist: artist));
         await tester.pumpAndSettle();
 
-        // "All" chip shows track count
-        expect(find.textContaining('All - 9 tracks'), findsOneWidget);
-
-        // "Albums" chip shows 1 release and 8 tracks
-        expect(find.textContaining('Albums - 1 releases'), findsOneWidget);
-        expect(find.textContaining('- 8 tracks'), findsOneWidget);
-
-        // "Singles" chip shows 1 release and 1 track
-        expect(find.textContaining('Singles - 1 releases'), findsOneWidget);
-        expect(find.textContaining('- 1 tracks'), findsOneWidget);
+        expect(find.text('2 albums · 9 tracks'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('artist_section_count_albums')),
+            matching: find.text('1'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('artist_section_count_singlesAndEps')),
+            matching: find.text('1'),
+          ),
+          findsOneWidget,
+        );
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('artist_section_count_tracks')),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('artist_section_count_tracks')),
+            matching: find.text('9'),
+          ),
+          findsOneWidget,
+        );
       },
     );
 

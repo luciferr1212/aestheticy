@@ -411,147 +411,161 @@ class TrackTableRowTile extends StatelessWidget {
           color: isCurrent ? AppColors.accentFill : Colors.transparent,
           borderRadius: BorderRadius.circular(AppSpacing.r10),
         ),
-        child: InkWell(
-          mouseCursor: onPlay != null
-              ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
-          hoverColor: const Color(0x14FFFFFF),
-          borderRadius: BorderRadius.circular(AppSpacing.r10),
-          onTap: onPlay,
-          onDoubleTap: onPlay,
-          onSecondaryTapUp: menuController != null
-              ? (details) => menuController.open(position: details.localPosition)
-              : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                if (showTrackNumber)
-                  SizedBox(
-                    width: 36,
-                    child: Center(
-                      child: isCurrent
-                          ? AnimatedEqualizerBars(
-                              isPlaying: isPlaying,
-                              reduceMotion: reduceMotion,
-                            )
-                          : Text(
-                              context.formatCountLocalized(displayIndex),
-                              style: AppTypography.caption.copyWith(
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                    ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: InkWell(
+                mouseCursor: onPlay != null
+                    ? SystemMouseCursors.click
+                    : SystemMouseCursors.basic,
+                hoverColor: const Color(0x14FFFFFF),
+                borderRadius: BorderRadius.circular(AppSpacing.r10),
+                onTap: onPlay,
+                onDoubleTap: onPlay,
+                onSecondaryTapUp: menuController != null
+                    ? (details) =>
+                        menuController.open(position: details.localPosition)
+                    : null,
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    start: 12,
+                    end: showActions ? 0 : 12,
                   ),
-                if (showCover) ...[
-                  const SizedBox(width: 8),
-                  TrackCoverThumbnail(coverKey: track.coverKey),
-                  const SizedBox(width: 12),
-                ],
-                // Title (+ optional "Not in library" tag)
-                Expanded(
-                  flex: 4,
                   child: Row(
                     children: [
-                      Flexible(
+                      if (showTrackNumber)
+                        SizedBox(
+                          width: 36,
+                          child: Center(
+                            child: isCurrent
+                                ? AnimatedEqualizerBars(
+                                    isPlaying: isPlaying,
+                                    reduceMotion: reduceMotion,
+                                  )
+                                : Text(
+                                    context.formatCountLocalized(displayIndex),
+                                    style: AppTypography.caption.copyWith(
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      if (showCover) ...[
+                        const SizedBox(width: 8),
+                        TrackCoverThumbnail(coverKey: track.coverKey),
+                        const SizedBox(width: 12),
+                      ],
+                      // Title (+ optional "Not in library" tag)
+                      Expanded(
+                        flex: 4,
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textDirection: textDirectionFor(title),
+                                style: AppTypography.body.copyWith(
+                                  color: isCurrent
+                                      ? AppColors.accent
+                                      : (row.isMissing
+                                          ? AppColors.textMuted
+                                          : AppColors.text),
+                                  fontWeight: isCurrent
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                            if (row.isMissing) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border:
+                                      Border.all(color: AppColors.borderSubtle),
+                                ),
+                                child: Text(
+                                  context.t('tracks.notInLibrary'),
+                                  style: AppTypography.micro
+                                      .copyWith(color: AppColors.textMuted),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (showArtist)
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textDirection: textDirectionFor(artist),
+                            style: AppTypography.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      if (showAlbum)
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            album,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textDirection: textDirectionFor(album),
+                            style: AppTypography.body.copyWith(
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ),
+                      SizedBox(
+                        width: 56,
                         child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textDirection: textDirectionFor(title),
-                          style: AppTypography.body.copyWith(
-                            color: isCurrent
-                                ? AppColors.accent
-                                : (row.isMissing
-                                    ? AppColors.textMuted
-                                    : AppColors.text),
-                            fontWeight:
-                                isCurrent ? FontWeight.w600 : FontWeight.w400,
+                          formattedDur,
+                          textAlign: TextAlign.end,
+                          style: AppTypography.caption.copyWith(
+                            color: AppColors.textMuted,
                           ),
                         ),
                       ),
-                      if (row.isMissing) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: AppColors.borderSubtle),
-                          ),
-                          child: Text(
-                            context.t('tracks.notInLibrary'),
-                            style: AppTypography.micro
-                                .copyWith(color: AppColors.textMuted),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
-                if (showArtist)
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textDirection: textDirectionFor(artist),
-                      style: AppTypography.body.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                if (showAlbum)
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      album,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textDirection: textDirectionFor(album),
-                      style: AppTypography.body.copyWith(
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ),
-                SizedBox(
-                  width: 56,
-                  child: Text(
-                    formattedDur,
-                    textAlign: TextAlign.end,
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.textMuted,
-                    ),
+              ),
+            ),
+            if (showActions)
+              Padding(
+                padding: const EdgeInsetsDirectional.only(start: 8, end: 12),
+                child: SizedBox(
+                  width: 32,
+                  child: Center(
+                    child: actionWidget ??
+                        (menuController != null
+                            ? IconButton(
+                                key: Key('track_more_button_$index'),
+                                icon: const Icon(Icons.more_horiz, size: 18),
+                                tooltip: context.t('tracks.moreOptions'),
+                                onPressed: () {
+                                  if (menuController.isOpen) {
+                                    menuController.close();
+                                  } else {
+                                    menuController.open();
+                                  }
+                                },
+                              )
+                            : const SizedBox.shrink()),
                   ),
                 ),
-                if (showActions) ...[
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 32,
-                    child: Center(
-                      child: actionWidget ??
-                          (menuController != null
-                              ? IconButton(
-                                  key: Key('track_more_button_$index'),
-                                  icon: const Icon(Icons.more_horiz, size: 18),
-                                  tooltip: context.t('tracks.moreOptions'),
-                                  onPressed: () {
-                                    if (menuController.isOpen) {
-                                      menuController.close();
-                                    } else {
-                                      menuController.open();
-                                    }
-                                  },
-                                )
-                              : const SizedBox.shrink()),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+              ),
+          ],
         ),
       );
     }

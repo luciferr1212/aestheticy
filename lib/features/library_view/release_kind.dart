@@ -38,6 +38,17 @@ abstract final class ReleaseKindClassifier {
   static final RegExp _epWordRegex =
       RegExp(r'(?:^|\s)ep$', caseSensitive: false);
 
+  /// Builds the canonical grouping key (`album|albumArtist`, lowercased and trimmed)
+  /// used to match [Track] records with [AlbumSummary] releases.
+  static String albumGroupKey({
+    required String? albumTitle,
+    required String? albumArtist,
+  }) {
+    final album = albumTitle?.trim().toLowerCase() ?? '';
+    final artist = albumArtist?.trim().toLowerCase() ?? '';
+    return '$album|$artist';
+  }
+
   /// Classifies a single album group according to the defined heuristic rules.
   static ReleaseCategory classifyAlbumGroup({
     required String? albumTitle,
@@ -45,6 +56,9 @@ abstract final class ReleaseKindClassifier {
     required List<Track> tracks,
     required String artistName,
     String? artistKey,
+    int? albumTrackCount,
+    String? fallbackDisplayArtist,
+    Set<String> aliasKeys = const {},
   }) {
     // 5. Tracks without an album: Singles.
     final trimmedTitle = albumTitle?.trim() ?? '';
@@ -62,29 +76,43 @@ abstract final class ReleaseKindClassifier {
       return ReleaseCategory.compilations;
     }
 
-    final targetKey = TextNormalizer.normalize(artistKey ?? artistName);
+    final targetKeys = <String>{
+      TextNormalizer.normalize(artistKey ?? artistName),
+      if (artistKey != null && artistKey.trim().isNotEmpty)
+        TextNormalizer.normalize(artistName),
+      for (final key in aliasKeys) TextNormalizer.normalize(key),
+    }..removeWhere((k) => k.isEmpty);
 
     // 2. The artist is not the album artist (a featured or track-level artist only): Appears on.
     if (trimmedAlbumArtist.isNotEmpty) {
       final albumArtistKey = TextNormalizer.normalize(trimmedAlbumArtist);
-      if (albumArtistKey != targetKey) {
+      if (!targetKeys.contains(albumArtistKey)) {
         return ReleaseCategory.appearsOn;
       }
-    } else {
+    } else if (tracks.isNotEmpty) {
       // Album artist tag is absent. Check if target artist is only featured across all tracks.
-      var isFeaturedOnly = tracks.isNotEmpty;
+      var isFeaturedOnly = true;
       for (final track in tracks) {
         final trackArtist = track.artist?.trim() ?? '';
         if (trackArtist.isNotEmpty) {
           final splits = ArtistSplitter.split(trackArtist);
-          if (splits.isNotEmpty && splits.first.key == targetKey) {
+          if (splits.isNotEmpty && targetKeys.contains(splits.first.key)) {
             isFeaturedOnly = false;
             break;
           }
         }
       }
-      if (isFeaturedOnly && tracks.isNotEmpty) {
+      if (isFeaturedOnly) {
         return ReleaseCategory.appearsOn;
+      }
+    } else {
+      final trimmedFallback = fallbackDisplayArtist?.trim() ?? '';
+      if (trimmedFallback.isNotEmpty &&
+          trimmedFallback.toLowerCase() != 'various') {
+        final splits = ArtistSplitter.split(trimmedFallback);
+        if (splits.isNotEmpty && !targetKeys.contains(splits.first.key)) {
+          return ReleaseCategory.appearsOn;
+        }
       }
     }
 
@@ -106,7 +134,9 @@ abstract final class ReleaseKindClassifier {
     // 4. By owned track count: 1 to 3 tracks and total under 20 minutes: Singles;
     //    4 to 6 tracks: EPs; 7 or more: Albums.
     //    A 1 to 3 track album over 20 minutes counts as an Album.
-    final count = tracks.length;
+    final count = (albumTrackCount != null && albumTrackCount > 0)
+        ? albumTrackCount
+        : tracks.length;
     final totalDurationMs =
         tracks.fold<int>(0, (sum, t) => sum + t.durationMs);
 
@@ -126,6 +156,74 @@ abstract final class ReleaseKindClassifier {
     return ReleaseCategory.singles;
   }
 
+  /// Classifies a single [AlbumSummary] using its matching album [tracks].
+  static ReleaseCategory classifyAlbum({
+    required AlbumSummary album,
+    required String artistName,
+    String? artistKey,
+    List<Track> tracks = const [],
+    Set<String> aliasKeys = const {},
+  }) {
+    return classifyAlbumGroup(
+      albumTitle: album.album,
+      albumArtist: album.albumArtist,
+      tracks: tracks,
+      artistName: artistName,
+      artistKey: artistKey,
+      albumTrackCount: album.trackCount,
+      fallbackDisplayArtist: album.displayArtist,
+      aliasKeys: aliasKeys,
+    );
+  }
+
+  /// Classifies [albums] into [ReleaseCategory] buckets using [tracks] grouped by
+  /// `album|albumArtist` to determine duration and null-album-artist ownership.
+  static Map<ReleaseCategory, List<AlbumSummary>> classifyAlbums({
+    required List<AlbumSummary> albums,
+    required String artistName,
+    String? artistKey,
+    List<Track> tracks = const [],
+    Set<String> aliasKeys = const {},
+  }) {
+    final tracksByGroup = <String, List<Track>>{};
+    for (final track in tracks) {
+      final albumName = track.album?.trim() ?? '';
+      if (albumName.isEmpty) continue;
+      final groupKey = albumGroupKey(
+        albumTitle: track.album,
+        albumArtist: track.albumArtist,
+      );
+      tracksByGroup.putIfAbsent(groupKey, () => []).add(track);
+    }
+
+    final classified = <ReleaseCategory, List<AlbumSummary>>{
+      ReleaseCategory.all: List<AlbumSummary>.unmodifiable(albums),
+      ReleaseCategory.albums: <AlbumSummary>[],
+      ReleaseCategory.singles: <AlbumSummary>[],
+      ReleaseCategory.eps: <AlbumSummary>[],
+      ReleaseCategory.compilations: <AlbumSummary>[],
+      ReleaseCategory.appearsOn: <AlbumSummary>[],
+    };
+
+    for (final album in albums) {
+      final groupKey = albumGroupKey(
+        albumTitle: album.album,
+        albumArtist: album.albumArtist,
+      );
+      final groupTracks = tracksByGroup[groupKey] ?? const <Track>[];
+      final category = classifyAlbum(
+        album: album,
+        artistName: artistName,
+        artistKey: artistKey,
+        tracks: groupTracks,
+        aliasKeys: aliasKeys,
+      );
+      classified[category]!.add(album);
+    }
+
+    return classified;
+  }
+
   /// Classifies [tracks] into release categories and counts distinct releases per category.
   static ReleaseClassification classify({
     required List<Track> tracks,
@@ -138,7 +236,10 @@ abstract final class ReleaseKindClassifier {
       // Rule 5: Tracks without an album are treated as individual single releases.
       final key = albumName.isEmpty
           ? ':loose:${track.path}'
-          : '${albumName.toLowerCase()}|${track.albumArtist?.trim().toLowerCase() ?? ''}';
+          : albumGroupKey(
+              albumTitle: track.album,
+              albumArtist: track.albumArtist,
+            );
       groups.putIfAbsent(key, () => []).add(track);
     }
 
