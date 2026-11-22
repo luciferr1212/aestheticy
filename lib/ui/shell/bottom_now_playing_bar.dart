@@ -22,6 +22,7 @@ import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'side_panel_controller.dart';
 import 'volume_hud.dart';
 import 'volume_wheel_region.dart';
 
@@ -43,6 +44,9 @@ class BottomNowPlayingBar extends StatelessWidget {
   /// Optional settings store for inspecting glass quality.
   final SettingsStore? settingsStore;
 
+  /// Optional docked side panel controller for toggling Queue and Lyrics tabs.
+  final SidePanelController? sidePanelController;
+
   /// Creates a [BottomNowPlayingBar].
   const BottomNowPlayingBar({
     super.key,
@@ -51,6 +55,7 @@ class BottomNowPlayingBar extends StatelessWidget {
     this.miniPlayerController,
     this.onTrackInfoBuild,
     this.settingsStore,
+    this.sidePanelController,
   });
 
   @override
@@ -59,35 +64,64 @@ class BottomNowPlayingBar extends StatelessWidget {
       borderRadius: 24.0,
       height: 84.0,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Row(
-        children: [
-          // Start side: Cover + Title + Artist + Expand chevron (button)
-          ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 120, maxWidth: 170),
-            child: _TrackInfoArea(
-              controller: controller,
-              navigator: navigator,
-              onTrackInfoBuild: onTrackInfoBuild,
-            ),
-          ),
-          const SizedBox(width: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isTight = constraints.maxWidth < 500;
+          final gap = isTight ? 4.0 : 8.0;
 
-          // Center side: Transport controls + Seekbar (Always LTR)
-          Expanded(
-            child: Directionality(
-              textDirection: TextDirection.ltr,
-              child: _CenterTransportArea(controller: controller),
-            ),
-          ),
-          const SizedBox(width: 8),
+          return Row(
+            children: [
+              // Start side: Cover + Title + Artist + Expand chevron (button)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: isTight ? 56 : 120,
+                  maxWidth: isTight ? 88 : 170,
+                ),
+                child: _TrackInfoArea(
+                  controller: controller,
+                  navigator: navigator,
+                  onTrackInfoBuild: onTrackInfoBuild,
+                  compact: isTight,
+                ),
+              ),
+              SizedBox(width: gap),
 
-          // End side: Auxiliary icon buttons (volume, lyrics, queue, etc.)
-          _EndControlsArea(
-            controller: controller,
-            navigator: navigator,
-            miniPlayerController: miniPlayerController,
-          ),
-        ],
+              // Center side: Transport controls + Seekbar (Always LTR)
+              Expanded(
+                child: Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: _CenterTransportArea(controller: controller),
+                ),
+              ),
+              SizedBox(width: gap),
+
+              // End side: Auxiliary icon buttons (volume, lyrics, queue, etc.)
+              if (isTight)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: (constraints.maxWidth * 0.36).clamp(80.0, 220.0),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: _EndControlsArea(
+                      controller: controller,
+                      navigator: navigator,
+                      miniPlayerController: miniPlayerController,
+                      sidePanelController: sidePanelController,
+                    ),
+                  ),
+                )
+              else
+                _EndControlsArea(
+                  controller: controller,
+                  navigator: navigator,
+                  miniPlayerController: miniPlayerController,
+                  sidePanelController: sidePanelController,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -100,11 +134,13 @@ class _TrackInfoArea extends StatelessWidget {
   final PlaybackController controller;
   final AppNavigator? navigator;
   final VoidCallback? onTrackInfoBuild;
+  final bool compact;
 
   const _TrackInfoArea({
     required this.controller,
     this.navigator,
     this.onTrackInfoBuild,
+    this.compact = false,
   });
 
   @override
@@ -145,84 +181,88 @@ class _TrackInfoArea extends StatelessWidget {
               }
             },
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Row(
-                children: [
-                  // Cover thumbnail (52x52, radius 10)
-                  _buildCover(coverKey),
-                  const SizedBox(width: 12),
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 2 : 6,
+                  vertical: 4,
+                ),
+                child: Row(
+                  children: [
+                    // Cover thumbnail
+                    _buildCover(coverKey),
+                    SizedBox(width: compact ? 6 : 12),
 
-                  // Title and Artist
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textDirection: textDirectionFor(title),
-                                style: AppTypography.bodyStrong.copyWith(
-                                  color: hasTrack
-                                      ? AppColors.text
-                                      : AppColors.textMuted,
+                    // Title and Artist
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textDirection: textDirectionFor(title),
+                                  style: AppTypography.bodyStrong.copyWith(
+                                    color: hasTrack
+                                        ? AppColors.text
+                                        : AppColors.textMuted,
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (hasTrack) ...[
-                              const SizedBox(width: 4),
-                              _PlayerFavoriteButton(path: current.uri),
+                              if (hasTrack && !compact) ...[
+                                const SizedBox(width: 4),
+                                _PlayerFavoriteButton(path: current.uri),
+                              ],
                             ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Builder(
-                          builder: (context) {
-                            final canLink = hasTrack &&
-                                rawArtist != null &&
-                                rawArtist.trim().isNotEmpty &&
-                                navigator != null;
-                            return MetadataLink(
-                              text: artist,
-                              style: AppTypography.caption.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
-                              reduceMotion: SettingsScope.maybeOf(context)
-                                      ?.settings
-                                      .reduceMotion ??
-                                  false,
-                              semanticLabel: canLink
-                                  ? context.t(
-                                      'common.goToArtist',
-                                      args: {'name': artist},
-                                    )
-                                  : null,
-                              onTap: canLink
-                                  ? () => MetadataNavHelper.openArtist(
-                                        context: context,
-                                        navigator: navigator!,
-                                        rawArtist: rawArtist,
+                          ),
+                          const SizedBox(height: 2),
+                          Builder(
+                            builder: (context) {
+                              final canLink = hasTrack &&
+                                  rawArtist != null &&
+                                  rawArtist.trim().isNotEmpty &&
+                                  navigator != null;
+                              return MetadataLink(
+                                text: artist,
+                                style: AppTypography.caption.copyWith(
+                                  color: AppColors.textSecondary,
+                                ),
+                                reduceMotion: SettingsScope.maybeOf(context)
+                                        ?.settings
+                                        .reduceMotion ??
+                                    false,
+                                semanticLabel: canLink
+                                    ? context.t(
+                                        'common.goToArtist',
+                                        args: {'name': artist},
                                       )
-                                  : null,
-                            );
-                          },
-                        ),
-                      ],
+                                    : null,
+                                onTap: canLink
+                                    ? () => MetadataNavHelper.openArtist(
+                                          context: context,
+                                          navigator: navigator!,
+                                          rawArtist: rawArtist,
+                                        )
+                                    : null,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
 
-                  // Directional chevron
-                  const Icon(
-                    Icons.keyboard_arrow_up,
-                    color: AppColors.textMuted,
-                    size: 20,
-                  ),
-                ],
-              ),
+                    // Directional chevron
+                    if (!compact)
+                      const Icon(
+                        Icons.keyboard_arrow_up,
+                        color: AppColors.textMuted,
+                        size: 20,
+                      ),
+                  ],
+                ),
             ),
           ),
         );
@@ -231,13 +271,23 @@ class _TrackInfoArea extends StatelessWidget {
   }
 
   Widget _buildCover(String? coverKey) {
+    final dim = compact ? 36.0 : 52.0;
     Widget imageWidget;
-    if (coverKey != null && CoverCache.hasCover(coverKey)) {
-      final file = File(CoverCache.pathFor(coverKey));
+    File? coverFile;
+    if (coverKey != null && coverKey.isNotEmpty) {
+      try {
+        if (CoverCache.hasCover(coverKey)) {
+          coverFile = File(CoverCache.pathFor(coverKey));
+        }
+      } on StateError {
+        coverFile = null;
+      }
+    }
+    if (coverFile != null) {
       imageWidget = Image.file(
-        file,
-        width: 52,
-        height: 52,
+        coverFile,
+        width: dim,
+        height: dim,
         fit: BoxFit.cover,
         cacheWidth: 104,
         cacheHeight: 104,
@@ -250,26 +300,27 @@ class _TrackInfoArea extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppSpacing.r10),
       child: SizedBox(
-        width: 52,
-        height: 52,
+        width: dim,
+        height: dim,
         child: imageWidget,
       ),
     );
   }
 
   Widget _buildPlaceholder() {
+    final dim = compact ? 36.0 : 52.0;
     return Container(
-      width: 52,
-      height: 52,
+      width: dim,
+      height: dim,
       decoration: BoxDecoration(
         color: const Color(0xFF22212C),
         borderRadius: BorderRadius.circular(AppSpacing.r10),
       ),
-      child: const Center(
+      child: Center(
         child: Icon(
           Icons.music_note,
           color: Colors.white24,
-          size: 24,
+          size: compact ? 18 : 24,
         ),
       ),
     );
@@ -492,7 +543,17 @@ class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
         height: 18,
         child: Row(
           children: [
-            Text(context.formatDurationLocalized(Duration.zero), style: AppTypography.micro.copyWith(color: AppColors.textMuted)),
+            SizedBox(
+              width: 32,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerEnd,
+                child: Text(
+                  context.formatDurationLocalized(Duration.zero),
+                  style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                ),
+              ),
+            ),
             const Expanded(
               child: SliderTheme(
                 data: SliderThemeData(
@@ -507,7 +568,17 @@ class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
                 ),
               ),
             ),
-            Text(context.formatDurationLocalized(Duration.zero), style: AppTypography.micro.copyWith(color: AppColors.textMuted)),
+            SizedBox(
+              width: 32,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  context.formatDurationLocalized(Duration.zero),
+                  style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                ),
+              ),
+            ),
           ],
         ),
       );
@@ -543,10 +614,14 @@ class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
                 children: [
                   SizedBox(
                     width: 32,
-                    child: Text(
-                      context.formatDurationLocalized(position),
-                      textAlign: TextAlign.end,
-                      style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: Text(
+                        context.formatDurationLocalized(position),
+                        textAlign: TextAlign.end,
+                        style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                      ),
                     ),
                   ),
                   Expanded(
@@ -582,10 +657,14 @@ class _NowPlayingSeekBarLeafState extends State<_NowPlayingSeekBarLeaf> {
                   ),
                   SizedBox(
                     width: 32,
-                    child: Text(
-                      context.formatDurationLocalized(totalDuration),
-                      textAlign: TextAlign.start,
-                      style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        context.formatDurationLocalized(totalDuration),
+                        textAlign: TextAlign.start,
+                        style: AppTypography.micro.copyWith(color: AppColors.textMuted),
+                      ),
                     ),
                   ),
                 ],
@@ -603,11 +682,13 @@ class _EndControlsArea extends StatelessWidget {
   final PlaybackController controller;
   final AppNavigator? navigator;
   final MiniPlayerController? miniPlayerController;
+  final SidePanelController? sidePanelController;
 
   const _EndControlsArea({
     required this.controller,
     this.navigator,
     this.miniPlayerController,
+    this.sidePanelController,
   });
 
   void _showVolumePopup(BuildContext context) {
@@ -692,31 +773,79 @@ class _EndControlsArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settingsStore = SettingsScope.maybeOf(context);
+    final panelController = sidePanelController;
+
+    Widget buildLyricsAndQueueButtons({
+      required bool isLyricsActive,
+      required bool isQueueActive,
+    }) {
+      final lyricsTooltip = panelController != null
+          ? (isLyricsActive
+              ? context.t('sidePanel.closeLyrics')
+              : context.t('sidePanel.openLyrics'))
+          : context.t('common.lyrics');
+      final queueTooltip = panelController != null
+          ? (isQueueActive
+              ? context.t('sidePanel.closeQueue')
+              : context.t('sidePanel.openQueue'))
+          : context.t('common.queue');
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GlassIconButton(
+            key: const Key('player_lyrics_button'),
+            icon: Icons.lyrics_outlined,
+            tooltip: lyricsTooltip,
+            semanticLabel: lyricsTooltip,
+            size: GlassButtonSize.small,
+            variant: isLyricsActive
+                ? GlassButtonVariant.selected
+                : GlassButtonVariant.normal,
+            onPressed: panelController != null
+                ? () => panelController.toggleTab(SidePanelTab.lyrics)
+                : (navigator != null ? () => navigator!.openLyrics() : null),
+          ),
+          const SizedBox(width: 4),
+          GlassIconButton(
+            key: const Key('player_queue_button'),
+            icon: Icons.queue_music,
+            tooltip: queueTooltip,
+            semanticLabel: queueTooltip,
+            size: GlassButtonSize.small,
+            variant: isQueueActive
+                ? GlassButtonVariant.selected
+                : GlassButtonVariant.normal,
+            onPressed: panelController != null
+                ? () => panelController.toggleTab(SidePanelTab.queue)
+                : (navigator != null ? () => navigator!.openQueue() : null),
+          ),
+        ],
+      );
+    }
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        // Lyrics (enabled)
-        GlassIconButton(
-          key: const Key('player_lyrics_button'),
-          icon: Icons.lyrics_outlined,
-          tooltip: context.t('common.lyrics'),
-          semanticLabel: context.t('common.lyrics'),
-          size: GlassButtonSize.small,
-          onPressed:
-              navigator != null ? () => navigator!.openLyrics() : null,
-        ),
-        const SizedBox(width: 4),
-
-        // Queue (opens Queue)
-        GlassIconButton(
-          key: const Key('player_queue_button'),
-          icon: Icons.queue_music,
-          tooltip: context.t('common.queue'),
-          semanticLabel: context.t('common.queue'),
-          size: GlassButtonSize.small,
-          onPressed:
-              navigator != null ? () => navigator!.openQueue() : null,
-        ),
+        if (panelController != null)
+          ListenableBuilder(
+            listenable: panelController,
+            builder: (context, _) {
+              final isLyricsActive = panelController.isOpen &&
+                  panelController.activeTab == SidePanelTab.lyrics;
+              final isQueueActive = panelController.isOpen &&
+                  panelController.activeTab == SidePanelTab.queue;
+              return buildLyricsAndQueueButtons(
+                isLyricsActive: isLyricsActive,
+                isQueueActive: isQueueActive,
+              );
+            },
+          )
+        else
+          buildLyricsAndQueueButtons(
+            isLyricsActive: false,
+            isQueueActive: false,
+          ),
         const SizedBox(width: 4),
 
         // Equalizer

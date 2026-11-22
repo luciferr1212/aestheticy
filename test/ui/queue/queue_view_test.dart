@@ -447,7 +447,7 @@ void main() {
   );
 
   testWidgets(
-    'Bottom bar queue button and Up Next Open queue button navigate to queue; Esc returns',
+    'Bottom bar queue button toggles side panel, expand opens QueueView, and Up Next Open queue button navigates to queue; Esc returns',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1.0;
@@ -478,17 +478,24 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 1. Bottom bar queue button navigates to queue
+      // 1. Bottom bar queue button opens the docked Queue side panel; Expand opens QueueView
       expect(navigator.current, AppDestination.albums);
       await tester.tap(find.byKey(const Key('player_queue_button')));
       await tester.pumpAndSettle();
+      expect(navigator.current, AppDestination.albums);
+      expect(find.byKey(const ValueKey('side_panel_queue_content')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('side_panel_expand_button')));
+      await tester.pumpAndSettle();
       expect(navigator.current, AppDestination.queue);
       expect(find.byType(QueueView), findsOneWidget);
+      expect(find.byKey(const Key('side_panel_surface')), findsNothing);
 
-      // Esc returns to albums
+      // Esc returns to albums and panel remains closed
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(navigator.current, AppDestination.albums);
+      expect(find.byKey(const Key('side_panel_surface')), findsNothing);
 
       // 2. Open Now Playing, then click "Open queue"
       navigator.openNowPlaying();

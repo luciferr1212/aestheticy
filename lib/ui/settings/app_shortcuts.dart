@@ -86,6 +86,12 @@ enum AppShortcutId {
 
   /// Global shortcut: toggle native full screen (F11).
   toggleFullScreen,
+
+  /// Global shortcut: toggle the docked Queue side panel (Ctrl + Shift + Q).
+  toggleQueuePanel,
+
+  /// Global shortcut: toggle the docked Lyrics side panel (Ctrl + Shift + L).
+  toggleLyricsPanel,
 }
 
 /// Representation of an active keyboard shortcut in Aestheticy.
@@ -272,6 +278,28 @@ const List<AppShortcutItem> kAppShortcuts = [
     keyCombination: 'F11',
     descriptionKey: 'shortcuts.toggleFullScreen',
     activator: SingleActivator(LogicalKeyboardKey.f11),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.toggleQueuePanel,
+    keyCombination: 'Ctrl + Shift + Q',
+    descriptionKey: 'shortcuts.toggleQueuePanel',
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyQ,
+      control: true,
+      shift: true,
+    ),
+    scope: AppShortcutScope.global,
+  ),
+  AppShortcutItem(
+    id: AppShortcutId.toggleLyricsPanel,
+    keyCombination: 'Ctrl + Shift + L',
+    descriptionKey: 'shortcuts.toggleLyricsPanel',
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyL,
+      control: true,
+      shift: true,
+    ),
     scope: AppShortcutScope.global,
   ),
   AppShortcutItem(

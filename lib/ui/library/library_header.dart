@@ -176,113 +176,128 @@ class _LibraryHeaderState extends State<LibraryHeader> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Top row: Greeting + Title and Search
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Left: Greeting + Title
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    greeting,
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.textMuted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final searchWidth = constraints.maxWidth >= 660
+                ? 260.0
+                : (constraints.maxWidth * 0.38).clamp(150.0, 220.0);
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // Left: Greeting + Title
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        widget.title,
-                        style: AppTypography.display.copyWith(
-                          letterSpacing: -0.5,
+                        greeting,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.caption.copyWith(
+                          color: AppColors.textMuted,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                      if (!widget.showControls) ...[
-                        const SizedBox(width: 10),
-                        Text(
-                          '${widget.itemCount} ${widget.itemCountLabel}',
-                          style: AppTypography.caption.copyWith(
-                            color: AppColors.textMuted,
+                      const SizedBox(height: 4),
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 10,
+                        runSpacing: 2,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTypography.display.copyWith(
+                              letterSpacing: -0.5,
+                            ),
                           ),
-                        ),
-                      ],
+                          if (!widget.showControls)
+                            Text(
+                              '${widget.itemCount} ${widget.itemCountLabel}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.caption.copyWith(
+                                color: AppColors.textMuted,
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
-                ],
-              ),
-            ),
-
-            // Right: Glass Search Field
-            SizedBox(
-              width: 260,
-              height: 40,
-              child: GlassSurface(
-                borderRadius: AppSpacing.r12,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.search,
-                      color: AppColors.textMuted,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        key: const Key('library_search_field'),
-                        controller: _controller,
-                        onChanged: _onTextChange,
-                        style: AppTypography.body.copyWith(color: AppColors.text),
-                        decoration: InputDecoration(
-                          hintText: context.t('common.search'),
-                          hintStyle: AppTypography.body.copyWith(
-                            color: AppColors.textMuted,
-                          ),
-                          isDense: true,
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                    if (_controller.text.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 16),
-                        color: AppColors.textMuted,
-                        onPressed: () {
-                          _controller.clear();
-                          widget.onSearchChanged('');
-                        },
-                      )
-                    else
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0x1AFFFFFF),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: AppColors.borderSubtle),
-                        ),
-                        child: Text(
-                          context.t('common.searchShortcut'),
-                          style: AppTypography.micro.copyWith(
-                            color: AppColors.textMuted,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                  ],
                 ),
-              ),
-            ),
-          ],
+                const SizedBox(width: 12),
+
+                // Right: Glass Search Field
+                SizedBox(
+                  width: searchWidth,
+                  height: 40,
+                  child: GlassSurface(
+                    borderRadius: AppSpacing.r12,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.search,
+                          color: AppColors.textMuted,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            key: const Key('library_search_field'),
+                            controller: _controller,
+                            onChanged: _onTextChange,
+                            style: AppTypography.body
+                                .copyWith(color: AppColors.text),
+                            decoration: InputDecoration(
+                              hintText: context.t('common.search'),
+                              hintStyle: AppTypography.body.copyWith(
+                                color: AppColors.textMuted,
+                              ),
+                              isDense: true,
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                        ),
+                        if (_controller.text.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 16),
+                            color: AppColors.textMuted,
+                            onPressed: () {
+                              _controller.clear();
+                              widget.onSearchChanged('');
+                            },
+                          )
+                        else if (searchWidth >= 190)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0x1AFFFFFF),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: AppColors.borderSubtle),
+                            ),
+                            child: Text(
+                              context.t('common.searchShortcut'),
+                              style: AppTypography.micro.copyWith(
+                                color: AppColors.textMuted,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         if (widget.showControls) ...[
           const SizedBox(height: 16),

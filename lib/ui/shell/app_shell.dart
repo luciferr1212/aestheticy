@@ -46,6 +46,8 @@ import 'app_navigator.dart';
 import 'bottom_now_playing_bar.dart';
 import 'global_playback_keys.dart';
 import 'scanning_panel.dart';
+import 'side_panel.dart';
+import 'side_panel_controller.dart';
 import 'sidebar.dart';
 import 'volume_hud.dart';
 
@@ -100,6 +102,9 @@ class AppShell extends StatefulWidget {
   /// Optional in-memory library data cache.
   final LibraryDataCache? dataCache;
 
+  /// Optional docked right side panel controller.
+  final SidePanelController? sidePanelController;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -119,6 +124,7 @@ class AppShell extends StatefulWidget {
     this.miniPlayerController,
     this.trayWindowController,
     this.dataCache,
+    this.sidePanelController,
   });
 
   @override
@@ -129,8 +135,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UserCollections _userCollections;
   late final LyricsController _lyricsController;
   late final LibraryDataCache _dataCache;
+  late SidePanelController _sidePanelController;
   bool _createdLyricsControllerLocally = false;
   bool _createdDataCacheLocally = false;
+  bool _createdSidePanelControllerLocally = false;
   List<LibraryFolder> _folders = [];
   bool _isLoadingFolders = true;
 
@@ -166,6 +174,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         settingsStore: widget.settingsStore,
       );
       _createdLyricsControllerLocally = true;
+    }
+    if (widget.sidePanelController != null) {
+      _sidePanelController = widget.sidePanelController!;
+    } else {
+      _sidePanelController = SidePanelController(
+        settingsStore: widget.settingsStore,
+      );
+      _createdSidePanelControllerLocally = true;
     }
     _userCollections = widget.userCollections ??
         UserCollections(repository: widget.repository);
@@ -212,7 +228,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           widget.navigator.goForward();
         }
       },
+      onToggleQueuePanel: () => _toggleSidePanel(SidePanelTab.queue),
+      onToggleLyricsPanel: () => _toggleSidePanel(SidePanelTab.lyrics),
     );
+  }
+
+  void _toggleSidePanel(SidePanelTab tab) {
+    final current = widget.navigator.current;
+    if (current == AppDestination.fullScreen ||
+        current == AppDestination.nowPlaying ||
+        current == AppDestination.lyrics) {
+      return;
+    }
+    _sidePanelController.toggleTab(tab);
   }
 
   void _openShortcutsCheatSheet() {
@@ -232,6 +260,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (_createdDataCacheLocally) {
       _dataCache.dispose();
+    }
+    if (_createdSidePanelControllerLocally) {
+      _sidePanelController.dispose();
     }
     if (_wasFullScreen && !_isSyncingFullScreen) {
       _wasFullScreen = false;
@@ -594,85 +625,128 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               child: AmbientBackground(settingsStore: widget.settingsStore),
             ),
 
-            // 2. Main structure: Sidebar + Content Column
+            // 2. Main structure: Sidebar + Content Column + Docked SidePanel
             Positioned.fill(
-              child: Row(
-                children: [
-                  // Start side: Sidebar (blur slot 1)
-                  Sidebar(
-                    navigator: widget.navigator,
-                    settingsStore: widget.settingsStore,
-                    onOpenFolders: _openFolders,
-                  ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return ListenableBuilder(
+                    listenable: _sidePanelController,
+                    builder: (context, _) {
+                      final showSidePanel =
+                          _sidePanelController.isVisibleForWidth(
+                        constraints.maxWidth,
+                      );
 
-                  // Content area & floating now-playing bar
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        // Scrollable content area with padding above bottom bar
-                        Positioned.fill(
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 104),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                      return Row(
+                        children: [
+                          // Start side: Sidebar (blur slot 1)
+                          Sidebar(
+                            navigator: widget.navigator,
+                            settingsStore: widget.settingsStore,
+                            onOpenFolders: _openFolders,
+                          ),
+
+                          // Content area & floating now-playing bar
+                          Expanded(
+                            key: const Key('app_shell_content_area'),
+                            child: Stack(
                               children: [
-                                // Top scanning panel
-                                ScanningPanel(scanService: widget.scanService),
-
-                                // Active destination view (no blur)
-                                Expanded(
-                                  child: AnimatedSwitcher(
-                                    key: const ValueKey('content_animated_switcher'),
-                                    duration: reduceMotion
-                                        ? Duration.zero
-                                        : const Duration(milliseconds: 120),
-                                    switchInCurve: Curves.easeOut,
-                                    switchOutCurve: Curves.easeOut,
-                                    layoutBuilder:
-                                        (currentChild, previousChildren) {
-                                      return currentChild ??
-                                          const SizedBox.shrink();
-                                    },
-                                    transitionBuilder: (child, animation) {
-                                      return FadeTransition(
-                                        opacity: CurvedAnimation(
-                                          parent: animation,
-                                          curve: Curves.easeOut,
+                                // Scrollable content area with padding above bottom bar
+                                Positioned.fill(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(bottom: 104),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        // Top scanning panel
+                                        ScanningPanel(
+                                          scanService: widget.scanService,
                                         ),
-                                        child: child,
-                                      );
-                                    },
-                                    child: _ViewStateRestorer(
-                                      key: ValueKey(
-                                          'view_state_${widget.navigator.currentEntry.id}'),
-                                      entry: widget.navigator.currentEntry,
-                                      navigator: widget.navigator,
-                                      child: _buildContent(currentDestination),
+
+                                        // Active destination view (no blur)
+                                        Expanded(
+                                          child: AnimatedSwitcher(
+                                            key: const ValueKey(
+                                              'content_animated_switcher',
+                                            ),
+                                            duration: reduceMotion
+                                                ? Duration.zero
+                                                : const Duration(
+                                                    milliseconds: 120,
+                                                  ),
+                                            switchInCurve: Curves.easeOut,
+                                            switchOutCurve: Curves.easeOut,
+                                            layoutBuilder: (
+                                              currentChild,
+                                              previousChildren,
+                                            ) {
+                                              return currentChild ??
+                                                  const SizedBox.shrink();
+                                            },
+                                            transitionBuilder:
+                                                (child, animation) {
+                                              return FadeTransition(
+                                                opacity: CurvedAnimation(
+                                                  parent: animation,
+                                                  curve: Curves.easeOut,
+                                                ),
+                                                child: child,
+                                              );
+                                            },
+                                            child: _ViewStateRestorer(
+                                              key: ValueKey(
+                                                'view_state_${widget.navigator.currentEntry.id}',
+                                              ),
+                                              entry:
+                                                  widget.navigator.currentEntry,
+                                              navigator: widget.navigator,
+                                              child: _buildContent(
+                                                currentDestination,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
+                                  ),
+                                ),
+
+                                // Floating bottom player bar (blur slot 2, 16dp margins)
+                                PositionedDirectional(
+                                  start: 16,
+                                  end: 16,
+                                  bottom: 16,
+                                  height: 84,
+                                  child: BottomNowPlayingBar(
+                                    controller: widget.controller,
+                                    navigator: widget.navigator,
+                                    miniPlayerController:
+                                        widget.miniPlayerController,
+                                    settingsStore: widget.settingsStore,
+                                    sidePanelController: _sidePanelController,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                        ),
 
-                        // Floating bottom player bar (blur slot 2, 16dp margins)
-                        PositionedDirectional(
-                          start: 16,
-                          end: 16,
-                          bottom: 16,
-                          height: 84,
-                          child: BottomNowPlayingBar(
-                            controller: widget.controller,
-                            navigator: widget.navigator,
-                            miniPlayerController: widget.miniPlayerController,
+                          // End side: Docked Queue/Lyrics SidePanel (blur slot 3 when open)
+                          SidePanel(
+                            key: const Key('app_shell_side_panel'),
+                            isVisible: showSidePanel,
+                            sidePanelController: _sidePanelController,
+                            playbackController: widget.controller,
+                            lyricsController: _lyricsController,
                             settingsStore: widget.settingsStore,
+                            navigator: widget.navigator,
+                            userCollections: _userCollections,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                        ],
+                      );
+                    },
+                  );
+                },
               ),
             ),
           ],

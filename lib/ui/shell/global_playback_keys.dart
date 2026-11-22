@@ -53,6 +53,12 @@ class GlobalPlaybackKeysHandler {
   /// Handles navigation forward (`Alt + Right`).
   final VoidCallback? onNavigateForward;
 
+  /// Handles toggling the docked Queue side panel (`Ctrl + Shift + Q`).
+  final VoidCallback? onToggleQueuePanel;
+
+  /// Handles toggling the docked Lyrics side panel (`Ctrl + Shift + L`).
+  final VoidCallback? onToggleLyricsPanel;
+
   int _arrowHeldDirection = 0;
   Timer? _seekCooldownTimer;
   Timer? _volumeCooldownTimer;
@@ -71,6 +77,8 @@ class GlobalPlaybackKeysHandler {
     this.isShortcutsCheatSheetOpen,
     this.onNavigateBack,
     this.onNavigateForward,
+    this.onToggleQueuePanel,
+    this.onToggleLyricsPanel,
   });
 
   /// Clears held key state and cancels active repeat timers.
@@ -219,6 +227,24 @@ class GlobalPlaybackKeysHandler {
       if (onEnterMiniPlayer != null) {
         onEnterMiniPlayer!();
         return KeyEventResult.handled;
+      }
+    }
+
+    // 2b. Docked side panel toggles (Ctrl + Shift + Q / Ctrl + Shift + L)
+    if (event is KeyDownEvent &&
+        !_isEditableTextFocused() &&
+        !_isPopupOrDialogFocused()) {
+      if (matchesShortcut(event, AppShortcutId.toggleQueuePanel)) {
+        if (onToggleQueuePanel != null) {
+          onToggleQueuePanel!();
+          return KeyEventResult.handled;
+        }
+      }
+      if (matchesShortcut(event, AppShortcutId.toggleLyricsPanel)) {
+        if (onToggleLyricsPanel != null) {
+          onToggleLyricsPanel!();
+          return KeyEventResult.handled;
+        }
       }
     }
 

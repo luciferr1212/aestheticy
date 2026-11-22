@@ -143,6 +143,9 @@ enum LyricsViewDensity {
 
   /// Compact expanded panel inside the frameless Mini Player.
   mini,
+
+  /// Docked side panel in the desktop shell.
+  sidePanel,
 }
 
 /// Presentation widget for time-synchronized and plain lyrics with calm motion and typography.
@@ -232,12 +235,14 @@ class _LyricsViewState extends State<LyricsView>
 
   double _defaultLineExtent() => switch (_effectiveDensity) {
         LyricsViewDensity.mini => widget.isWideMini ? 36.0 : 40.0,
+        LyricsViewDensity.sidePanel => 48.0,
         LyricsViewDensity.fullScreen => 84.0,
         LyricsViewDensity.page => 68.0,
       };
 
   double _syncedVerticalPadding() => switch (_effectiveDensity) {
         LyricsViewDensity.mini => 24.0,
+        LyricsViewDensity.sidePanel => 40.0,
         LyricsViewDensity.fullScreen => 140.0,
         LyricsViewDensity.page => 100.0,
       };
@@ -796,11 +801,95 @@ class _LyricsViewState extends State<LyricsView>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.showHeader && _effectiveDensity != LyricsViewDensity.mini)
+          if (_effectiveDensity == LyricsViewDensity.sidePanel)
+            _buildSidePanelToolbar(context)
+          else if (widget.showHeader &&
+              _effectiveDensity != LyricsViewDensity.mini)
             _buildHeader(context),
           Expanded(
             child: _buildBody(context),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidePanelToolbar(BuildContext context) {
+    final current = widget.playbackController.queue.current;
+    final doc = widget.controller.document;
+    final isSynced = doc != null && doc.kind == LyricsKind.synced;
+    if (current == null && !isSynced) {
+      return const SizedBox.shrink();
+    }
+
+    final title = current != null
+        ? (current.extras?['title'] ?? context.t('library.unknownTitle'))
+        : context.t('player.noTrack');
+    final rawArtist = current?.extras?['artist'];
+    final artist = current != null
+        ? (rawArtist != null && rawArtist.isNotEmpty
+            ? context.displayArtist(rawArtist)
+            : context.t('library.unknownArtist'))
+        : '—';
+
+    final String sourceLabel;
+    if (doc != null) {
+      sourceLabel = switch (doc.source) {
+        LyricsSourceOrigin.local => context.t('lyrics.source.local'),
+        LyricsSourceOrigin.embedded => context.t('lyrics.source.embedded'),
+        LyricsSourceOrigin.lrclib => context.t('lyrics.source.lrclib'),
+      };
+    } else {
+      sourceLabel = '';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (current != null)
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textDirection: textDirectionFor(title),
+                        style: AppTypography.bodyStrong.copyWith(
+                          color: AppColors.text,
+                        ),
+                      ),
+                      Text(
+                        artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textDirection: textDirectionFor(artist),
+                        style: AppTypography.caption.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (sourceLabel.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  _buildBadge(sourceLabel),
+                ],
+              ],
+            ),
+          if (isSynced) ...[
+            if (current != null) const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: _LyricsSyncControl(controller: widget.controller),
+            ),
+          ],
         ],
       ),
     );
@@ -1020,16 +1109,20 @@ class _LyricsViewState extends State<LyricsView>
       return _buildMiniUnavailable(context);
     }
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.lyrics_outlined, size: 48, color: AppColors.textMuted),
-          const SizedBox(height: 16),
-          Text(
-            context.t('lyrics.state.off'),
-            style: AppTypography.body.copyWith(color: AppColors.textMuted),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lyrics_outlined, size: 48, color: AppColors.textMuted),
+            const SizedBox(height: 16),
+            Text(
+              context.t('lyrics.state.off'),
+              textAlign: TextAlign.center,
+              style: AppTypography.body.copyWith(color: AppColors.textMuted),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1039,16 +1132,20 @@ class _LyricsViewState extends State<LyricsView>
       return _buildMiniUnavailable(context);
     }
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
-          const SizedBox(height: 16),
-          Text(
-            context.t('lyrics.state.notFound'),
-            style: AppTypography.body.copyWith(color: AppColors.textMuted),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
+            const SizedBox(height: 16),
+            Text(
+              context.t('lyrics.state.notFound'),
+              textAlign: TextAlign.center,
+              style: AppTypography.body.copyWith(color: AppColors.textMuted),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1058,24 +1155,28 @@ class _LyricsViewState extends State<LyricsView>
       return _buildMiniUnavailable(context);
     }
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.error_outline, size: 48, color: AppColors.textMuted),
-          const SizedBox(height: 16),
-          Text(
-            context.t('lyrics.state.error'),
-            style: AppTypography.body.copyWith(color: AppColors.textMuted),
-          ),
-          const SizedBox(height: 16),
-          GlassPillButton(
-            leadingIcon: Icons.refresh,
-            label: context.t('lyrics.retry'),
-            tooltip: context.t('lyrics.retry'),
-            semanticLabel: context.t('lyrics.retry'),
-            onPressed: () => widget.controller.retry(),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: AppColors.textMuted),
+            const SizedBox(height: 16),
+            Text(
+              context.t('lyrics.state.error'),
+              textAlign: TextAlign.center,
+              style: AppTypography.body.copyWith(color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 16),
+            GlassPillButton(
+              leadingIcon: Icons.refresh,
+              label: context.t('lyrics.retry'),
+              tooltip: context.t('lyrics.retry'),
+              semanticLabel: context.t('lyrics.retry'),
+              onPressed: () => widget.controller.retry(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1083,16 +1184,20 @@ class _LyricsViewState extends State<LyricsView>
   Widget _buildFound(BuildContext context, LyricsDocument doc) {
     if (doc.kind == LyricsKind.instrumental) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.music_note, size: 56, color: AppColors.textMuted),
-            const SizedBox(height: 16),
-            Text(
-              context.t('lyrics.state.instrumental'),
-              style: AppTypography.title.copyWith(color: AppColors.textMuted),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.music_note, size: 56, color: AppColors.textMuted),
+              const SizedBox(height: 16),
+              Text(
+                context.t('lyrics.state.instrumental'),
+                textAlign: TextAlign.center,
+                style: AppTypography.title.copyWith(color: AppColors.textMuted),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -1113,6 +1218,7 @@ class _LyricsViewState extends State<LyricsView>
     }
     final plainFontSize = switch (density) {
       LyricsViewDensity.mini => widget.isWideMini ? 14.0 : 15.0,
+      LyricsViewDensity.sidePanel => 15.5,
       LyricsViewDensity.fullScreen => 26.0,
       LyricsViewDensity.page => 20.0,
     };
@@ -1141,9 +1247,13 @@ class _LyricsViewState extends State<LyricsView>
           child: SingleChildScrollView(
             controller: _plainScrollController,
             padding: EdgeInsets.symmetric(
-              horizontal: density == LyricsViewDensity.mini ? 16 : 32,
+              horizontal: (density == LyricsViewDensity.mini ||
+                      density == LyricsViewDensity.sidePanel)
+                  ? 16
+                  : 32,
               vertical: switch (density) {
                 LyricsViewDensity.mini => 24,
+                LyricsViewDensity.sidePanel => 28,
                 LyricsViewDensity.fullScreen => 80,
                 LyricsViewDensity.page => 48,
               },
@@ -1157,7 +1267,11 @@ class _LyricsViewState extends State<LyricsView>
                     for (final line in doc.lines)
                       Padding(
                         padding: EdgeInsets.symmetric(
-                          vertical: density == LyricsViewDensity.mini ? 4 : 6,
+                          vertical: density == LyricsViewDensity.mini
+                              ? 4
+                              : (density == LyricsViewDensity.sidePanel
+                                  ? 5
+                                  : 6),
                         ),
                         child: Text(
                           line.text,
@@ -1167,7 +1281,11 @@ class _LyricsViewState extends State<LyricsView>
                             fontSize: plainFontSize,
                             fontWeight: FontWeight.normal,
                             color: AppColors.textSecondary,
-                            height: density == LyricsViewDensity.mini ? 1.45 : 1.6,
+                            height: density == LyricsViewDensity.mini
+                                ? 1.45
+                                : (density == LyricsViewDensity.sidePanel
+                                    ? 1.5
+                                    : 1.6),
                           ),
                         ),
                       ),
@@ -1181,7 +1299,9 @@ class _LyricsViewState extends State<LyricsView>
     );
 
     final showNotice =
-        density == LyricsViewDensity.page && !widget.isFullScreen;
+        (density == LyricsViewDensity.page ||
+                density == LyricsViewDensity.sidePanel) &&
+            !widget.isFullScreen;
     if (!showNotice) {
       return plainView;
     }
@@ -1250,7 +1370,10 @@ class _LyricsViewState extends State<LyricsView>
         child: ListView.builder(
           controller: _scrollController,
           padding: EdgeInsets.symmetric(
-            horizontal: density == LyricsViewDensity.mini ? 12 : 24,
+            horizontal: (density == LyricsViewDensity.mini ||
+                    density == LyricsViewDensity.sidePanel)
+                ? 12
+                : 24,
             vertical: _syncedVerticalPadding(),
           ),
           itemCount: doc.lines.length,
@@ -1428,6 +1551,7 @@ class _SyncedLineItemState extends State<_SyncedLineItem> {
 
     final double constantFontSize = switch (widget.density) {
       LyricsViewDensity.mini => widget.isWideMini ? 18.0 : 20.0,
+      LyricsViewDensity.sidePanel => 20.0,
       LyricsViewDensity.fullScreen => 42.0,
       LyricsViewDensity.page => 32.0,
     };
@@ -1470,8 +1594,13 @@ class _SyncedLineItemState extends State<_SyncedLineItem> {
             curve: Curves.easeOutCubic,
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: widget.density == LyricsViewDensity.mini ? 8 : 16,
-                vertical: widget.density == LyricsViewDensity.mini ? 5 : 8,
+                horizontal: (widget.density == LyricsViewDensity.mini ||
+                        widget.density == LyricsViewDensity.sidePanel)
+                    ? 8
+                    : 16,
+                vertical: widget.density == LyricsViewDensity.mini
+                    ? 5
+                    : (widget.density == LyricsViewDensity.sidePanel ? 6 : 8),
               ),
               child: Align(
                 alignment: startAlign,

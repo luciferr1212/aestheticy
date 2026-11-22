@@ -149,6 +149,12 @@ class AppSettings {
   /// Transition smoothness mode for audio playback ('off', 'soft', or 'smooth').
   final String transitionSmoothness;
 
+  /// Whether the docked right side panel is open.
+  final bool sidePanelOpen;
+
+  /// Active tab in the docked right side panel ('queue' or 'lyrics').
+  final String sidePanelTab;
+
   /// Whether smooth volume fade transitions are enabled around playback changes.
   bool get smoothTransitions => transitionSmoothness != 'off';
 
@@ -216,6 +222,8 @@ class AppSettings {
     this.miniPlayerShowLyrics = false,
     String transitionSmoothness = 'smooth',
     bool? smoothTransitions,
+    this.sidePanelOpen = false,
+    String sidePanelTab = 'queue',
   })  : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
@@ -241,7 +249,8 @@ class AppSettings {
             ? (smoothTransitions == false && transitionSmoothness == 'smooth'
                 ? 'off'
                 : transitionSmoothness)
-            : 'smooth';
+            : 'smooth',
+        sidePanelTab = sidePanelTab == 'lyrics' ? 'lyrics' : 'queue';
 
   static double _clampPreamp(num? value) {
     if (value == null) return 0.0;
@@ -308,6 +317,8 @@ class AppSettings {
     bool? miniPlayerShowLyrics,
     String? transitionSmoothness,
     bool? smoothTransitions,
+    bool? sidePanelOpen,
+    String? sidePanelTab,
   }) {
     String resolvedSmoothness = this.transitionSmoothness;
     if (transitionSmoothness != null) {
@@ -378,6 +389,10 @@ class AppSettings {
       miniPlayerLastY: miniPlayerLastY ?? this.miniPlayerLastY,
       miniPlayerShowLyrics: miniPlayerShowLyrics ?? this.miniPlayerShowLyrics,
       transitionSmoothness: resolvedSmoothness,
+      sidePanelOpen: sidePanelOpen ?? this.sidePanelOpen,
+      sidePanelTab: sidePanelTab == null
+          ? this.sidePanelTab
+          : (sidePanelTab == 'lyrics' ? 'lyrics' : 'queue'),
     );
   }
 
@@ -433,6 +448,8 @@ class AppSettings {
       'miniPlayerShowLyrics': miniPlayerShowLyrics,
       'transitionSmoothness': transitionSmoothness,
       'smoothTransitions': smoothTransitions,
+      'sidePanelOpen': sidePanelOpen,
+      'sidePanelTab': sidePanelTab,
     };
   }
 
@@ -716,6 +733,12 @@ class AppSettings {
       transitionSmoothness = 'smooth';
     }
 
+    final rawSidePanelOpen = json['sidePanelOpen'];
+    final sidePanelOpen = rawSidePanelOpen is bool ? rawSidePanelOpen : false;
+
+    final rawSidePanelTab = json['sidePanelTab'];
+    final sidePanelTab = rawSidePanelTab == 'lyrics' ? 'lyrics' : 'queue';
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -765,6 +788,8 @@ class AppSettings {
       miniPlayerLastY: miniPlayerLastY,
       miniPlayerShowLyrics: miniPlayerShowLyrics,
       transitionSmoothness: transitionSmoothness,
+      sidePanelOpen: sidePanelOpen,
+      sidePanelTab: sidePanelTab,
     );
   }
 
@@ -821,7 +846,9 @@ class AppSettings {
           miniPlayerLastX == other.miniPlayerLastX &&
           miniPlayerLastY == other.miniPlayerLastY &&
           miniPlayerShowLyrics == other.miniPlayerShowLyrics &&
-          transitionSmoothness == other.transitionSmoothness;
+          transitionSmoothness == other.transitionSmoothness &&
+          sidePanelOpen == other.sidePanelOpen &&
+          sidePanelTab == other.sidePanelTab;
 
   @override
   int get hashCode => Object.hashAll([
@@ -873,5 +900,7 @@ class AppSettings {
         miniPlayerLastY,
         miniPlayerShowLyrics,
         transitionSmoothness,
+        sidePanelOpen,
+        sidePanelTab,
       ]);
 }
