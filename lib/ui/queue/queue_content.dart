@@ -69,22 +69,47 @@ class _QueueContentState extends State<QueueContent> {
   StreamSubscription<void>? _queueSub;
   StreamSubscription<AudioSource?>? _currentSub;
 
-  int _selectedIndex = -1;
+  int? _selectedEntryId;
+  int? _selectionAnchorEntryId;
+  final Set<int> _selectedEntryIds = <int>{};
   bool _userScrolled = false;
+
+  int get _resolvedSelectedIndex {
+    final id = _selectedEntryId;
+    if (id == null) return -1;
+    return widget.controller.queue.indexOfEntryId(id);
+  }
 
   @override
   void initState() {
     super.initState();
-    _selectedIndex = widget.controller.queue.currentIndex;
+    final initialId = widget.controller.queue.currentEntry?.id;
+    _selectedEntryId = initialId;
+    _selectionAnchorEntryId = initialId;
+    if (initialId != null) {
+      _selectedEntryIds.add(initialId);
+    }
 
     _queueSub = widget.controller.queueChangeStream.listen((_) {
       if (!mounted) return;
-      final len = widget.controller.queue.length;
+      final existingIds =
+          widget.controller.queue.entries.map((e) => e.id).toSet();
       setState(() {
-        if (len == 0) {
-          _selectedIndex = -1;
-        } else if (_selectedIndex >= len) {
-          _selectedIndex = len - 1;
+        _selectedEntryIds.removeWhere((id) => !existingIds.contains(id));
+        if (_selectedEntryId != null && !existingIds.contains(_selectedEntryId)) {
+          _selectedEntryId =
+              _selectedEntryIds.isNotEmpty ? _selectedEntryIds.first : null;
+        }
+        if (_selectedEntryIds.isEmpty) {
+          final fallbackCur = widget.controller.queue.currentEntry?.id;
+          if (fallbackCur != null && existingIds.contains(fallbackCur)) {
+            _selectedEntryId = fallbackCur;
+            _selectedEntryIds.add(fallbackCur);
+          }
+        }
+        if (_selectionAnchorEntryId != null &&
+            !existingIds.contains(_selectionAnchorEntryId)) {
+          _selectionAnchorEntryId = _selectedEntryId;
         }
       });
     });
@@ -145,68 +170,164 @@ class _QueueContentState extends State<QueueContent> {
 
     if (isTextFieldFocused) return KeyEventResult.ignored;
 
+    final entries = widget.controller.queue.entries;
+
     if (isDeleteKey(event)) {
-      if (_selectedIndex >= 0 &&
-          _selectedIndex < widget.controller.queue.length) {
-        final toRemove = _selectedIndex;
-        widget.controller.removeFromQueue(toRemove);
-        setState(() {
-          if (widget.controller.queue.length <= 1) {
-            _selectedIndex = -1;
-          } else if (_selectedIndex >= widget.controller.queue.length - 1) {
-            _selectedIndex = widget.controller.queue.length - 2;
+      final targetIds = _selectedEntryIds.isNotEmpty
+          ? _selectedEntryIds.toSet()
+          : (_selectedEntryId != null ? <int>{_selectedEntryId!} : <int>{});
+      if (targetIds.isNotEmpty) {
+        var earliestRemovedIdx = -1;
+        for (var i = 0; i < entries.length; i++) {
+          if (targetIds.contains(entries[i].id)) {
+            earliestRemovedIdx = i;
+            break;
           }
-        });
-        return KeyEventResult.handled;
+        }
+        if (earliestRemovedIdx >= 0) {
+          int? nextSelectedId;
+          for (var i = earliestRemovedIdx; i < entries.length; i++) {
+            if (!targetIds.contains(entries[i].id)) {
+              nextSelectedId = entries[i].id;
+              break;
+            }
+          }
+          if (nextSelectedId == null) {
+            for (var i = earliestRemovedIdx - 1; i >= 0; i--) {
+              if (!targetIds.contains(entries[i].id)) {
+                nextSelectedId = entries[i].id;
+                break;
+              }
+            }
+          }
+
+          setState(() {
+            _selectedEntryId = nextSelectedId;
+            _selectionAnchorEntryId = nextSelectedId;
+            _selectedEntryIds
+              ..clear()
+              ..addAll(nextSelectedId != null ? [nextSelectedId] : const []);
+          });
+          widget.controller.removeEntriesFromQueue(targetIds);
+          return KeyEventResult.handled;
+        }
       }
     }
 
     // Alt+Up and Alt+Down shortcuts to move selected upcoming row
     final isAlt = isAltModifierPressed();
+    final isShift = isShiftModifierPressed();
+    final selectedIdx = _resolvedSelectedIndex;
 
     if (isAlt && isArrowUpKey(event)) {
       final curIdx = widget.controller.queue.currentIndex;
-      if (_selectedIndex > curIdx + 1 &&
-          _selectedIndex < widget.controller.queue.length) {
-        final from = _selectedIndex;
-        final to = _selectedIndex - 1;
-        widget.controller.moveInQueue(from, to);
-        setState(() {
-          _selectedIndex = to;
-        });
+      if (selectedIdx > curIdx + 1 && selectedIdx < entries.length) {
+        final to = selectedIdx - 1;
+        widget.controller.moveInQueue(selectedIdx, to);
         return KeyEventResult.handled;
       }
     } else if (isAlt && isArrowDownKey(event)) {
       final curIdx = widget.controller.queue.currentIndex;
-      if (_selectedIndex > curIdx &&
-          _selectedIndex < widget.controller.queue.length - 1) {
-        final from = _selectedIndex;
-        final to = _selectedIndex + 1;
-        widget.controller.moveInQueue(from, to);
-        setState(() {
-          _selectedIndex = to;
-        });
+      if (selectedIdx > curIdx && selectedIdx < entries.length - 1) {
+        final to = selectedIdx + 1;
+        widget.controller.moveInQueue(selectedIdx, to);
         return KeyEventResult.handled;
       }
     } else if (!isAlt && isArrowDownKey(event)) {
-      if (_selectedIndex < widget.controller.queue.length - 1) {
+      if (entries.isEmpty) return KeyEventResult.ignored;
+      final nextIdx = selectedIdx < 0
+          ? 0
+          : (selectedIdx < entries.length - 1 ? selectedIdx + 1 : selectedIdx);
+      if (selectedIdx < entries.length - 1) {
+        final nextEntry = entries[nextIdx];
         setState(() {
-          _selectedIndex++;
+          _selectedEntryId = nextEntry.id;
+          if (isShift && _selectionAnchorEntryId != null) {
+            final anchorIdx =
+                widget.controller.queue.indexOfEntryId(_selectionAnchorEntryId!);
+            if (anchorIdx >= 0) {
+              final lo = anchorIdx < nextIdx ? anchorIdx : nextIdx;
+              final hi = anchorIdx > nextIdx ? anchorIdx : nextIdx;
+              _selectedEntryIds
+                ..clear()
+                ..addAll([for (var i = lo; i <= hi; i++) entries[i].id]);
+            }
+          } else {
+            _selectionAnchorEntryId = nextEntry.id;
+            _selectedEntryIds
+              ..clear()
+              ..add(nextEntry.id);
+          }
         });
-        _scrollToIndex(_selectedIndex, smooth: true);
+        _scrollToIndex(nextIdx, smooth: true);
         return KeyEventResult.handled;
       }
     } else if (!isAlt && isArrowUpKey(event)) {
-      if (_selectedIndex > 0) {
+      if (entries.isEmpty) return KeyEventResult.ignored;
+      final prevIdx = selectedIdx < 0
+          ? entries.length - 1
+          : (selectedIdx > 0 ? selectedIdx - 1 : 0);
+      if (selectedIdx > 0 || selectedIdx < 0) {
+        final prevEntry = entries[prevIdx];
         setState(() {
-          _selectedIndex--;
+          _selectedEntryId = prevEntry.id;
+          if (isShift && _selectionAnchorEntryId != null) {
+            final anchorIdx =
+                widget.controller.queue.indexOfEntryId(_selectionAnchorEntryId!);
+            if (anchorIdx >= 0) {
+              final lo = anchorIdx < prevIdx ? anchorIdx : prevIdx;
+              final hi = anchorIdx > prevIdx ? anchorIdx : prevIdx;
+              _selectedEntryIds
+                ..clear()
+                ..addAll([for (var i = lo; i <= hi; i++) entries[i].id]);
+            }
+          } else {
+            _selectionAnchorEntryId = prevEntry.id;
+            _selectedEntryIds
+              ..clear()
+              ..add(prevEntry.id);
+          }
         });
-        _scrollToIndex(_selectedIndex, smooth: true);
+        _scrollToIndex(prevIdx, smooth: true);
         return KeyEventResult.handled;
       }
     }
 
     return KeyEventResult.ignored;
+  }
+
+  void _handleRowSelection(QueueEntry entry, int index, List<QueueEntry> entries) {
+    final isCtrl = isCtrlModifierPressed();
+    final isShift = isShiftModifierPressed();
+
+    setState(() {
+      if (isShift && _selectionAnchorEntryId != null) {
+        final anchorIdx =
+            widget.controller.queue.indexOfEntryId(_selectionAnchorEntryId!);
+        if (anchorIdx >= 0) {
+          final lo = anchorIdx < index ? anchorIdx : index;
+          final hi = anchorIdx > index ? anchorIdx : index;
+          _selectedEntryIds
+            ..clear()
+            ..addAll([for (var i = lo; i <= hi; i++) entries[i].id]);
+          _selectedEntryId = entry.id;
+          return;
+        }
+      }
+      if (isCtrl) {
+        if (!_selectedEntryIds.remove(entry.id)) {
+          _selectedEntryIds.add(entry.id);
+        }
+        _selectedEntryId = entry.id;
+        _selectionAnchorEntryId = entry.id;
+        return;
+      }
+      _selectedEntryId = entry.id;
+      _selectionAnchorEntryId = entry.id;
+      _selectedEntryIds
+        ..clear()
+        ..add(entry.id);
+    });
   }
 
   Widget _buildProxyDecorator(
@@ -366,15 +487,20 @@ class _QueueContentState extends State<QueueContent> {
                           entry: entry,
                           currentIndex: currentIndex,
                           currentEntry: currentEntry,
-                          isSelected: _selectedIndex == index,
+                          isSelected: _selectedEntryIds.contains(entry.id),
                           compact: widget.compact,
                           controller: widget.controller,
                           navigator: widget.navigator,
                           userCollections: widget.userCollections,
                           totalCount: entries.length,
-                          onSelect: () {
-                            setState(() => _selectedIndex = index);
+                          onSelect: ({bool playIfPlain = false}) {
+                            final isModified =
+                                isCtrlModifierPressed() || isShiftModifierPressed();
+                            _handleRowSelection(entry, index, entries);
                             _focusNode.requestFocus();
+                            if (playIfPlain && !isModified) {
+                              widget.controller.playTrack(index);
+                            }
                           },
                         );
 
@@ -459,7 +585,7 @@ class _QueueRow extends StatefulWidget {
   final AppNavigator navigator;
   final UserCollections? userCollections;
   final int totalCount;
-  final VoidCallback onSelect;
+  final void Function({bool playIfPlain}) onSelect;
 
   const _QueueRow({
     super.key,
@@ -544,8 +670,7 @@ class _QueueRowState extends State<_QueueRow> {
                 hoverColor: const Color(0x14FFFFFF),
                 borderRadius: BorderRadius.circular(AppSpacing.r10),
                 onTap: () {
-                  widget.onSelect();
-                  widget.controller.playTrack(widget.index);
+                  widget.onSelect(playIfPlain: true);
                 },
                 child: Padding(
                   padding: EdgeInsets.symmetric(
@@ -660,7 +785,7 @@ class _QueueRowState extends State<_QueueRow> {
                             height: 28,
                           ),
                           onPressed: () =>
-                              widget.controller.removeFromQueue(widget.index),
+                              widget.controller.removeEntryFromQueue(widget.entry.id),
                         ),
 
                       // More actions menu
@@ -669,6 +794,7 @@ class _QueueRowState extends State<_QueueRow> {
                         isHovered: _isHovered,
                         compact: widget.compact,
                         index: widget.index,
+                        entryId: widget.entry.id,
                         source: source,
                         controller: widget.controller,
                         navigator: widget.navigator,
@@ -784,6 +910,7 @@ class _QueueRowMenu extends StatelessWidget {
   final bool isHovered;
   final bool compact;
   final int index;
+  final int entryId;
   final AudioSource source;
   final PlaybackController controller;
   final AppNavigator navigator;
@@ -795,6 +922,7 @@ class _QueueRowMenu extends StatelessWidget {
     required this.isHovered,
     required this.compact,
     required this.index,
+    required this.entryId,
     required this.source,
     required this.controller,
     required this.navigator,
@@ -878,7 +1006,7 @@ class _QueueRowMenu extends StatelessWidget {
         MenuItemButton(
           key: const Key('queue_menu_remove'),
           leadingIcon: const Icon(Icons.delete_outline, size: 16),
-          onPressed: () => controller.removeFromQueue(index),
+          onPressed: () => controller.removeEntryFromQueue(entryId),
           child: Text(context.t('queue.remove')),
         ),
 

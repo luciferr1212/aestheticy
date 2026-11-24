@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -16,13 +17,14 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 import 'track_actions_menu.dart';
 
 /// Screen displaying all user-created playlists with grid cards, creation,
 /// and management actions.
-class PlaylistsView extends StatelessWidget {
+class PlaylistsView extends StatefulWidget {
   /// User collections store.
   final UserCollections collections;
 
@@ -45,6 +47,9 @@ class PlaylistsView extends StatelessWidget {
   /// Optional import callback for M3U testing or injection.
   final Future<void> Function(BuildContext context)? onImportM3u;
 
+  /// Optional in-memory library data cache for automatic refresh after scans.
+  final LibraryDataCache? dataCache;
+
   /// Creates a [PlaylistsView].
   const PlaylistsView({
     super.key,
@@ -55,7 +60,57 @@ class PlaylistsView extends StatelessWidget {
     required this.navigator,
     this.onExportM3u,
     this.onImportM3u,
+    this.dataCache,
   });
+
+  @override
+  State<PlaylistsView> createState() => _PlaylistsViewState();
+}
+
+class _PlaylistsViewState extends State<PlaylistsView> {
+  LibraryDataCache? _activeCache;
+  int _lastCacheRevision = -1;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      _lastCacheRevision = _activeCache?.revision ?? -1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(PlaylistsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dataCache != widget.dataCache) {
+      final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+      if (cache != _activeCache) {
+        _activeCache?.removeListener(_onCacheChanged);
+        _activeCache = cache;
+        _activeCache?.addListener(_onCacheChanged);
+        _lastCacheRevision = _activeCache?.revision ?? -1;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    final cache = _activeCache;
+    if (!mounted || cache == null) return;
+    if (cache.revision != _lastCacheRevision) {
+      _lastCacheRevision = cache.revision;
+      unawaited(widget.collections.refresh());
+    }
+  }
 
   List<PlaylistSummary> _sortPlaylists(
     List<PlaylistSummary> list,
@@ -100,18 +155,18 @@ class PlaylistsView extends StatelessWidget {
           return _PlaylistListRow(
             key: Key('playlist_list_row_${playlist.id}'),
             playlist: playlist,
-            onTap: () => navigator.openPlaylistDetail(
+            onTap: () => widget.navigator.openPlaylistDetail(
               playlist.id,
               playlist: playlist,
             ),
             onRename: () => showRenamePlaylistDialog(
               context,
-              collections: collections,
+              collections: widget.collections,
               playlist: playlist,
             ),
             onDelete: () => showDeletePlaylistDialog(
               context,
-              collections: collections,
+              collections: widget.collections,
               playlist: playlist,
             ),
             onExport: () => doExport(context, playlist),
@@ -132,18 +187,18 @@ class PlaylistsView extends StatelessWidget {
             child: _PlaylistWideCard(
               key: Key('playlist_wide_card_${playlist.id}'),
               playlist: playlist,
-              onTap: () => navigator.openPlaylistDetail(
+              onTap: () => widget.navigator.openPlaylistDetail(
                 playlist.id,
                 playlist: playlist,
               ),
               onRename: () => showRenamePlaylistDialog(
                 context,
-                collections: collections,
+                collections: widget.collections,
                 playlist: playlist,
               ),
               onDelete: () => showDeletePlaylistDialog(
                 context,
-                collections: collections,
+                collections: widget.collections,
                 playlist: playlist,
               ),
               onExport: () => doExport(context, playlist),
@@ -168,18 +223,18 @@ class PlaylistsView extends StatelessWidget {
         return _PlaylistCard(
           key: Key('playlist_card_${playlist.id}'),
           playlist: playlist,
-          onTap: () => navigator.openPlaylistDetail(
+          onTap: () => widget.navigator.openPlaylistDetail(
             playlist.id,
             playlist: playlist,
           ),
           onRename: () => showRenamePlaylistDialog(
             context,
-            collections: collections,
+            collections: widget.collections,
             playlist: playlist,
           ),
           onDelete: () => showDeletePlaylistDialog(
             context,
-            collections: collections,
+            collections: widget.collections,
             playlist: playlist,
           ),
           onExport: () => doExport(context, playlist),
@@ -190,24 +245,24 @@ class PlaylistsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final doImport = onImportM3u ??
+    final doImport = widget.onImportM3u ??
         (ctx) => M3u.importPlaylist(
               ctx,
-              repository: repository,
-              collections: collections,
+              repository: widget.repository,
+              collections: widget.collections,
             );
-    final doExport = onExportM3u ??
+    final doExport = widget.onExportM3u ??
         (ctx, pl) => M3u.exportPlaylist(
               ctx,
-              repository: repository,
+              repository: widget.repository,
               playlist: pl,
             );
 
     return ListenableBuilder(
-      listenable: collections,
+      listenable: widget.collections,
       builder: (context, _) {
-        final rawPlaylists = collections.playlists;
-        final settings = settingsStore.settings;
+        final rawPlaylists = widget.collections.playlists;
+        final settings = widget.settingsStore.settings;
         final playlists = _sortPlaylists(
           rawPlaylists,
           settings.playlistsSort,
@@ -248,7 +303,7 @@ class PlaylistsView extends StatelessWidget {
                     size: GlassButtonSize.medium,
                     onPressed: () => showCreatePlaylistDialog(
                       context,
-                      collections: collections,
+                      collections: widget.collections,
                     ),
                   ),
                 ],
@@ -259,16 +314,16 @@ class PlaylistsView extends StatelessWidget {
                 allowedShapes: const ['square', 'wide', 'list'],
                 currentShape: currentShape,
                 onShapeChanged: (newShape) {
-                  settingsStore.update((s) => s.copyWith(playlistsViewMode: newShape));
+                  widget.settingsStore.update((s) => s.copyWith(playlistsViewMode: newShape));
                 },
                 sortOptions: const ['name', 'trackCount', 'recentlyAdded'],
                 currentSort: settings.playlistsSort,
                 onSortChanged: (newSort) {
-                  settingsStore.update((s) => s.copyWith(playlistsSort: newSort));
+                  widget.settingsStore.update((s) => s.copyWith(playlistsSort: newSort));
                 },
                 sortDirection: SortDirection.fromReversed(settings.playlistsSortReversed),
                 onSortDirectionChanged: (newDir) {
-                  settingsStore.update((s) => s.copyWith(playlistsSortReversed: newDir.isReversed));
+                  widget.settingsStore.update((s) => s.copyWith(playlistsSortReversed: newDir.isReversed));
                 },
                 reduceMotion: reduceMotion,
               ),
@@ -310,7 +365,7 @@ class PlaylistsView extends StatelessWidget {
                                   size: GlassButtonSize.medium,
                                   onPressed: () => showCreatePlaylistDialog(
                                     context,
-                                    collections: collections,
+                                    collections: widget.collections,
                                   ),
                                 ),
                                 const SizedBox(width: 12),

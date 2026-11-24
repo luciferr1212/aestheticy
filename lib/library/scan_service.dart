@@ -25,6 +25,7 @@ class ScanService extends ChangeNotifier {
   bool _isScanning = false;
   bool _isCancelled = false;
   bool _disposed = false;
+  int _libraryVersion = 0;
 
   /// Creates a [ScanService].
   ScanService({
@@ -38,25 +39,53 @@ class ScanService extends ChangeNotifier {
   /// Whether a scan operation is currently in progress.
   bool get isScanning => _isScanning;
 
+  /// Monotonically incremented whenever a scan finishes or a library folder is
+  /// added/removed so dependent caches and pages revalidate consistently.
+  int get libraryVersion => _libraryVersion;
+
   /// Broadcast stream of [ScanProgress] events emitted during scans.
   Stream<ScanProgress> get progressStream => _progressController.stream;
 
   /// Adds a filesystem folder path to the library and scans it immediately.
   Future<LibraryFolder> addFolder(String path) async {
     final folder = await repository.addFolder(path);
-    await _scanSingleFolder(folder);
+    _isScanning = true;
+    _isCancelled = false;
+    _currentProgress = const ScanProgress();
+    notifyListeners();
+
+    try {
+      await _scanFolders([folder]);
+    } finally {
+      _finishScanSession();
+    }
     return folder;
   }
 
-  /// Rescans all registered library folders sequentially.
+  /// Removes a library folder, deletes its tracks, and notifies listeners so
+  /// all library views refresh without flicker.
+  Future<void> removeFolder(int folderId) async {
+    await repository.removeFolder(folderId);
+    _libraryVersion++;
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
+  /// Rescans all registered library folders sequentially while keeping
+  /// [isScanning] continuously `true` until the entire run completes.
   Future<void> rescanAll() async {
     if (_isScanning) return;
-    final folders = await repository.listFolders();
+    _isScanning = true;
     _isCancelled = false;
+    _currentProgress = const ScanProgress();
+    notifyListeners();
 
-    for (final folder in folders) {
-      if (_isCancelled || _disposed) break;
-      await _scanSingleFolder(folder);
+    try {
+      final folders = await repository.listFolders();
+      await _scanFolders(folders);
+    } finally {
+      _finishScanSession();
     }
   }
 
@@ -69,28 +98,38 @@ class ScanService extends ChangeNotifier {
     if (!_progressController.isClosed) {
       _progressController.add(_currentProgress);
     }
-    notifyListeners();
+    if (!_disposed) {
+      notifyListeners();
+    }
   }
 
-  Future<void> _scanSingleFolder(LibraryFolder folder) async {
-    _isScanning = true;
-    _isCancelled = false;
-    notifyListeners();
-
-    try {
-      await for (final progress in scanner.scan(folder)) {
-        if (_disposed) break;
-        _currentProgress = progress;
+  Future<void> _scanFolders(List<LibraryFolder> folders) async {
+    for (var i = 0; i < folders.length; i++) {
+      if (_isCancelled || _disposed) break;
+      final isLast = i == folders.length - 1;
+      await for (final progress in scanner.scan(folders[i])) {
+        if (_disposed || _isCancelled) break;
+        final forwarded = isLast ? progress : progress.copyWith(done: false);
+        _currentProgress = forwarded;
         if (!_progressController.isClosed) {
-          _progressController.add(progress);
+          _progressController.add(forwarded);
         }
         notifyListeners();
       }
-    } finally {
-      _isScanning = false;
-      if (!_disposed) {
-        notifyListeners();
+    }
+  }
+
+  void _finishScanSession() {
+    _isScanning = false;
+    _libraryVersion++;
+    if (!_disposed) {
+      if (!_currentProgress.done) {
+        _currentProgress = _currentProgress.copyWith(done: true);
+        if (!_progressController.isClosed) {
+          _progressController.add(_currentProgress);
+        }
       }
+      notifyListeners();
     }
   }
 

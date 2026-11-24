@@ -568,5 +568,60 @@ void main() {
       staleController.dispose();
       delayedStore.dispose();
     });
+
+    test('per-track offset shifts every duplicate-timestamp line and its words', () async {
+      final offsetStore = LyricsOffsetStore(directory: tempDir);
+      await offsetStore.init();
+
+      const lrc = '''
+[00:10.00][01:10.00]<00:10.00>Chorus <00:10.50>word
+[00:20.00]Bridge
+[01:15.00]Outro
+''';
+      repository.onResolve = (path) async => LyricsResultFound(parseLrc(lrc));
+
+      final controller = LyricsController(
+        playbackController: playbackController,
+        repository: repository,
+        settingsStore: settingsStore,
+        offsetStore: offsetStore,
+      );
+
+      queue.replaceAll([
+        const AudioSource('file:///music/dup.mp3', extras: {'title': 'Dup'}),
+      ]);
+      await playbackController.play();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Delay lyrics by +500ms: 10s chorus fires at 10.5s / 11.0s; 70s chorus fires at 70.5s / 71.0s
+      await controller.setOffset(500);
+
+      controller.updatePosition(const Duration(milliseconds: 10200));
+      expect(controller.currentLineIndex, equals(-1));
+
+      controller.updatePosition(const Duration(milliseconds: 10500));
+      expect(controller.currentLineIndex, equals(0));
+      expect(controller.currentWordIndex, equals(0));
+
+      controller.updatePosition(const Duration(milliseconds: 11000));
+      expect(controller.currentLineIndex, equals(0));
+      expect(controller.currentWordIndex, equals(1));
+
+      // Second duplicate-timestamp occurrence at 01:10.00 (shifted to 70.5s / 71.0s)
+      controller.updatePosition(const Duration(milliseconds: 70200));
+      expect(controller.currentLineIndex, equals(1)); // Still Bridge before 70.5s
+
+      controller.updatePosition(const Duration(milliseconds: 70500));
+      expect(controller.currentLineIndex, equals(2));
+      expect(controller.currentWordIndex, equals(0));
+
+      controller.updatePosition(const Duration(milliseconds: 71000));
+      expect(controller.currentLineIndex, equals(2));
+      expect(controller.currentWordIndex, equals(1));
+
+      await offsetStore.flush();
+      offsetStore.dispose();
+      controller.dispose();
+    });
   });
 }

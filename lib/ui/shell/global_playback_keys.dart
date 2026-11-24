@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/playback_controller.dart';
+import '../glass/glass_button.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/settings_store.dart';
 import 'volume_hud.dart';
@@ -116,6 +117,20 @@ class GlobalPlaybackKeysHandler {
         focusContext.findAncestorWidgetOfExactType<Dialog>() != null;
   }
 
+  bool _isSpaceConsumingButtonFocused(BuildContext focusContext) {
+    final widget = focusContext.widget;
+    return widget is ButtonStyleButton ||
+        widget is IconButton ||
+        widget is GlassIconButton ||
+        widget is GlassPillButton ||
+        focusContext.findAncestorWidgetOfExactType<ButtonStyleButton>() !=
+            null ||
+        focusContext.findAncestorWidgetOfExactType<IconButton>() != null ||
+        focusContext.findAncestorWidgetOfExactType<GlassIconButton>() !=
+            null ||
+        focusContext.findAncestorWidgetOfExactType<GlassPillButton>() != null;
+  }
+
   bool _isDeepWidgetConsumed({required bool isArrow}) {
     final focusContext = FocusManager.instance.primaryFocus?.context;
     if (focusContext == null) return false;
@@ -136,10 +151,7 @@ class GlobalPlaybackKeysHandler {
       return true;
     }
 
-    if (!isArrow &&
-        (focusContext.findAncestorWidgetOfExactType<ButtonStyleButton>() !=
-                null ||
-            focusContext.findAncestorWidgetOfExactType<IconButton>() != null)) {
+    if (!isArrow && _isSpaceConsumingButtonFocused(focusContext)) {
       return true;
     }
 

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
+import 'package:aestheticy/ui/l10n/app_strings.dart';
 
 /// Modal view displaying library folders, rescan controls, and scanning progress.
 class FolderManagementSheet extends StatefulWidget {
@@ -97,7 +98,11 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding folder: $e')),
+          SnackBar(
+            content: Text(
+              context.t('folders.errorAdding', args: {'error': '$e'}),
+            ),
+          ),
         );
       }
     }
@@ -105,12 +110,12 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
 
   Future<void> _removeFolder(LibraryFolder folder) async {
     if (folder.id == null) return;
-    await widget.repository.removeFolder(folder.id!);
+    await widget.scanService.removeFolder(folder.id!);
     await _loadFolders();
   }
 
-  String _formatDateTime(DateTime? dt) {
-    if (dt == null) return 'Never scanned';
+  String _formatDateTime(BuildContext context, DateTime? dt) {
+    if (dt == null) return context.t('folders.neverScanned');
     final local = dt.toLocal();
     final y = local.year;
     final m = local.month.toString().padLeft(2, '0');
@@ -141,7 +146,7 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
               const Icon(Icons.folder_special, size: 22, color: Color(0xFFC3B1E1)),
               const SizedBox(width: 10),
               Text(
-                'Music Folders',
+                context.t('folders.title'),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -161,7 +166,7 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
                 key: const Key('add_folder_button'),
                 onPressed: isScanning ? null : _pickAndAddFolder,
                 icon: const Icon(Icons.create_new_folder, size: 18),
-                label: const Text('Add folder'),
+                label: Text(context.t('folders.addFolder')),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
@@ -173,7 +178,7 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
                         await _loadFolders();
                       },
                 icon: const Icon(Icons.sync, size: 18),
-                label: const Text('Rescan'),
+                label: Text(context.t('folders.rescan')),
               ),
             ],
           ),
@@ -197,15 +202,21 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
                         Expanded(
                           child: Text(
                             progress.found > 0
-                                ? 'Scanning: ${progress.processed} / ${progress.found} files'
-                                : 'Discovering audio files...',
+                                ? context.t(
+                                    'folders.scanningProgress',
+                                    args: {
+                                      'processed': '${progress.processed}',
+                                      'found': '${progress.found}',
+                                    },
+                                  )
+                                : context.t('folders.discovering'),
                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
                           ),
                         ),
                         TextButton(
                           key: const Key('scan_cancel_button'),
                           onPressed: () => widget.scanService.cancel(),
-                          child: const Text('Cancel'),
+                          child: Text(context.t('common.cancel')),
                         ),
                       ],
                     ),
@@ -217,7 +228,14 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Added: ${progress.added} • Updated: ${progress.updated} • Errors: ${progress.errors}',
+                      context.t(
+                        'folders.scanSummary',
+                        args: {
+                          'added': '${progress.added}',
+                          'updated': '${progress.updated}',
+                          'errors': '${progress.errors}',
+                        },
+                      ),
                       style: const TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                   ],
@@ -232,12 +250,12 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (_folders.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24.0),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24.0),
               child: Center(
                 child: Text(
-                  'No folders added yet. Click "Add folder" to scan music.',
-                  style: TextStyle(color: Colors.grey),
+                  context.t('folders.empty'),
+                  style: const TextStyle(color: Colors.grey),
                 ),
               ),
             )
@@ -262,12 +280,17 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
                         style: const TextStyle(fontWeight: FontWeight.w500),
                       ),
                       subtitle: Text(
-                        'Last scan: ${_formatDateTime(folder.lastScanAt)}',
+                        context.t(
+                          'folders.lastScan',
+                          args: {
+                            'time': _formatDateTime(context, folder.lastScanAt),
+                          },
+                        ),
                         style: const TextStyle(fontSize: 11, color: Colors.grey),
                       ),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                        tooltip: 'Remove folder',
+                        tooltip: context.t('folders.removeFolderTooltip'),
                         onPressed: isScanning ? null : () => _removeFolder(folder),
                       ),
                     );

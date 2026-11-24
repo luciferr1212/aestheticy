@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:aestheticy/library/album_identity.dart';
+import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 
@@ -112,7 +114,7 @@ class FakeLibraryRepository implements LibraryRepository {
       final albums = await listAlbumsByArtistKey(key);
       for (final album in albums) {
         seen.putIfAbsent(
-          '${album.album}\u0000${album.albumArtist ?? ''}',
+          AlbumIdentity.forSummary(album),
           () => album,
         );
       }
@@ -132,8 +134,23 @@ class FakeLibraryRepository implements LibraryRepository {
   Future<int> artistCount() async => 0;
 
   @override
-  Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist}) async {
-    return _tracks.values.where((t) => t.album == album).toList();
+  Future<List<Track>> tracksOfAlbum(
+    String album, {
+    String? albumArtist,
+    String? albumKey,
+  }) async {
+    final trimmedKey = albumKey?.trim() ?? '';
+    final targetKey = trimmedKey.isNotEmpty
+        ? trimmedKey
+        : AlbumIdentity.key(
+            album: album.trim() == AlbumIdentity.unknownAlbumTitle
+                ? null
+                : album,
+            albumArtist: albumArtist,
+          );
+    return _tracks.values
+        .where((t) => AlbumIdentity.forTrack(t) == targetKey)
+        .toList();
   }
 
   @override
@@ -377,7 +394,16 @@ class FakeLibraryRepository implements LibraryRepository {
       ..sort((a, b) => a.position.compareTo(b.position));
 
     return items.map((it) {
-      final t = _tracks[it.path];
+      Track? t = _tracks[it.path];
+      if (t == null) {
+        final key = FilePathUtils.canonicalKey(it.path);
+        for (final entry in _tracks.entries) {
+          if (FilePathUtils.canonicalKey(entry.key) == key) {
+            t = entry.value;
+            break;
+          }
+        }
+      }
       return PlaylistEntry(
         entryId: it.id,
         position: it.position,
@@ -492,19 +518,24 @@ class FakeLibraryRepository implements LibraryRepository {
     final latestPlayByCleanPath = <String, DateTime>{};
 
     for (final e in countedEvents) {
-      final clean = e.uri.startsWith('file://') ? e.uri.substring(7) : e.uri;
+      final clean = FilePathUtils.canonicalKey(e.uri);
       final existing = latestPlayByCleanPath[clean];
       if (existing == null || e.startedAt.isAfter(existing)) {
         latestPlayByCleanPath[clean] = e.startedAt;
       }
     }
 
+    final tracksByCanonicalKey = <String, Track>{
+      for (final entry in _tracks.entries)
+        FilePathUtils.canonicalKey(entry.key): entry.value,
+    };
+
     final sortedEntries = latestPlayByCleanPath.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     final result = <Track>[];
     for (final entry in sortedEntries) {
-      final t = _tracks[entry.key];
+      final t = tracksByCanonicalKey[entry.key];
       if (t != null) {
         result.add(t);
         if (result.length >= limit) break;

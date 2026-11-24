@@ -1,3 +1,4 @@
+import '../../library/album_identity.dart';
 import '../../library/artist_splitter.dart';
 import '../../library/models.dart';
 import '../../library/text_normalizer.dart';
@@ -38,15 +39,20 @@ abstract final class ReleaseKindClassifier {
   static final RegExp _epWordRegex =
       RegExp(r'(?:^|\s)ep$', caseSensitive: false);
 
-  /// Builds the canonical grouping key (`album|albumArtist`, lowercased and trimmed)
-  /// used to match [Track] records with [AlbumSummary] releases.
+  /// Builds the canonical album identity key used to match [Track] records
+  /// with [AlbumSummary] releases via [AlbumIdentity].
   static String albumGroupKey({
     required String? albumTitle,
     required String? albumArtist,
+    String? artist,
+    String? trackPath,
   }) {
-    final album = albumTitle?.trim().toLowerCase() ?? '';
-    final artist = albumArtist?.trim().toLowerCase() ?? '';
-    return '$album|$artist';
+    return AlbumIdentity.key(
+      album: albumTitle,
+      albumArtist: albumArtist,
+      artist: artist,
+      trackPath: trackPath,
+    );
   }
 
   /// Classifies a single album group according to the defined heuristic rules.
@@ -177,7 +183,7 @@ abstract final class ReleaseKindClassifier {
   }
 
   /// Classifies [albums] into [ReleaseCategory] buckets using [tracks] grouped by
-  /// `album|albumArtist` to determine duration and null-album-artist ownership.
+  /// [AlbumIdentity] to determine duration and null-album-artist ownership.
   static Map<ReleaseCategory, List<AlbumSummary>> classifyAlbums({
     required List<AlbumSummary> albums,
     required String artistName,
@@ -186,14 +192,15 @@ abstract final class ReleaseKindClassifier {
     Set<String> aliasKeys = const {},
   }) {
     final tracksByGroup = <String, List<Track>>{};
+    final tracksByTitle = <String, List<Track>>{};
     for (final track in tracks) {
-      final albumName = track.album?.trim() ?? '';
-      if (albumName.isEmpty) continue;
-      final groupKey = albumGroupKey(
-        albumTitle: track.album,
-        albumArtist: track.albumArtist,
-      );
+      if (!AlbumIdentity.hasAlbumTag(track.album)) continue;
+      final groupKey = AlbumIdentity.forTrack(track);
       tracksByGroup.putIfAbsent(groupKey, () => []).add(track);
+      if (track.albumArtist == null || track.albumArtist!.trim().isEmpty) {
+        final normTitle = TextNormalizer.normalize(track.album);
+        tracksByTitle.putIfAbsent(normTitle, () => []).add(track);
+      }
     }
 
     final classified = <ReleaseCategory, List<AlbumSummary>>{
@@ -206,16 +213,20 @@ abstract final class ReleaseKindClassifier {
     };
 
     for (final album in albums) {
-      final groupKey = albumGroupKey(
-        albumTitle: album.album,
-        albumArtist: album.albumArtist,
-      );
-      final groupTracks = tracksByGroup[groupKey] ?? const <Track>[];
+      final groupKey = AlbumIdentity.forSummary(album);
+      var groupTracks = tracksByGroup[groupKey];
+      if (groupTracks == null &&
+          album.identityKey == null &&
+          (album.albumArtist == null || album.albumArtist!.trim().isEmpty) &&
+          (album.displayArtist == null || album.displayArtist!.trim().isEmpty) &&
+          AlbumIdentity.hasAlbumTag(album.album)) {
+        groupTracks = tracksByTitle[TextNormalizer.normalize(album.album)];
+      }
       final category = classifyAlbum(
         album: album,
         artistName: artistName,
         artistKey: artistKey,
-        tracks: groupTracks,
+        tracks: groupTracks ?? const <Track>[],
         aliasKeys: aliasKeys,
       );
       classified[category]!.add(album);
@@ -232,14 +243,7 @@ abstract final class ReleaseKindClassifier {
   }) {
     final groups = <String, List<Track>>{};
     for (final track in tracks) {
-      final albumName = track.album?.trim() ?? '';
-      // Rule 5: Tracks without an album are treated as individual single releases.
-      final key = albumName.isEmpty
-          ? ':loose:${track.path}'
-          : albumGroupKey(
-              albumTitle: track.album,
-              albumArtist: track.albumArtist,
-            );
+      final key = AlbumIdentity.forTrack(track);
       groups.putIfAbsent(key, () => []).add(track);
     }
 

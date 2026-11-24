@@ -314,7 +314,7 @@ void main() {
       expect(bowie.trackCount, 1);
 
       // tracksOfAlbum order check
-      final kidATracks = await repo.tracksOfAlbum('Kid A');
+      final kidATracks = await repo.tracksOfAlbum('Kid A', albumArtist: 'Radiohead');
       expect(kidATracks.map((t) => t.trackNo).toList(), [1, 8]);
 
       // tracksOfArtist check
@@ -1369,6 +1369,58 @@ void main() {
       expect(
         albums.map((a) => a.album).toList(),
         equals(['Beirut Album', 'El Lilady', 'Kifak Album']),
+      );
+    });
+
+    test('recentlyPlayedTracks matches file:// URIs and Windows/POSIX plain paths identically', () async {
+      final tWin = Track(
+        path: r'C:\Music\Folder One\My Song.mp3',
+        folderId: folder.id!,
+        title: 'Win Song',
+        artist: 'Artist W',
+        album: 'Win Album',
+        durationMs: 200000,
+        mtimeMs: 10,
+        sizeBytes: 10,
+        addedAt: now,
+      );
+      final tPosix = Track(
+        path: '/music/posix song.flac',
+        folderId: folder.id!,
+        title: 'Posix Song',
+        artist: 'Artist P',
+        album: 'Posix Album',
+        durationMs: 200000,
+        mtimeMs: 10,
+        sizeBytes: 10,
+        addedAt: now,
+      );
+      await repo.upsertTracks([tWin, tPosix]);
+
+      await repo.insertPlayEvent(
+        PlayEvent(
+          uri: 'file:///C:/Music/Folder%20One/My%20Song.mp3',
+          startedAt: DateTime.utc(2026, 2, 1, 10, 0),
+          listenedMs: 60000,
+          counted: true,
+          completed: true,
+        ),
+      );
+
+      await repo.insertPlayEvent(
+        PlayEvent(
+          uri: 'file:///music/posix%20song.flac',
+          startedAt: DateTime.utc(2026, 2, 1, 9, 0),
+          listenedMs: 60000,
+          counted: true,
+          completed: true,
+        ),
+      );
+
+      final recent = await repo.recentlyPlayedTracks();
+      expect(
+        recent.map((t) => t.title).toList(),
+        equals(['Win Song', 'Posix Song']),
       );
     });
   });

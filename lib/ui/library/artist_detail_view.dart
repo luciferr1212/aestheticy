@@ -22,6 +22,7 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 import 'track_table.dart';
@@ -80,6 +81,9 @@ class ArtistDetailView extends StatefulWidget {
   /// Optional random generator for deterministic shuffle tests.
   final math.Random? random;
 
+  /// Optional in-memory library data cache for automatic refresh after scans.
+  final LibraryDataCache? dataCache;
+
   /// Creates an [ArtistDetailView].
   const ArtistDetailView({
     super.key,
@@ -91,6 +95,7 @@ class ArtistDetailView extends StatefulWidget {
     this.playCountSource,
     this.artistImagePath,
     this.random,
+    this.dataCache,
   });
 
   @override
@@ -107,6 +112,7 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
   String _trackSearchQuery = '';
   late final TextEditingController _searchController;
   late final math.Random _random;
+  LibraryDataCache? _activeCache;
 
   @override
   void initState() {
@@ -118,8 +124,27 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+    }
+  }
+
+  @override
   void didUpdateWidget(ArtistDetailView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.dataCache != widget.dataCache) {
+      final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+      if (cache != _activeCache) {
+        _activeCache?.removeListener(_onCacheChanged);
+        _activeCache = cache;
+        _activeCache?.addListener(_onCacheChanged);
+      }
+    }
     if (oldWidget.settingsStore != widget.settingsStore) {
       oldWidget.settingsStore.removeListener(_onSettingsChanged);
       widget.settingsStore.addListener(_onSettingsChanged);
@@ -139,9 +164,15 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
 
   @override
   void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
     widget.settingsStore.removeListener(_onSettingsChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    _loadData();
   }
 
   void _onSettingsChanged() {
@@ -252,9 +283,7 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
   Future<void> _shuffleTracks(List<Track> tracks) async {
     if (tracks.isEmpty) return;
     final sources = tracks.map((t) => t.toAudioSource()).toList();
-    final startIndex = sources.length > 1 ? _random.nextInt(sources.length) : 0;
-    await widget.controller.playQueue(sources, startIndex: startIndex);
-    await widget.controller.setShuffle(true);
+    await widget.controller.playShuffled(sources, random: _random);
   }
 
   String _sectionTitle(BuildContext context, ArtistPageSectionKind kind) {

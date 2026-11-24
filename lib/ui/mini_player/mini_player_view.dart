@@ -641,7 +641,7 @@ class _MiniPlayerViewState extends State<MiniPlayerView> {
     final rawArtist = current?.extras?['artist'];
     final artist = hasTrack ? context.displayArtist(rawArtist) : '—';
     final coverKey = current?.extras?['coverKey'];
-    final trackPath = current?.extras?['path'];
+    final trackPath = current?.uri;
 
     return Focus(
       autofocus: true,

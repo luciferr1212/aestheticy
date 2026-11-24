@@ -1,9 +1,11 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
+import '../../library/album_identity.dart';
 import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
@@ -17,6 +19,7 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'track_actions_menu.dart';
 
 /// Album detail screen displaying large artwork, metadata header, Play & Shuffle buttons,
@@ -37,6 +40,9 @@ class AlbumDetailView extends StatefulWidget {
   /// The navigation coordinator.
   final AppNavigator navigator;
 
+  /// Optional in-memory library data cache for automatic refresh after scans.
+  final LibraryDataCache? dataCache;
+
   /// Creates an [AlbumDetailView].
   const AlbumDetailView({
     super.key,
@@ -45,6 +51,7 @@ class AlbumDetailView extends StatefulWidget {
     required this.controller,
     required this.settingsStore,
     required this.navigator,
+    this.dataCache,
   });
 
   @override
@@ -52,25 +59,97 @@ class AlbumDetailView extends StatefulWidget {
 }
 
 class _AlbumDetailViewState extends State<AlbumDetailView> {
+  late AlbumSummary _album;
   List<Track> _tracks = [];
   bool _isLoading = true;
+  bool _refreshedFromCache = false;
+  int _loadRequestId = 0;
+  LibraryDataCache? _activeCache;
 
   @override
   void initState() {
     super.initState();
+    _album = widget.album;
+    _loadTracks();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+    }
+  }
+
+  @override
+  void didUpdateWidget(AlbumDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dataCache != widget.dataCache) {
+      final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+      if (cache != _activeCache) {
+        _activeCache?.removeListener(_onCacheChanged);
+        _activeCache = cache;
+        _activeCache?.addListener(_onCacheChanged);
+      }
+    }
+    if (AlbumIdentity.forSummary(oldWidget.album) !=
+            AlbumIdentity.forSummary(widget.album) ||
+        oldWidget.repository != widget.repository) {
+      _album = widget.album;
+      _refreshedFromCache = false;
+      _isLoading = true;
+      _loadTracks();
+    } else if (oldWidget.album != widget.album) {
+      _album = widget.album;
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    _refreshedFromCache = true;
+    final cachedAlbums = _activeCache?.albums;
+    if (cachedAlbums != null) {
+      final targetKey = AlbumIdentity.forSummary(_album);
+      AlbumSummary? updated;
+      for (final a in cachedAlbums) {
+        if (AlbumIdentity.forSummary(a) == targetKey) {
+          updated = a;
+          break;
+        }
+      }
+      if (updated != null && updated != _album) {
+        setState(() {
+          _album = updated!;
+        });
+      }
+    }
     _loadTracks();
   }
 
   Future<void> _loadTracks() async {
+    final reqId = ++_loadRequestId;
     final tracks = await widget.repository.tracksOfAlbum(
-      widget.album.album,
-      albumArtist: widget.album.albumArtist,
+      _album.album,
+      albumArtist: _album.albumArtist ??
+          (_album.displayArtist != 'various' ? _album.displayArtist : null),
+      albumKey: _album.identityKey,
     );
-    if (mounted) {
-      setState(() {
-        _tracks = tracks;
-        _isLoading = false;
-      });
+    if (mounted && reqId == _loadRequestId) {
+      if (!listEquals(_tracks, tracks) || _isLoading) {
+        setState(() {
+          _tracks = tracks;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -78,8 +157,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     if (_tracks.isEmpty) return;
     final sources = _tracks.map((t) => t.toAudioSource()).toList();
     if (shuffle) {
-      sources.shuffle();
-      await widget.controller.playQueue(sources, startIndex: 0);
+      await widget.controller.playShuffled(sources);
     } else {
       await widget.controller.playQueue(sources, startIndex: startIndex);
     }
@@ -120,7 +198,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 220x220 cover
-              _buildLargeCover(widget.album.coverKey),
+              _buildLargeCover(_album.coverKey),
               const SizedBox(width: 24),
 
               // Metadata details
@@ -130,15 +208,15 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                   children: [
                     const SizedBox(height: 8),
                     Text(
-                      widget.album.album,
-                      textDirection: textDirectionFor(widget.album.album),
+                      _album.album,
+                      textDirection: textDirectionFor(_album.album),
                       style: AppTypography.display.copyWith(letterSpacing: -0.5),
                     ),
                     const SizedBox(height: 6),
                     Builder(
                       builder: (context) {
                         final artist = context.displayArtist(
-                            widget.album.displayArtist ?? widget.album.albumArtist);
+                            _album.displayArtist ?? _album.albumArtist);
                         return Text(
                           artist,
                           textDirection: textDirectionFor(artist),
@@ -152,9 +230,13 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                     const SizedBox(height: 8),
                     Builder(
                       builder: (context) {
-                        final countStr = context.formatCountLocalized(widget.album.trackCount);
-                        final yearStr = widget.album.year != null
-                            ? ' • ${context.localizeDigitsText(widget.album.year.toString())}'
+                        final displayCount = (_tracks.isNotEmpty ||
+                                _refreshedFromCache)
+                            ? _tracks.length
+                            : _album.trackCount;
+                        final countStr = context.formatCountLocalized(displayCount);
+                        final yearStr = _album.year != null
+                            ? ' • ${context.localizeDigitsText(_album.year.toString())}'
                             : '';
                         final durStr = _tracks.isNotEmpty
                             ? ' • ${context.formatDurationLocalized(Duration(milliseconds: _tracks.fold(0, (sum, t) => sum + t.durationMs)))}'

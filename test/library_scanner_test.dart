@@ -353,7 +353,7 @@ void main() {
       expect(await repo.trackCount(), equals(supportedExts.length));
     });
 
-    test('fallbacks when tags are missing: title=filename, album=parent folder, artist=Unknown artist', () async {
+    test('fallbacks when tags are missing: title=filename, album=null (not parent folder), artist=Unknown artist', () async {
       final subDir = Directory(p.join(tempDir.path, 'Summer Vibes'))..createSync();
       final file = File(p.join(subDir.path, 'Chill Beats.mp3'))..writeAsBytesSync([1, 2]);
 
@@ -378,7 +378,7 @@ void main() {
 
       final track = tracks.first;
       expect(track.title, equals('Chill Beats'));
-      expect(track.album, equals('Summer Vibes'));
+      expect(track.album, isNull);
       expect(track.artist, equals('Unknown artist'));
     });
 

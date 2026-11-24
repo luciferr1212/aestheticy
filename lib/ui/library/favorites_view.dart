@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_models.dart';
@@ -12,13 +14,14 @@ import '../l10n/number_format.dart';
 import '../settings/settings_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
 import 'track_table.dart';
 
 /// Screen displaying the user's favorite tracks with synchronous updates on toggle,
 /// playback controls, and track table.
-class FavoritesView extends StatelessWidget {
+class FavoritesView extends StatefulWidget {
   /// Library repository for loading favorite tracks.
   final LibraryRepository repository;
 
@@ -31,6 +34,9 @@ class FavoritesView extends StatelessWidget {
   /// Settings store.
   final SettingsStore settingsStore;
 
+  /// Optional in-memory library data cache for automatic refresh after scans.
+  final LibraryDataCache? dataCache;
+
   /// Creates a [FavoritesView].
   const FavoritesView({
     super.key,
@@ -38,20 +44,69 @@ class FavoritesView extends StatelessWidget {
     required this.collections,
     required this.controller,
     required this.settingsStore,
+    this.dataCache,
   });
+
+  @override
+  State<FavoritesView> createState() => _FavoritesViewState();
+}
+
+class _FavoritesViewState extends State<FavoritesView> {
+  LibraryDataCache? _activeCache;
+  int _lastCacheRevision = -1;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      _lastCacheRevision = _activeCache?.revision ?? -1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(FavoritesView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dataCache != widget.dataCache) {
+      final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+      if (cache != _activeCache) {
+        _activeCache?.removeListener(_onCacheChanged);
+        _activeCache = cache;
+        _activeCache?.addListener(_onCacheChanged);
+        _lastCacheRevision = _activeCache?.revision ?? -1;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    final cache = _activeCache;
+    if (!mounted || cache == null) return;
+    if (cache.revision != _lastCacheRevision) {
+      _lastCacheRevision = cache.revision;
+      unawaited(widget.collections.refresh());
+    }
+  }
 
   Future<void> _playFavorites(List<Track> tracks,
       {bool shuffle = false, int startIndex = 0}) async {
     if (tracks.isEmpty) return;
     final sources = tracks.map((t) => t.toAudioSource()).toList();
     if (shuffle) {
-      sources.shuffle();
-      await controller.playQueue(sources, startIndex: 0);
+      await widget.controller.playShuffled(sources);
     } else {
       final safeIndex = (startIndex >= 0 && startIndex < sources.length)
           ? startIndex
           : 0;
-      await controller.playQueue(sources, startIndex: safeIndex);
+      await widget.controller.playQueue(sources, startIndex: safeIndex);
     }
   }
 
@@ -85,13 +140,13 @@ class FavoritesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settings = settingsStore.settings;
+    final settings = widget.settingsStore.settings;
     final reduceMotion = settings.reduceMotion;
 
     return ListenableBuilder(
-      listenable: collections,
+      listenable: widget.collections,
       builder: (context, _) {
-        final rawTracks = collections.favoriteTracks;
+        final rawTracks = widget.collections.favoriteTracks;
         final favoriteTracks = _sortFavorites(
           rawTracks,
           settings.favoritesSort,
@@ -167,11 +222,11 @@ class FavoritesView extends StatelessWidget {
                 sortOptions: const ['recentlyAdded', 'title', 'artist', 'album', 'duration'],
                 currentSort: settings.favoritesSort,
                 onSortChanged: (newSort) {
-                  settingsStore.update((s) => s.copyWith(favoritesSort: newSort));
+                  widget.settingsStore.update((s) => s.copyWith(favoritesSort: newSort));
                 },
                 sortDirection: SortDirection.fromReversed(settings.favoritesSortReversed),
                 onSortDirectionChanged: (newDir) {
-                  settingsStore.update((s) => s.copyWith(favoritesSortReversed: newDir.isReversed));
+                  widget.settingsStore.update((s) => s.copyWith(favoritesSortReversed: newDir.isReversed));
                 },
                 reduceMotion: reduceMotion,
               ),
@@ -180,14 +235,14 @@ class FavoritesView extends StatelessWidget {
               // TrackTable
               Expanded(
                 child: StreamBuilder<AudioSource?>(
-                  stream: controller.currentStream,
-                  initialData: controller.queue.current,
+                  stream: widget.controller.currentStream,
+                  initialData: widget.controller.queue.current,
                   builder: (context, trackSnapshot) {
                     final activeSource = trackSnapshot.data;
 
                     return StreamBuilder<PlaybackState>(
-                      stream: controller.stateStream,
-                      initialData: controller.currentState,
+                      stream: widget.controller.stateStream,
+                      initialData: widget.controller.currentState,
                       builder: (context, stateSnapshot) {
                         final isPlaying =
                             stateSnapshot.data == PlaybackState.playing;
@@ -197,8 +252,8 @@ class FavoritesView extends StatelessWidget {
                           currentPlayingPath: activeSource?.uri,
                           isPlaying: isPlaying,
                           reduceMotion: reduceMotion,
-                          controller: controller,
-                          userCollections: collections,
+                          controller: widget.controller,
+                          userCollections: widget.collections,
                           listViewKey: const Key('favorites_tracks_list'),
                           onPlay: (index, row) {
                             _playFavorites(favoriteTracks, startIndex: index);

@@ -196,6 +196,22 @@ class PlaybackController {
     }
   }
 
+  /// Restores a saved queue snapshot without re-shuffling and notifies listeners.
+  void restoreQueueSnapshot({
+    required List<QueueEntry> entries,
+    int currentIndex = 0,
+    bool shuffled = false,
+    RepeatMode repeatMode = RepeatMode.off,
+  }) {
+    queue.restoreSnapshot(
+      entries: entries,
+      currentIndex: currentIndex,
+      shuffled: shuffled,
+      repeatMode: repeatMode,
+    );
+    notifyQueueChanged();
+  }
+
   /// Seeks to [position] within the current track.
   Future<void> seek(Duration position) async {
     _currentPosition = position;
@@ -322,24 +338,10 @@ class PlaybackController {
     return _enqueueTransition(() => _switchTrackInternal(source, gen, profile));
   }
 
-  /// Replaces the queue with [sources], starts playback at [startIndex],
-  /// resets preload state, and preloads the next track for gapless transitions.
-  ///
-  /// When [kKeepUserQueueOnNewContext] is true, any upcoming user-queued tracks
-  /// survive the context switch and are placed directly after the newly started track.
-  Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) {
-    _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
-    if (sources.isEmpty) {
-      queue.clear();
-      final gen = _beginTransition();
-      final profile = _fadeProfile;
-      return _enqueueTransition(
-        () => _stopInternal(gen, clearResume: false, profile: profile),
-      );
-    }
-
+  void _replaceQueuePreservingUserQueue(
+    List<AudioSource> sources, {
+    required int startIndex,
+  }) {
     final survivingUserEntries = <QueueEntry>[];
     if (kKeepUserQueueOnNewContext && !queue.isEmpty && queue.currentIndex >= 0) {
       for (var i = queue.currentIndex + 1; i < queue.length; i++) {
@@ -358,13 +360,36 @@ class PlaybackController {
       for (var i = 0; i < validStartIndex; i++) {
         newEntries.add(queue.createEntry(sources[i], isUserQueued: false));
       }
-      newEntries.add(queue.createEntry(sources[validStartIndex], isUserQueued: false));
+      newEntries.add(
+        queue.createEntry(sources[validStartIndex], isUserQueued: false),
+      );
       newEntries.addAll(survivingUserEntries);
       for (var i = validStartIndex + 1; i < sources.length; i++) {
         newEntries.add(queue.createEntry(sources[i], isUserQueued: false));
       }
       queue.replaceAllEntries(newEntries, startIndex: validStartIndex);
     }
+  }
+
+  /// Replaces the queue with [sources], starts playback at [startIndex],
+  /// resets preload state, and preloads the next track for gapless transitions.
+  ///
+  /// When [kKeepUserQueueOnNewContext] is true, any upcoming user-queued tracks
+  /// survive the context switch and are placed directly after the newly started track.
+  Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) {
+    _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
+    if (sources.isEmpty) {
+      queue.clear();
+      final gen = _beginTransition();
+      final profile = _fadeProfile;
+      return _enqueueTransition(
+        () => _stopInternal(gen, clearResume: false, profile: profile),
+      );
+    }
+
+    _replaceQueuePreservingUserQueue(sources, startIndex: startIndex);
 
     notifyQueueChanged();
     final source = queue.current;
@@ -379,6 +404,52 @@ class PlaybackController {
     return _enqueueTransition(
       () => _switchTrackInternal(source, gen, profile),
     );
+  }
+
+  /// Replaces the queue with [sources], enables shuffle mode, starts playback on
+  /// a randomly selected item, notifies queue listeners, and preloads the next track.
+  Future<void> playShuffled(List<AudioSource> sources, {math.Random? random}) {
+    _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
+    if (sources.isEmpty) {
+      return playQueue(const []);
+    }
+
+    final startIndex = sources.length > 1
+        ? (random ?? math.Random()).nextInt(sources.length)
+        : 0;
+    _replaceQueuePreservingUserQueue(sources, startIndex: startIndex);
+    queue.setShuffle(true);
+    notifyQueueChanged();
+
+    final source = queue.current;
+    final gen = _beginTransition();
+    final profile = _fadeProfile;
+    if (source == null) {
+      return _enqueueTransition(
+        () => _stopInternal(gen, clearResume: false, profile: profile),
+      );
+    }
+
+    return _enqueueTransition(
+      () => _switchTrackInternal(source, gen, profile),
+    );
+  }
+
+  /// Stops playback, clears the entire queue, notifies listeners, and clears preload.
+  Future<void> clearQueue() async {
+    queue.clear();
+    _consecutiveFatalErrors = 0;
+    _armedResumePosition = null;
+    _armedResumeUri = null;
+    notifyQueueChanged();
+    final gen = _beginTransition();
+    final profile = _fadeProfile;
+    await _enqueueTransition(
+      () => _stopInternal(gen, clearResume: false, profile: profile),
+    );
+    await _preloadNext();
   }
 
   /// Removes upcoming items from the queue while keeping the currently
@@ -466,19 +537,29 @@ class PlaybackController {
     await _preloadNext();
   }
 
-  /// Safely removes the track at [index] in active playback order.
-  ///
-  /// - If [index] is invalid, this is a no-op.
-  /// - If [index] is not current, removes it, notifies listeners, and refreshes preload
-  ///   without interrupting current playback.
-  /// - If [index] is current and other items remain, removes it, resets error/resume state,
-  ///   plays the item now at the cursor, and notifies listeners.
-  /// - If [index] was the only item, clears the queue, stops the engine, and emits null current track.
-  Future<void> removeFromQueue(int index) async {
-    if (index < 0 || index >= queue.length) return;
+  /// Safely removes the entry identified by [entryId] from the queue.
+  Future<void> removeEntryFromQueue(int entryId) {
+    return removeEntriesFromQueue([entryId]);
+  }
 
-    if (queue.length == 1) {
-      queue.clear();
+  /// Safely removes all entries matching [entryIds] in a single operation,
+  /// keeping playback continuous when current survives, advancing when current
+  /// is removed, stopping when empty, notifying listeners, and refreshing preload.
+  Future<void> removeEntriesFromQueue(Iterable<int> entryIds) async {
+    final idSet = entryIds.toSet();
+    if (idSet.isEmpty || queue.isEmpty) return;
+
+    final existingIds = queue.entries.map((e) => e.id).toSet();
+    final matchingIds = idSet.intersection(existingIds);
+    if (matchingIds.isEmpty) return;
+
+    final wasCurrent = queue.currentEntry != null &&
+        matchingIds.contains(queue.currentEntry!.id);
+
+    queue.removeByIds(matchingIds);
+
+    if (queue.isEmpty) {
+      _consecutiveFatalErrors = 0;
       _armedResumePosition = null;
       _armedResumeUri = null;
       notifyQueueChanged();
@@ -491,15 +572,12 @@ class PlaybackController {
       return;
     }
 
-    final isCurrent = index == queue.currentIndex;
-    if (!isCurrent) {
-      queue.remove(index);
+    if (!wasCurrent) {
       notifyQueueChanged();
       await _preloadNext();
       return;
     }
 
-    queue.remove(index);
     notifyQueueChanged();
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
@@ -515,6 +593,19 @@ class PlaybackController {
       }
     });
     await _preloadNext();
+  }
+
+  /// Safely removes the track at [index] in active playback order.
+  ///
+  /// - If [index] is invalid, this is a no-op.
+  /// - If [index] is not current, removes it, notifies listeners, and refreshes preload
+  ///   without interrupting current playback.
+  /// - If [index] is current and other items remain, removes it, resets error/resume state,
+  ///   plays the item now at the cursor, and notifies listeners.
+  /// - If [index] was the only item, clears the queue, stops the engine, and emits null current track.
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    await removeEntryFromQueue(queue.entries[index].id);
   }
 
   /// Moves the item at [index] in active playback order to directly after the current track.

@@ -5,8 +5,14 @@ Calm, minimal, and beautiful — by mido.
 
 ## Status
 
-Phase 1: Audio core (in progress).  
-Phase 3a: UI foundation ([docs/ui.md](docs/ui.md)).
+Phase 1–4 active: audio core, SQLite library, liquid-glass UI foundation ([docs/ui.md](docs/ui.md)), synced lyrics, queue, mini player, localization (English & Arabic RTL), and settings management.
+
+## Highlights
+
+- **Audio & Queue**: `libmpv` behind `AudioEngine`, 10-band EQ, fade profiles, unified `PlaybackController.playShuffled` / repeat sync, entry-identity multi-select queue editing & delete, session restore preserving shuffled order and duplicate entry identity, and resizable docked Queue/Lyrics side panel.
+- **Library**: Folder scanning with continuous multi-folder progress, cancellation protection, unified `AlbumIdentity` grouping and cover keys, real recently-added album sorting, live stale-while-revalidate refresh on scan/folder changes, stale-guarded search (matching track artists & display translations on Albums), artist merge/never-split rules, `file://` URI-aware history/playlists, and safe atomic `.m3u`/`.m3u8` export & Windows-path M3U import.
+- **Localization & Display**: Full English + Arabic RTL interface, display-only artist name translations manager in Settings, localized library sheets/dialogs.
+- **Mini Player & Shortcuts**: Compact & square modes, lyrics toggle, always-on-top pin, favorite toggle, and Space-key guard covering focused glass buttons and text fields.
 
 ## Local Development
 

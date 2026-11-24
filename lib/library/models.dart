@@ -245,6 +245,12 @@ class AlbumSummary {
   /// Computed display artist for UI representation.
   final String? displayArtist;
 
+  /// Canonical album identity key computed by `AlbumIdentity`.
+  final String? identityKey;
+
+  /// Latest track added timestamp among tracks belonging to this album.
+  final DateTime? addedAt;
+
   /// Creates an immutable [AlbumSummary] instance.
   const AlbumSummary({
     required this.album,
@@ -253,6 +259,8 @@ class AlbumSummary {
     required this.trackCount,
     this.coverKey,
     this.displayArtist,
+    this.identityKey,
+    this.addedAt,
   });
 
   @override
@@ -265,7 +273,9 @@ class AlbumSummary {
           year == other.year &&
           trackCount == other.trackCount &&
           coverKey == other.coverKey &&
-          displayArtist == other.displayArtist;
+          displayArtist == other.displayArtist &&
+          identityKey == other.identityKey &&
+          addedAt == other.addedAt;
 
   @override
   int get hashCode =>
@@ -274,11 +284,13 @@ class AlbumSummary {
       year.hashCode ^
       trackCount.hashCode ^
       coverKey.hashCode ^
-      displayArtist.hashCode;
+      displayArtist.hashCode ^
+      identityKey.hashCode ^
+      addedAt.hashCode;
 
   @override
   String toString() =>
-      'AlbumSummary(album: $album, albumArtist: $albumArtist, year: $year, trackCount: $trackCount)';
+      'AlbumSummary(album: $album, albumArtist: $albumArtist, year: $year, trackCount: $trackCount, identityKey: $identityKey, addedAt: $addedAt)';
 }
 
 /// Lightweight read model for an artist derived on-the-fly from track records.

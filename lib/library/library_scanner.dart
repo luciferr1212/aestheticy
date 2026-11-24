@@ -287,7 +287,9 @@ class LibraryScanner {
           );
           yield progress;
         } else if (message is _ScanCompleteMessage) {
-          if (message.unreadableDirs == 0 && message.missingPaths.isNotEmpty) {
+          if (!_isCancelled &&
+              message.unreadableDirs == 0 &&
+              message.missingPaths.isNotEmpty) {
             await repository.removeTracksByPath(message.missingPaths);
             totalRemoved = message.missingPaths.length;
           }
@@ -365,7 +367,7 @@ class _ScannedTrackItem {
   final String title;
   final String artist;
   final String? albumArtist;
-  final String album;
+  final String? album;
   final int? trackNo;
   final int? discNo;
   final int? year;
@@ -379,7 +381,7 @@ class _ScannedTrackItem {
     required this.title,
     required this.artist,
     this.albumArtist,
-    required this.album,
+    this.album,
     this.trackNo,
     this.discNo,
     this.year,
@@ -555,7 +557,7 @@ void _scanWorkerEntry(_WorkerConfig config) async {
 
           // Fallbacks when tags are missing:
           // title = file name without extension
-          // album = parent folder name
+          // album = null (singles without an album tag stay individual)
           // artist = 'Unknown artist'
           final rawTitle = tags.title?.trim();
           final title = (rawTitle != null && rawTitle.isNotEmpty)
@@ -563,10 +565,9 @@ void _scanWorkerEntry(_WorkerConfig config) async {
               : p.basenameWithoutExtension(filePath);
 
           final rawAlbum = tags.album?.trim();
-          final parentDirName = p.basename(p.dirname(filePath)).trim();
           final album = (rawAlbum != null && rawAlbum.isNotEmpty)
               ? rawAlbum
-              : (parentDirName.isNotEmpty ? parentDirName : 'Unknown Album');
+              : null;
 
           final rawArtist = tags.artist?.trim();
           final artist = (rawArtist != null && rawArtist.isNotEmpty)
@@ -580,17 +581,22 @@ void _scanWorkerEntry(_WorkerConfig config) async {
 
           final durationMs = tags.durationMs ?? 0;
 
-          // Cover art handling: save ONE embedded cover per album to covers folder.
+          // Cover art handling: save ONE embedded cover per album (or per untagged
+          // single path) to covers folder using unified AlbumIdentity.
           final albumKey = CoverCache.computeCoverKey(
             albumArtist: albumArtist,
+            artist: artist,
             album: album,
+            trackPath: filePath,
           );
 
           String? coverKey;
           if (tags.embeddedCover != null && tags.embeddedCover!.isNotEmpty) {
             coverKey = CoverCache.saveCoverSync(
               albumArtist: albumArtist,
+              artist: artist,
               album: album,
+              trackPath: filePath,
               bytes: tags.embeddedCover!,
               coversDirectory: config.coversDirectory,
             );
@@ -672,13 +678,14 @@ void _scanWorkerEntry(_WorkerConfig config) async {
   }
 
   // Detect removed files: tracks in database whose files are no longer on disk.
-  // If any directory listing failed (permission/IO error), skip the removal of
-  // missing tracks for that scan to protect existing library tracks.
-  final missingPaths = unreadableDirsCount > 0
-      ? const <String>[]
-      : config.existingFiles.keys
-          .where((path) => !scannedPaths.contains(path))
-          .toList();
+  // If cancelled or any directory listing failed, skip removal of missing
+  // tracks so unscanned folders/files stay intact.
+  final missingPaths = computeMissingPaths(
+    existingPaths: config.existingFiles.keys,
+    scannedPaths: scannedPaths,
+    isCancelled: isCancelled,
+    unreadableDirsCount: unreadableDirsCount,
+  );
 
   config.sendPort.send(_ScanCompleteMessage(
     missingPaths: missingPaths,
@@ -690,6 +697,23 @@ void _scanWorkerEntry(_WorkerConfig config) async {
   ));
 
   controlPort.close();
+}
+
+/// Computes tracks missing from disk after scanning a folder.
+///
+/// Returns an empty list when the scan was cancelled ([isCancelled]) or
+/// encountered unreadable directories ([unreadableDirsCount] > 0) so unscanned
+/// files are never removed from the library.
+List<String> computeMissingPaths({
+  required Iterable<String> existingPaths,
+  required Set<String> scannedPaths,
+  required bool isCancelled,
+  required int unreadableDirsCount,
+}) {
+  if (isCancelled || unreadableDirsCount > 0) {
+    return const <String>[];
+  }
+  return existingPaths.where((path) => !scannedPaths.contains(path)).toList();
 }
 
 bool _isIgnoredDirectory(String name) {

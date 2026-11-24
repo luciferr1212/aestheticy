@@ -12,10 +12,15 @@ import 'package:aestheticy/features/integration/app_shutdown.dart';
 import 'package:aestheticy/features/integration/tray_window_controller.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/text_normalizer.dart';
 import 'package:aestheticy/main.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
+import 'package:aestheticy/ui/audio_panels/eq_controller.dart';
+import 'package:aestheticy/ui/audio_panels/eq_scope.dart';
+import 'package:aestheticy/ui/audio_panels/eq_store.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/app_shortcuts.dart';
@@ -81,6 +86,8 @@ Widget _buildTestSettingsApp({
   bool isWindowsOverride = true,
   TrayWindowController? trayWindowController,
   bool? trayUnavailableOverride,
+  EqController? eqController,
+  EqController? scopeEqController,
 }) {
   return ListenableBuilder(
     listenable: settingsStore,
@@ -105,7 +112,9 @@ Widget _buildTestSettingsApp({
               store: settingsStore,
               child: ArtistNameScope(
                 store: artistNameStore,
-                child: child!,
+                child: scopeEqController != null
+                    ? EqScope(controller: scopeEqController, child: child!)
+                    : child!,
               ),
             ),
           ),
@@ -118,6 +127,7 @@ Widget _buildTestSettingsApp({
             navigator: navigator,
             audioSettingsApplier: audioSettingsApplier,
             artistNameStore: artistNameStore,
+            eqController: eqController,
             onOpenFolders: onOpenFolders ?? () {},
             isWindowsOverride: isWindowsOverride,
             trayWindowController: trayWindowController,
@@ -1210,6 +1220,297 @@ void main() {
         find.text('أيقونة شريط المهام غير متاحة، سيتم إنهاء التطبيق عند إغلاقه'),
         findsOneWidget,
       );
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(milliseconds: 500));
+    },
+  );
+
+  testWidgets(
+    'diagnostics report reflects real EQ enabled state from EqScope and engine fallback',
+    timeout: const Timeout(Duration(seconds: 30)),
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      String? copiedClipboard;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copiedClipboard = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      final eqStore = EqStore(
+        directory: tempDir,
+        initialSettings: const EqSettings(enabled: true),
+      );
+      final eqController = EqController(engine: engine, store: eqStore);
+      addTearDown(() {
+        eqController.dispose();
+        eqStore.dispose();
+      });
+
+      await tester.pumpWidget(
+        _buildTestSettingsApp(
+          engine: engine,
+          repository: repository,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          audioSettingsApplier: audioSettingsApplier,
+          artistNameStore: artistNameStore,
+          scopeEqController: eqController,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scrollFinder = find.byType(Scrollable).first;
+      final copyBtn = find.byKey(const Key('settings_copy_diagnostics_button'));
+      await tester.scrollUntilVisible(copyBtn, 300.0, scrollable: scrollFinder);
+      await tester.ensureVisible(copyBtn);
+      await tester.pumpAndSettle();
+
+      await tester.tap(copyBtn);
+      await tester.pumpAndSettle();
+      expect(copiedClipboard, isNotNull);
+      expect(copiedClipboard, contains('EQ Enabled: true'));
+
+      // Disable EQ via controller and verify report updates
+      await eqController.setEnabled(false);
+      await tester.tap(copyBtn);
+      await tester.pumpAndSettle();
+      expect(copiedClipboard, contains('EQ Enabled: false'));
+
+      // Without EqScope / EqController, falls back to engine.isEqEnabled
+      await engine.setEqEnabled(true);
+      await tester.pumpWidget(
+        _buildTestSettingsApp(
+          engine: engine,
+          repository: repository,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          audioSettingsApplier: audioSettingsApplier,
+          artistNameStore: artistNameStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(copyBtn, 300.0, scrollable: scrollFinder);
+      await tester.ensureVisible(copyBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(copyBtn);
+      await tester.pumpAndSettle();
+      expect(copiedClipboard, contains('EQ Enabled: true'));
+      await tester.pump(const Duration(milliseconds: 500));
+    },
+  );
+
+  testWidgets(
+    'S4: Artist name translations support add, validation, edit, confirmation-free undo delete, persistence, and RTL without affecting merged artists',
+    timeout: const Timeout(Duration(seconds: 30)),
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      // Verify merged artists in library repo stay completely unaffected
+      final sqliteRepo = SqliteLibraryRepository.inMemory();
+      addTearDown(sqliteRepo.close);
+      final folder = await sqliteRepo.addFolder('C:\\Music');
+      await sqliteRepo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\t1.mp3',
+          folderId: folder.id!,
+          title: 'Song 1',
+          artist: 'Alias Artist',
+          durationMs: 120000,
+          mtimeMs: 1,
+          sizeBytes: 100,
+          addedAt: DateTime(2026),
+        ),
+        Track(
+          path: 'C:\\Music\\t2.mp3',
+          folderId: folder.id!,
+          title: 'Song 2',
+          artist: 'Canonical Artist',
+          durationMs: 120000,
+          mtimeMs: 1,
+          sizeBytes: 100,
+          addedAt: DateTime(2026),
+        ),
+      ]);
+      await sqliteRepo.mergeArtists(
+        TextNormalizer.normalize('Alias Artist'),
+        TextNormalizer.normalize('Canonical Artist'),
+        targetName: 'Canonical Artist',
+      );
+      final aliasesBefore = await sqliteRepo.listAliases();
+      expect(aliasesBefore.length, 1);
+
+      await tester.pumpWidget(
+        _buildTestSettingsApp(
+          engine: engine,
+          repository: sqliteRepo,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          audioSettingsApplier: audioSettingsApplier,
+          artistNameStore: artistNameStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scrollFinder = find.byType(Scrollable).first;
+      final addBtn = find.byKey(const Key('settings_artist_add_submit_button'));
+      await tester.scrollUntilVisible(addBtn, 200.0, scrollable: scrollFinder);
+      await tester.ensureVisible(addBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('No custom artist translations yet'), findsOneWidget);
+
+      // 1. Validation: empty original
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+      expect(find.text('Enter the original artist name'), findsOneWidget);
+      expect(artistNameStore.count, 0);
+
+      // 2. Validation: original set, both translations empty
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_original_field')),
+        'Fairuz',
+      );
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+      expect(find.text('Enter at least one translated name'), findsOneWidget);
+      expect(artistNameStore.count, 0);
+
+      // 3. Valid add + clear fields + persistence check
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_ar_field')),
+        'فيروز',
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_en_field')),
+        'Fairouz',
+      );
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+
+      expect(artistNameStore.count, 1);
+      final savedFairuz = artistNameStore.getEntry('Fairuz');
+      expect(savedFairuz, isNotNull);
+      expect(savedFairuz!.ar, 'فيروز');
+      expect(savedFairuz.en, 'Fairouz');
+
+      // Persist to disk and reload in a fresh store
+      await tester.runAsync(() => artistNameStore.flush());
+      final reloadedStore = ArtistNameStore(directory: tempDir);
+      addTearDown(reloadedStore.dispose);
+      await tester.runAsync(() => reloadedStore.init());
+      expect(reloadedStore.getEntry('Fairuz')?.ar, 'فيروز');
+
+      // 4. Duplicate rejection by normalized key (case + whitespace)
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_original_field')),
+        '  FAIRUZ  ',
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_ar_field')),
+        'تعديل مكرر',
+      );
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('A translation for this artist already exists'),
+        findsOneWidget,
+      );
+      expect(artistNameStore.count, 1);
+
+      // Add a second distinct artist for duplicate-on-edit check
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_original_field')),
+        'Amr Diab',
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_ar_field')),
+        'عمرو دياب',
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_add_en_field')),
+        '',
+      );
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+      expect(artistNameStore.count, 2);
+
+      // 5. Edit existing entry (and verify duplicate-key check in edit dialog)
+      final fairuzKey = TextNormalizer.normalize('Fairuz');
+      final editBtn = find.byKey(ValueKey('artist_name_edit_$fairuzKey'));
+      await tester.ensureVisible(editBtn);
+      await tester.tap(editBtn);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_edit_original_field')),
+        '  amr diab ',
+      );
+      await tester.tap(
+        find.byKey(const Key('settings_artist_edit_save_button')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('A translation for this artist already exists'),
+        findsOneWidget,
+      );
+
+      // Restore valid original & update translations
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_edit_original_field')),
+        'Fairuz',
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_edit_ar_field')),
+        'السيدة فيروز',
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings_artist_edit_en_field')),
+        'Fairuz',
+      );
+      await tester.tap(
+        find.byKey(const Key('settings_artist_edit_save_button')),
+      );
+      await tester.pumpAndSettle();
+      expect(artistNameStore.getEntry('Fairuz')?.ar, 'السيدة فيروز');
+
+      // 6. Remove confirmation-free -> SnackBar -> Undo restores exact entry
+      final removeBtn = find.byKey(ValueKey('artist_name_remove_$fairuzKey'));
+      await tester.tap(removeBtn);
+      await tester.pumpAndSettle();
+
+      expect(artistNameStore.getEntry('Fairuz'), isNull);
+      expect(find.text('Removed translation for "Fairuz"'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(artistNameStore.getEntry('Fairuz')?.ar, 'السيدة فيروز');
+      expect(artistNameStore.getEntry('Fairuz')?.en, 'Fairuz');
+
+      // 7. Merged artists in repository untouched
+      final aliasesAfter = await sqliteRepo.listAliases();
+      expect(aliasesAfter.length, 1);
+      expect(aliasesAfter.first.canonicalName, 'Canonical Artist');
+
+      // 8. Switch to Arabic RTL + Large text scale at 1000x700 with no overflow
+      tester.view.physicalSize = const Size(1000, 700);
+      settingsStore.update(
+        (s) => s.copyWith(language: 'ar', textScale: 'large'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('إضافة ترجمة'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(milliseconds: 500));
     },

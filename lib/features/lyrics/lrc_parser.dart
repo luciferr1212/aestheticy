@@ -142,12 +142,10 @@ LyricsDocument parseLrc(
       final rawLyric = trimmed.replaceAll(_lineTimestampRegex, '').trim();
 
       // Check for Enhanced LRC word tags: <mm:ss.xx>
-      List<LyricsWord>? lineWords;
+      final rawWords = <({int startMs, String text})>[];
       final wordMatches = _wordTimestampRegex.allMatches(rawLyric).toList();
       if (wordMatches.isNotEmpty) {
         hasAnyWordTiming = true;
-        final wordsDraft = <LyricsWord>[];
-
         for (var i = 0; i < wordMatches.length; i++) {
           final wm = wordMatches[i];
           final rawWordStart = _parseTimestampMs(
@@ -155,8 +153,6 @@ LyricsDocument parseLrc(
             wm.group(2)!,
             wm.group(3),
           );
-          final shiftedStart = rawWordStart - offsetMs;
-          final wordStart = shiftedStart < 0 ? 0 : shiftedStart;
 
           final nextStart = (i + 1 < wordMatches.length)
               ? wordMatches[i + 1].start
@@ -164,26 +160,7 @@ LyricsDocument parseLrc(
           final wordText = rawLyric.substring(wm.end, nextStart).trim();
 
           if (wordText.isNotEmpty) {
-            wordsDraft.add(LyricsWord(
-              startMs: wordStart,
-              text: wordText,
-            ));
-          }
-        }
-
-        // Link endMs = next word's startMs
-        if (wordsDraft.isNotEmpty) {
-          lineWords = <LyricsWord>[];
-          for (var i = 0; i < wordsDraft.length; i++) {
-            final w = wordsDraft[i];
-            final end = (i + 1 < wordsDraft.length)
-                ? wordsDraft[i + 1].startMs
-                : null;
-            lineWords.add(LyricsWord(
-              startMs: w.startMs,
-              endMs: end,
-              text: w.text,
-            ));
+            rawWords.add((startMs: rawWordStart, text: wordText));
           }
         }
       }
@@ -193,14 +170,53 @@ LyricsDocument parseLrc(
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
 
-      for (final tm in timestampMatches) {
-        final rawStart = _parseTimestampMs(
-          tm.group(1)!,
-          tm.group(2)!,
-          tm.group(3),
-        );
+      final rawStarts = timestampMatches
+          .map((tm) => _parseTimestampMs(tm.group(1)!, tm.group(2)!, tm.group(3)))
+          .toList();
+
+      int baseWordOriginMs = rawStarts.first;
+      if (rawWords.isNotEmpty) {
+        final firstWordRaw = rawWords.first.startMs;
+        int? candidateOrigin;
+        var minRaw = rawStarts.first;
+        for (final r in rawStarts) {
+          if (r < minRaw) minRaw = r;
+          if (r <= firstWordRaw &&
+              (candidateOrigin == null || r > candidateOrigin)) {
+            candidateOrigin = r;
+          }
+        }
+        baseWordOriginMs = candidateOrigin ?? minRaw;
+      }
+
+      for (final rawStart in rawStarts) {
         final shifted = rawStart - offsetMs;
         final startMs = shifted < 0 ? 0 : shifted;
+        final lineDelta = rawStart - baseWordOriginMs;
+
+        List<LyricsWord>? lineWords;
+        if (rawWords.isNotEmpty) {
+          final shiftedWords = rawWords.map((w) {
+            final wordShifted = w.startMs + lineDelta - offsetMs;
+            return (
+              startMs: wordShifted < 0 ? 0 : wordShifted,
+              text: w.text,
+            );
+          }).toList();
+
+          lineWords = <LyricsWord>[];
+          for (var i = 0; i < shiftedWords.length; i++) {
+            final w = shiftedWords[i];
+            final end = (i + 1 < shiftedWords.length)
+                ? shiftedWords[i + 1].startMs
+                : null;
+            lineWords.add(LyricsWord(
+              startMs: w.startMs,
+              endMs: end,
+              text: w.text,
+            ));
+          }
+        }
 
         parsedLines.add(_RawLine(
           startMs: startMs,
@@ -248,7 +264,13 @@ LyricsDocument parseLrc(
       ));
     } else {
       final words = item.words!;
-      final nextLineStart = (i + 1 < capped.length) ? capped[i + 1].startMs : null;
+      int? nextLineStart;
+      for (var j = i + 1; j < capped.length; j++) {
+        if (capped[j].startMs > item.startMs) {
+          nextLineStart = capped[j].startMs;
+          break;
+        }
+      }
 
       final updatedWords = <LyricsWord>[];
       for (var wIdx = 0; wIdx < words.length; wIdx++) {

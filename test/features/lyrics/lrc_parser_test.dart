@@ -147,5 +147,42 @@ Third verse line
       expect(() => parseLrc('[[[invalid]]]:::<<<>>>'), returnsNormally);
       expect(() => parseLrc('[offset:not_a_num]\n[9999:99.999]Huge line'), returnsNormally);
     });
+
+    test('duplicate timestamps with word timing shift every occurrence and apply [offset:]', () {
+      const lrc = '''
+[offset:+500]
+[00:10.00][01:10.00]<00:10.00>Chorus <00:10.50>line
+[01:12.00]After chorus
+''';
+
+      final doc = parseLrc(lrc);
+      expect(doc.lines.length, equals(3));
+
+      final first = doc.lines[0];
+      expect(first.startMs, equals(9500));
+      expect(first.words![0].startMs, equals(9500));
+      expect(first.words![0].endMs, equals(10000));
+      expect(first.words![1].startMs, equals(10000));
+      expect(first.words![1].endMs, equals(69500));
+
+      final second = doc.lines[1];
+      expect(second.startMs, equals(69500));
+      expect(second.words![0].startMs, equals(69500));
+      expect(second.words![0].endMs, equals(70000));
+      expect(second.words![1].startMs, equals(70000));
+      expect(second.words![1].endMs, equals(71500));
+    });
+
+    test('identical duplicate timestamps preserve valid last-word endMs from next strictly later line', () {
+      const lrc = '''
+[00:10.00][00:10.00]<00:10.00>Hi <00:10.40>there
+[00:12.00]Next
+''';
+
+      final doc = parseLrc(lrc);
+      expect(doc.lines.length, equals(3));
+      expect(doc.lines[0].words![1].endMs, equals(12000));
+      expect(doc.lines[1].words![1].endMs, equals(12000));
+    });
   });
 }

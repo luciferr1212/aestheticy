@@ -95,7 +95,10 @@ class _LibraryHeaderState extends State<LibraryHeader> {
   @override
   void didUpdateWidget(covariant LibraryHeader oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.searchQuery != _controller.text) {
+    if (!(_debounceTimer?.isActive ?? false) &&
+        widget.searchQuery != oldWidget.searchQuery &&
+        widget.searchQuery != _controller.text &&
+        widget.searchQuery != _controller.text.trim()) {
       _controller.text = widget.searchQuery;
     }
   }
@@ -268,6 +271,7 @@ class _LibraryHeaderState extends State<LibraryHeader> {
                             icon: const Icon(Icons.close, size: 16),
                             color: AppColors.textMuted,
                             onPressed: () {
+                              _debounceTimer?.cancel();
                               _controller.clear();
                               widget.onSearchChanged('');
                             },

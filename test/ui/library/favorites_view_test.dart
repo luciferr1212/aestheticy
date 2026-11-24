@@ -103,6 +103,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(controller.queue.current?.uri, track1.path);
+      expect(controller.queue.isShuffled, isFalse);
+
+      // Shuffle favorites sets shuffle state cleanly on controller/queue
+      await tester.tap(find.byKey(const Key('favorites_shuffle_button')));
+      await tester.pumpAndSettle();
+
+      expect(controller.queue.current?.uri, track1.path);
+      expect(controller.queue.isShuffled, isTrue);
 
       // Unfavorite live
       await collections.toggleFavorite(track1.path);

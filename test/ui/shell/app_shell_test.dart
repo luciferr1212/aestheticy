@@ -124,7 +124,12 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
   Future<List<ArtistAlias>> listAliases() async => List.unmodifiable(_aliases);
 
   @override
-  Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist}) async => [];
+  Future<List<Track>> tracksOfAlbum(
+    String album, {
+    String? albumArtist,
+    String? albumKey,
+  }) async =>
+      [];
 
   @override
   Future<List<Track>> tracksOfArtist(String artist, {String? artistKey}) async => [];

@@ -16,7 +16,9 @@ import 'package:aestheticy/features/lyrics/lyrics_controller.dart';
 import 'package:aestheticy/features/lyrics/lyrics_models.dart';
 import 'package:aestheticy/features/lyrics/lyrics_repository.dart';
 import 'package:aestheticy/library/cover_cache.dart';
+import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/track_audio_source_mapper.dart';
 import 'package:aestheticy/main.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
@@ -838,6 +840,123 @@ void main() {
 
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(seconds: 2));
+      },
+    );
+
+    testWidgets(
+      'favorite button works using queue current uri when extras[path] is absent',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final now = DateTime.now();
+        final track1 = Track(
+          path: 'C:/music/track_one.mp3',
+          folderId: 1,
+          title: 'Track One',
+          artist: 'Artist One',
+          durationMs: 180000,
+          mtimeMs: 1000,
+          sizeBytes: 1024,
+          addedAt: now,
+        );
+        final track2 = Track(
+          path: 'C:/music/track_two.mp3',
+          folderId: 1,
+          title: 'Track Two',
+          artist: 'Artist Two',
+          durationMs: 200000,
+          mtimeMs: 1000,
+          sizeBytes: 2048,
+          addedAt: now,
+        );
+        await userCollections.toggleFavorite(track2.path);
+
+        final source1 = track1.toAudioSource();
+        final source2 = track2.toAudioSource();
+        expect(source1.extras?.containsKey('path'), isFalse);
+
+        await playbackController.playQueue([source1, source2]);
+
+        await tester.pumpWidget(
+          buildTestHarness(windowSize: const Size(480, 170)),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.favorite_border), findsOneWidget);
+        expect(find.byIcon(Icons.favorite), findsNothing);
+        expect(userCollections.isFavorite(track1.path), isFalse);
+
+        await tester.tap(find.byIcon(Icons.favorite_border));
+        await tester.pumpAndSettle();
+
+        expect(userCollections.isFavorite(track1.path), isTrue);
+        expect(find.byIcon(Icons.favorite), findsOneWidget);
+        expect(find.byIcon(Icons.favorite_border), findsNothing);
+
+        // Toggle back off
+        await tester.tap(find.byIcon(Icons.favorite));
+        await tester.pumpAndSettle();
+        expect(userCollections.isFavorite(track1.path), isFalse);
+        expect(find.byIcon(Icons.favorite_border), findsOneWidget);
+
+        // Advance to track 2 (already favorite) and verify square layout reflects state
+        await playbackController.playTrack(1);
+        await tester.pumpWidget(
+          buildTestHarness(windowSize: const Size(340, 440)),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.favorite), findsOneWidget);
+        expect(userCollections.isFavorite(track2.path), isTrue);
+      },
+    );
+
+    testWidgets(
+      'S5: Space while GlassIconButton has focus in MiniPlayerView does not trigger play/pause',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        await playbackController.playQueue(const [
+          AudioSource(
+            'file:///mini_space_guard.mp3',
+            extras: {'title': 'Guard Track', 'artist': 'Guard Artist'},
+          ),
+        ]);
+
+        await tester.pumpWidget(
+          buildTestHarness(windowSize: const Size(480, 170)),
+        );
+        await tester.pumpAndSettle();
+
+        expect(playbackController.currentState, PlaybackState.playing);
+        expect(settingsStore.settings.miniPlayerShowLyrics, isFalse);
+
+        final lyricsBtn = find.byKey(const Key('mini_lyrics_toggle'));
+        expect(lyricsBtn, findsOneWidget);
+        final target = find.descendant(
+          of: lyricsBtn,
+          matching: find.byType(GestureDetector),
+        );
+        expect(target, findsWidgets);
+        Focus.of(tester.element(target.first)).requestFocus();
+        await tester.pumpAndSettle();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pumpAndSettle();
+
+        // Lyrics toggle activated without toggling playback!
+        expect(playbackController.currentState, PlaybackState.playing);
+        expect(settingsStore.settings.miniPlayerShowLyrics, isTrue);
+
+        // Moving focus back to MiniPlayerView root -> Space pauses playback
+        final rootFocus = find.descendant(
+          of: find.byType(MiniPlayerView),
+          matching: find.byWidgetPredicate((w) => w is Focus && w.onKeyEvent != null),
+        );
+        tester.widget<Focus>(rootFocus.first).focusNode?.requestFocus();
+        await tester.pumpAndSettle();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(playbackController.currentState, PlaybackState.paused);
       },
     );
   });

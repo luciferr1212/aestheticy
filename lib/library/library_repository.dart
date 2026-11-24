@@ -62,8 +62,13 @@ abstract class LibraryRepository {
   /// Returns the total number of unique derived artists.
   Future<int> artistCount();
 
-  /// Retrieves all tracks belonging to [album], optionally scoped to [albumArtist].
-  Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist});
+  /// Retrieves all tracks belonging to [album], scoped to [albumArtist] or an
+  /// explicit canonical [albumKey].
+  Future<List<Track>> tracksOfAlbum(
+    String album, {
+    String? albumArtist,
+    String? albumKey,
+  });
 
   /// Retrieves all tracks performed by [artist], optionally matching by [artistKey].
   Future<List<Track>> tracksOfArtist(String artist, {String? artistKey});

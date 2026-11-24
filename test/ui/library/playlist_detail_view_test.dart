@@ -126,12 +126,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(controller.queue.current?.uri, track1.path);
+      expect(controller.queue.isShuffled, isFalse);
 
-      // Shuffle playlist
+      // Shuffle playlist sets shuffle state on controller/queue
       await tester.tap(find.byKey(const Key('playlist_shuffle_button')));
       await tester.pumpAndSettle();
 
       expect(controller.queue.items.length, 2);
+      expect(controller.queue.isShuffled, isTrue);
     },
   );
 
@@ -156,6 +158,103 @@ void main() {
       }
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
+    },
+  );
+
+  testWidgets(
+    'S3: playing a track in a playlist with missing files at start, middle, and end starts the exact clicked track',
+    timeout: const Timeout(Duration(seconds: 30)),
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final track3 = Track(
+        id: 3,
+        folderId: 1,
+        path: 'C:/Music/song3.mp3',
+        durationMs: 170000,
+        title: 'Song Three',
+        artist: 'Artist C',
+        album: 'Album C',
+        mtimeMs: 0,
+        sizeBytes: 1000,
+        addedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      );
+      await repo.upsertTracks([track3]);
+
+      const missingStart = 'C:/Music/missing_start.mp3';
+      const missingMid = 'C:/Music/missing_mid.mp3';
+      const missingEnd = 'C:/Music/missing_end.mp3';
+
+      final mixedPlaylist = await collections.createPlaylist('Mixed Missing');
+      await collections.addToPlaylist(mixedPlaylist.id, [
+        missingStart, // row 0 (missing at start)
+        track1.path, // row 1 -> playable index 0
+        missingMid, // row 2 (missing in middle)
+        track2.path, // row 3 -> playable index 1
+        track3.path, // row 4 -> playable index 2
+        missingEnd, // row 5 (missing at end)
+      ]);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(
+            body: UserCollectionsScope(
+              collections: collections,
+              child: PlaylistDetailView(
+                playlistId: mixedPlaylist.id,
+                initialPlaylist: mixedPlaylist,
+                repository: repo,
+                collections: collections,
+                controller: controller,
+                settingsStore: settingsStore,
+                navigator: navigator,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Future<void> tapRowText(String label) async {
+        final finder = find.text(label);
+        await tester.ensureVisible(finder);
+        await tester.tap(finder);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+      }
+
+      // Clicking playable row after missing start plays Song One
+      await tapRowText('Song One');
+      expect(controller.queue.current?.uri, track1.path);
+      expect(
+        controller.queue.items.map((s) => s.uri).toList(),
+        [track1.path, track2.path, track3.path],
+      );
+
+      // Clicking playable row after missing middle plays Song Two (previously played Song Three!)
+      await tapRowText('Song Two');
+      expect(controller.queue.current?.uri, track2.path);
+
+      // Clicking last playable row before missing end plays Song Three
+      await tapRowText('Song Three');
+      expect(controller.queue.current?.uri, track3.path);
+
+      // Tapping a missing row at start, middle, or end does nothing
+      await tapRowText('missing_start.mp3');
+      expect(controller.queue.current?.uri, track3.path);
+
+      await tapRowText('missing_mid.mp3');
+      expect(controller.queue.current?.uri, track3.path);
+
+      await tapRowText('missing_end.mp3');
+      expect(controller.queue.current?.uri, track3.path);
+      expect(tester.takeException(), isNull);
     },
   );
 }

@@ -1,0 +1,42 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## Unreleased
+
+### Added
+- Request tokens (`_searchRequestId`) on `AlbumsView`, `ArtistsView`, and `TracksView` search flows to discard out-of-order and post-clear stale search responses, plus `ArtistNameStore.expandedSearchQueries`.
+- `FilePathUtils` (`lib/library/file_path_utils.dart`) and SQLite scalar function `normalize_file_path` to match `file://` URIs, Windows backslash paths, UNC shares, and POSIX paths consistently across `recentlyPlayedTracks` and `playlistEntries`.
+- `M3u.importPlaylistWithSummary` (`M3uImportSummary`), `M3u.validateExportTarget`, `M3u.writeM3uAtomically`, and localized export refusal/overwrite confirmation strings (`m3u.exportRefusedAudio`, `m3u.exportRefusedOtherFile`, `m3u.overwriteTitle`, `m3u.overwriteMessage`, `m3u.overwriteConfirm`) in `AppStrings` (en + ar).
+- `computeMissingPaths` helper in `LibraryScanner` and tests covering search race/debounce/translated-name scope (`test/ui/library/library_search_test.dart`), M3U Windows paths/refusals/confirmation/atomic overwrite (`test/features/collections/m3u_test.dart`), `rescanAll` continuity and cancellation (`test/library/scan_service_test.dart`), duplicate-timestamp LRC word shifting (`lrc_parser_test.dart`, `lyrics_controller_test.dart`), and `CoverPalette` resource disposal (`cover_palette_test.dart`).
+- Unified `AlbumIdentity` helper (`lib/library/album_identity.dart`) and `AlbumSummary.identityKey` / `AlbumSummary.addedAt` (`MAX(added_at)`), plus SQLite `album_identity_key` scalar function and optional `albumKey` scoping on `LibraryRepository.tracksOfAlbum`.
+- `ScanService.libraryVersion` counter and `ScanService.removeFolder` plus `UserCollections.refresh` for flicker-free library refresh notifications.
+- `PlaybackController.playShuffled`, `PlaybackController.clearQueue`, `PlaybackController.restoreQueueSnapshot`, `PlaybackController.removeEntryFromQueue`, and `PlaybackController.removeEntriesFromQueue` with entry-identity tracking (`PlaybackQueue.removeByIds`, `indexOfEntryId`, `restoreSnapshot`).
+- `SavedSessionItem.entryId` and `SavedSession.currentEntryId` persistence for exact duplicate-entry restoration.
+- Multi-selection (Ctrl+Click / Shift+Click / Shift+Arrows) and identity-preserving Delete key handling in `QueueContent`.
+- Settings UI under **Artist names** to add, edit, and remove display-only artist-name translations with normalized-key duplicate validation and confirmation-free undo SnackBar.
+- Localization key coverage test in `test/ui/l10n/l10n_test.dart` scanning `lib/` lookups against both English and Arabic dictionaries.
+- Tests covering `AlbumIdentity` (`test/library/album_identity_test.dart`), `recentlyAdded` sorting, flicker-free library auto-refresh (`test/ui/library_auto_refresh_test.dart`), shuffled/duplicate/missing session restore, unified album/artist/playlist/favorites shuffle sync, missing-file playlist play mapping, queue Delete edge cases, and focused `GlassIconButton`/`GlassPillButton` Space-key guards.
+
+### Changed
+- Removed parent-folder album fallback for untagged singles in `LibraryScanner`, and aligned `SqliteLibraryRepository`, `CoverCache`, `ReleaseKindClassifier`, `AlbumsView`, and `AlbumDetailView` on `AlbumIdentity`.
+- Defaulted `AppSettings.albumsSortReversed` to `true` (newest first when `albumSort` is `'recentlyAdded'`).
+- Wired `LibraryDataCache`, `UserCollections`, `AppShell`, and all library list/detail/collection views for stale-while-revalidate refresh on scan completion and folder additions/removals.
+- Routed all album, artist, playlist, and favorites shuffle actions through `PlaybackController.playShuffled`, and moved `QueueView` clear and `AudioLabScreen` shuffle/repeat mutations behind `PlaybackController`.
+- Added missing `AppStrings` translations (`artists.albumsAndTracks`, `common.save`, `miniPlayer.enterTooltip`) in both English and Arabic.
+- Localized remaining user-visible strings across `ArtistsView`, `TracksView`, `ArtistRulesSheet`, and `FolderManagementSheet`, and expanded `no_hardcoded_strings_test.dart` to cover `lib/features/library` and multiline/ternary `Text` calls.
+
+### Fixed
+- `SqliteLibraryRepository.searchAlbums` now groups by `album_key` before filtering so track artists and merged canonical artist names match without corrupting `trackCount` or `distinct_artist_count`, and `AlbumsView` matches display-only artist translations.
+- `M3u.parseM3u` preserves valid Windows backslash paths, decodes `file://` URIs, parses `#EXTINF` titles, and reports missing paths cleanly; `M3u.exportPlaylist` refuses audio extensions and existing non-playlist files, forces `.m3u8` when needed, asks confirmation before overwriting `.m3u`/`.m3u8`, and writes atomically (temp sibling + flush + rename).
+- `ScanService.rescanAll` keeps `isScanning` continuously `true` across multiple folders and suppresses intermediate `done: true` events; cancelled scans never mark unscanned files as missing.
+- `parseLrc` shifts word timings for every timestamp on multi-timestamp Enhanced LRC lines (including `[offset:]` and duplicate-timestamp `endMs` resolution), and `paletteForCover` disposes decoded `Codec` and `ui.Image` instances in a `finally` block.
+- Same-title albums with differing artists or null `album_artist` no longer merge across `tracksOfAlbum`, album queries, `CoverCache` keys, or `ReleaseKindClassifier`, and untagged singles receive unique track-path identities.
+- `AlbumsView` `'recentlyAdded'` sort now orders by `AlbumSummary.addedAt` instead of alphabetical album title order, and `'artist'` sort uses displayed artist names.
+- All library views (including `AlbumDetailView`, `ArtistDetailView`, `PlaylistDetailView`, `FavoritesView`, `PlaylistsView`, `AlbumsView`, `ArtistsView`, `TracksView`, and `WelcomeView`/`AppShell`) refresh automatically after scans or folder changes without loading flicker.
+- Session restore no longer re-shuffles restored shuffled queues and accurately restores repeat modes, duplicate tracks by `QueueEntry` identity, and missing-track fallbacks.
+- Playlist track clicks map visible row index to the playable audio source list when earlier or middle playlist entries are missing, and ignore clicks on missing rows.
+- Queue Delete key removes selected entry IDs cleanly (including duplicates, multi-selection, current entry, and above/below entries) and refreshes gapless preload.
+- Global Space-key playback toggle ignores events when `GlassIconButton` or `GlassPillButton` (as well as standard buttons and text fields) holds focus.
+- Mini player favorite button now reads `current?.uri` instead of missing `extras['path']` so toggling favorites works and reflects current track state.
+- Diagnostic report now reads the real equalizer enabled state from `EqController`/`EqScope` (with `AudioEngine.isEqEnabled` fallback) instead of hardcoded `false`.

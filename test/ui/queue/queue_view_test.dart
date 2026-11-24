@@ -532,4 +532,145 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
+
+  testWidgets(
+    'S4: Delete key handles duplicates, consecutive deletes, current item removal, above/below removal, and multi-select',
+    timeout: const Timeout(Duration(seconds: 30)),
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      // Use a gapless spy engine to verify preload refresh on Delete
+      final spyEngine = _SpyPreloadEngine();
+      await spyEngine.init();
+      addTearDown(spyEngine.dispose);
+      final spyQueue = PlaybackQueue();
+      final spyCtrl = PlaybackController(engine: spyEngine, queue: spyQueue);
+      await spyCtrl.init();
+      addTearDown(spyCtrl.dispose);
+
+      Widget buildSpyQueue() {
+        return SettingsScope(
+          store: settingsStore,
+          child: MaterialApp(
+            theme: buildAppTheme(),
+            home: Scaffold(
+              body: QueueView(
+                controller: spyCtrl,
+                navigator: navigator,
+                settingsStore: settingsStore,
+                userCollections: collections,
+              ),
+            ),
+          ),
+        );
+      }
+
+      final dupA = _createSource('dup_a', uri: 'C:\\Music\\dup_a.flac');
+      final mid = _createSource('mid_b', uri: 'C:\\Music\\mid_b.flac');
+      final tail = _createSource('tail_c', uri: 'C:\\Music\\tail_c.flac');
+      final extra = _createSource('extra_d', uri: 'C:\\Music\\extra_d.flac');
+
+      // Queue: [dup_a (#0), mid_b (#1), dup_a (#2), tail_c (#3), extra_d (#4)], playing #1 (mid_b)
+      await spyCtrl.playQueue([dupA, mid, dupA, tail, extra], startIndex: 1);
+      await tester.pumpWidget(buildSpyQueue());
+      await tester.pumpAndSettle();
+
+      final initialEntries = List<QueueEntry>.from(spyQueue.entries);
+
+      // 1. Delete entry above current (#0 dup_a) -> #1 mid_b keeps playing without reopen
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+
+      final opensBefore = spyEngine.openCallCount;
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+
+      // #0 dup_a deleted, mid_b still playing without reopen, #2 dup_a untouched!
+      expect(spyEngine.openCallCount, opensBefore);
+      expect(spyQueue.currentEntry?.id, initialEntries[1].id);
+      expect(spyQueue.entries.map((e) => e.id).toList(), [
+        initialEntries[1].id,
+        initialEntries[2].id,
+        initialEntries[3].id,
+        initialEntries[4].id,
+      ]);
+
+      // 2. Navigate to duplicate entry (now index 1, initialEntries[2]) and delete it, then immediately press Delete again!
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+
+      expect(spyQueue.entries.map((e) => e.id).toList(), [
+        initialEntries[1].id,
+        initialEntries[3].id,
+        initialEntries[4].id,
+      ]);
+
+      // Consecutive Delete must remove tail_c (index 1, next item), NOT jump back onto mid_b!
+      spyEngine.preloadedUris.clear();
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+      expect(spyQueue.entries.map((e) => e.id).toList(), [
+        initialEntries[1].id,
+        initialEntries[4].id,
+      ]);
+      expect(spyEngine.preloadedUris.last, extra.uri);
+
+      // 3. Delete the currently playing entry (initialEntries[1] mid_b) -> opens extra_d (initialEntries[4])
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+
+      expect(spyQueue.length, 1);
+      expect(spyQueue.currentEntry?.id, initialEntries[4].id);
+      expect(spyEngine.openedSource?.uri, extra.uri);
+
+      // 4. Multi-select via Shift+Click and Delete removes multiple entries together
+      final m0 = _createSource('m0');
+      final m1 = _createSource('m1');
+      final m2 = _createSource('m2');
+      final m3 = _createSource('m3');
+      await spyCtrl.playQueue([m0, m1, m2, m3], startIndex: 0);
+      await tester.pumpAndSettle();
+
+      final multiEntries = List<QueueEntry>.from(spyQueue.entries);
+      // ArrowDown to m1, then Shift+Click m3 -> selects [m1, m2, m3] without interrupting m0
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(ValueKey('queue_row_${multiEntries[3].id}')));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+
+      spyEngine.preloadedUris.clear();
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+
+      expect(spyQueue.entries.map((e) => e.id).toList(), [multiEntries[0].id]);
+      expect(spyQueue.currentEntry?.id, multiEntries[0].id);
+      expect(spyEngine.preloadedUris.last, isNull);
+    },
+  );
+}
+
+class _SpyPreloadEngine extends FakeAudioEngine {
+  final List<String?> preloadedUris = [];
+
+  @override
+  EngineCapabilities get capabilities => const EngineCapabilities(
+        exclusiveMode: false,
+        gapless: true,
+        equalizer: true,
+        replayGain: true,
+      );
+
+  @override
+  Future<void> preloadNext(AudioSource? next) async {
+    preloadedUris.add(next?.uri);
+    await super.preloadNext(next);
+  }
 }

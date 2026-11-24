@@ -3,11 +3,13 @@ import 'package:aestheticy/audio/playback_queue.dart';
 
 /// An immutable representation of a serialized queue track item.
 class SavedSessionItem {
+  final int? entryId;
   final String uri;
   final Map<String, String>? extras;
   final bool isUserQueued;
 
   const SavedSessionItem({
+    this.entryId,
     required this.uri,
     this.extras,
     this.isUserQueued = false,
@@ -16,6 +18,7 @@ class SavedSessionItem {
   AudioSource toAudioSource() => AudioSource(uri, extras: extras);
 
   Map<String, Object?> toJson() => {
+        if (entryId != null) 'entryId': entryId,
         'uri': uri,
         if (extras != null) 'extras': extras,
         if (isUserQueued) 'isUserQueued': true,
@@ -23,6 +26,8 @@ class SavedSessionItem {
 
   factory SavedSessionItem.fromJson(Map<String, Object?>? json) {
     if (json == null) return const SavedSessionItem(uri: '');
+    final rawEntryId = json['entryId'];
+    final entryId = rawEntryId is int ? rawEntryId : null;
     final uri = json['uri'] as String? ?? '';
     final isUserQueued = json['isUserQueued'] == true;
     final rawExtras = json['extras'];
@@ -33,6 +38,7 @@ class SavedSessionItem {
       );
     }
     return SavedSessionItem(
+      entryId: entryId,
       uri: uri,
       extras: extras,
       isUserQueued: isUserQueued,
@@ -44,11 +50,12 @@ class SavedSessionItem {
       identical(this, other) ||
       other is SavedSessionItem &&
           runtimeType == other.runtimeType &&
+          entryId == other.entryId &&
           uri == other.uri &&
           isUserQueued == other.isUserQueued;
 
   @override
-  int get hashCode => Object.hash(uri, isUserQueued);
+  int get hashCode => Object.hash(entryId, uri, isUserQueued);
 }
 
 /// Immutable model representing a snapshot of the playback queue and state.
@@ -57,6 +64,7 @@ class SavedSession {
 
   final List<SavedSessionItem> queue;
   final int currentIndex;
+  final int? currentEntryId;
   final String? currentUri;
   final int positionMs;
   final bool shuffle;
@@ -66,6 +74,7 @@ class SavedSession {
   const SavedSession({
     this.queue = const [],
     this.currentIndex = 0,
+    this.currentEntryId,
     this.currentUri,
     this.positionMs = 0,
     this.shuffle = false,
@@ -89,6 +98,7 @@ class SavedSession {
     return {
       'queue': queue.take(maxQueueCapacity).map((item) => item.toJson()).toList(),
       'currentIndex': currentIndex,
+      if (currentEntryId != null) 'currentEntryId': currentEntryId,
       if (currentUri != null) 'currentUri': currentUri,
       'positionMs': positionMs,
       'shuffle': shuffle,
@@ -114,6 +124,8 @@ class SavedSession {
 
     final rawIndex = json['currentIndex'];
     final currentIndex = rawIndex is int ? rawIndex : 0;
+    final rawCurrentEntryId = json['currentEntryId'];
+    final currentEntryId = rawCurrentEntryId is int ? rawCurrentEntryId : null;
     final currentUri = json['currentUri'] as String?;
 
     final rawPos = json['positionMs'];
@@ -137,6 +149,7 @@ class SavedSession {
     return SavedSession(
       queue: items,
       currentIndex: currentIndex,
+      currentEntryId: currentEntryId,
       currentUri: currentUri,
       positionMs: positionMs,
       shuffle: shuffle,
@@ -151,6 +164,7 @@ class SavedSession {
       other is SavedSession &&
           runtimeType == other.runtimeType &&
           currentIndex == other.currentIndex &&
+          currentEntryId == other.currentEntryId &&
           currentUri == other.currentUri &&
           positionMs == other.positionMs &&
           shuffle == other.shuffle &&
@@ -159,6 +173,7 @@ class SavedSession {
   @override
   int get hashCode => Object.hash(
         currentIndex,
+        currentEntryId,
         currentUri,
         positionMs,
         shuffle,

@@ -1973,5 +1973,139 @@ void _registerControllerShuffleRepeatTests() {
       await ctrl.dispose();
       await engine.dispose();
     });
+
+    test('S2: playShuffled enables shuffle, notifies listeners, preserves user queue, and refreshes preload', () async {
+      final engine = _PreloadSpyEngine();
+      await engine.init();
+      final ctrl = PlaybackController(engine: engine, queue: PlaybackQueue(random: Random(7)));
+      await ctrl.init();
+
+      await ctrl.playQueue([_src('ctx1'), _src('ctx2')], startIndex: 0);
+      await ctrl.addToQueue([_src('user_q')]);
+      engine.preloadedUris.clear();
+
+      var notifications = 0;
+      final sub = ctrl.queueChangeStream.listen((_) => notifications++);
+
+      await ctrl.playShuffled(
+        [_src('a'), _src('b'), _src('c'), _src('d')],
+        random: Random(11),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(ctrl.queue.isShuffled, isTrue);
+      expect(notifications, 1);
+      expect(ctrl.queue.items.length, 5);
+      expect(ctrl.queue.entries[1].source.uri, 'file:///user_q.flac');
+      expect(ctrl.queue.entries[1].isUserQueued, isTrue);
+      expect(engine.preloadedUris, isNotEmpty);
+      expect(engine.preloadedUris.last, ctrl.queue.peekNext()?.uri);
+
+      // Empty playShuffled stops and clears queue cleanly
+      await ctrl.playShuffled(const []);
+      expect(ctrl.queue.isEmpty, isTrue);
+
+      await sub.cancel();
+      await ctrl.dispose();
+      await engine.dispose();
+    });
+
+    test('S2: clearQueue empties queue, notifies listeners, stops playback, and clears preload', () async {
+      final engine = _PreloadSpyEngine();
+      await engine.init();
+      final ctrl = PlaybackController(engine: engine, queue: PlaybackQueue());
+      await ctrl.init();
+
+      await ctrl.playQueue([_src('a'), _src('b')], startIndex: 0);
+      engine.preloadedUris.clear();
+
+      var notifications = 0;
+      final sub = ctrl.queueChangeStream.listen((_) => notifications++);
+
+      await ctrl.clearQueue();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(ctrl.queue.isEmpty, isTrue);
+      expect(ctrl.currentState, PlaybackState.idle);
+      expect(notifications, 1);
+      expect(engine.preloadedUris.last, isNull);
+
+      await sub.cancel();
+      await ctrl.dispose();
+      await engine.dispose();
+    });
+  });
+
+  group('S4 Entry-identity removal (removeById, removeByIds, removeEntriesFromQueue)', () {
+    test('PlaybackQueue.removeByIds handles duplicates, shuffle on, above/below/current removal', () {
+      final q = PlaybackQueue(random: _seededRandom());
+      q.replaceAll([_src('dup'), _src('mid'), _src('dup'), _src('tail')], startIndex: 2);
+      final e0 = q.entries[0];
+      final e1 = q.entries[1];
+      final e2 = q.entries[2]; // current ('dup')
+      final e3 = q.entries[3];
+
+      // Remove e0 (duplicate above current) & e1 -> current stays exact e2!
+      expect(q.removeByIds([e0.id, e1.id]), 2);
+      expect(q.length, 2);
+      expect(q.currentEntry?.id, e2.id);
+      expect(q.currentIndex, 0);
+      expect(q.entries.map((e) => e.id).toList(), [e2.id, e3.id]);
+
+      // Shuffle mode: removing current advances to next surviving entry in active order
+      q.replaceAll([_src('a'), _src('b'), _src('c'), _src('d')], startIndex: 0);
+      q.setShuffle(true);
+      final orderIds = q.entries.map((e) => e.id).toList();
+      final removedCount = q.removeByIds([orderIds[0], orderIds[2]]);
+      expect(removedCount, 2);
+      expect(q.isShuffled, isTrue);
+      expect(q.currentEntry?.id, orderIds[1]);
+      expect(q.entries.map((e) => e.id).toList(), [orderIds[1], orderIds[3]]);
+    });
+
+    test('PlaybackController.removeEntriesFromQueue updates current pointer, preserves non-current playback, and refreshes preload', () async {
+      final engine = _PreloadSpyEngine();
+      await engine.init();
+      final ctrl = PlaybackController(engine: engine, queue: PlaybackQueue());
+      await ctrl.init();
+
+      await ctrl.playQueue([
+        _src('s0'),
+        _src('dup'),
+        _src('s2'),
+        _src('dup'),
+        _src('s4'),
+      ], startIndex: 2);
+      final entries = ctrl.queue.entries;
+      final opensAfterInit = engine.openCallCount;
+      engine.preloadedUris.clear();
+
+      // Remove entry above current (entries[0]) and second duplicate below (entries[3]) -> does not interrupt playback!
+      await ctrl.removeEntriesFromQueue([entries[0].id, entries[3].id]);
+      expect(engine.openCallCount, opensAfterInit);
+      expect(ctrl.queue.currentEntry?.id, entries[2].id);
+      expect(ctrl.queue.currentIndex, 1);
+      expect(ctrl.queue.entries.map((e) => e.id).toList(), [entries[1].id, entries[2].id, entries[4].id]);
+      expect(engine.preloadedUris.last, 'file:///s4.flac');
+
+      // Remove currently playing entry (entries[2]) -> opens s4 and refreshes preload to null
+      await ctrl.removeEntryFromQueue(entries[2].id);
+      expect(ctrl.queue.currentEntry?.id, entries[4].id);
+      expect(engine.openedSource?.uri, 'file:///s4.flac');
+      expect(engine.preloadedUris.last, isNull);
+
+      // Removing non-existent id is a no-op
+      await ctrl.removeEntryFromQueue(999999);
+      expect(ctrl.queue.length, 2);
+
+      // Removing all remaining entries stops engine and clears preload
+      await ctrl.removeEntriesFromQueue(ctrl.queue.entries.map((e) => e.id));
+      expect(ctrl.queue.isEmpty, isTrue);
+      expect(ctrl.currentState, PlaybackState.idle);
+      expect(engine.preloadedUris.last, isNull);
+
+      await ctrl.dispose();
+      await engine.dispose();
+    });
   });
 }

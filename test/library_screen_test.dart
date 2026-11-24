@@ -12,6 +12,10 @@ import 'package:aestheticy/features/library/folder_management_sheet.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/ui/library/artists_view.dart';
+import 'package:aestheticy/ui/library/tracks_view.dart';
+import 'package:aestheticy/ui/settings/app_settings.dart';
+import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
@@ -410,5 +414,87 @@ void main() {
       expect(queue.length, 1);
       expect(queue.items.map((s) => s.uri), ['file:///music/song1.mp3']);
     });
+
+    testWidgets(
+      'S5: FolderManagementSheet, ArtistsView and TracksView empty states localize in Arabic RTL',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final arStore = SettingsStore(
+          initialSettings: const AppSettings(language: 'ar'),
+        );
+        addTearDown(arStore.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: SettingsScope(
+                store: arStore,
+                child: Scaffold(
+                  body: FolderManagementSheet(
+                    repository: repository,
+                    scanService: scanService,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('مجلدات الموسيقى'), findsOneWidget);
+        expect(find.text('إضافة مجلد'), findsOneWidget);
+        expect(find.text('إعادة الفحص'), findsOneWidget);
+        expect(
+          find.text('لم تُضف مجلدات بعد. اضغط «إضافة مجلد» لفحص الموسيقى.'),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+
+        // Verify ArtistsView empty state in Arabic RTL
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: SettingsScope(
+                store: arStore,
+                child: Scaffold(
+                  body: ArtistsView(
+                    repository: repository,
+                    settingsStore: arStore,
+                    navigator: AppNavigator(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('لا يوجد فنانون في المكتبة'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        // Verify TracksView empty state in Arabic RTL
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: SettingsScope(
+                store: arStore,
+                child: Scaffold(
+                  body: TracksView(
+                    repository: repository,
+                    controller: controller,
+                    settingsStore: arStore,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('لا توجد أغاني في المكتبة'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

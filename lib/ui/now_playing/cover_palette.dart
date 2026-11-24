@@ -197,7 +197,14 @@ final LinkedHashMap<String, CoverPalette> _paletteLruCache =
     LinkedHashMap<String, CoverPalette>();
 
 /// Returns the cached or extracted [CoverPalette] for the given [coverKey].
-Future<CoverPalette> paletteForCover(String? coverKey) async {
+Future<CoverPalette> paletteForCover(
+  String? coverKey, {
+  Future<Codec> Function(
+    Uint8List list, {
+    int? targetWidth,
+    int? targetHeight,
+  })? codecDecoder,
+}) async {
   if (coverKey == null || !CoverCache.hasCover(coverKey)) {
     return CoverPalette.fallback;
   }
@@ -208,6 +215,8 @@ Future<CoverPalette> paletteForCover(String? coverKey) async {
     return cached;
   }
 
+  Codec? codec;
+  Image? image;
   try {
     final path = CoverCache.pathFor(coverKey);
     final file = File(path);
@@ -216,21 +225,23 @@ Future<CoverPalette> paletteForCover(String? coverKey) async {
     final bytes = await file.readAsBytes();
     if (bytes.isEmpty) return CoverPalette.fallback;
 
-    final codec = await instantiateImageCodec(
+    final decode = codecDecoder ?? instantiateImageCodec;
+    codec = await decode(
       bytes,
       targetWidth: 32,
       targetHeight: 32,
     );
     final frame = await codec.getNextFrame();
-    final byteData = await frame.image.toByteData(
+    image = frame.image;
+    final byteData = await image.toByteData(
       format: ImageByteFormat.rawRgba,
     );
     if (byteData == null) return CoverPalette.fallback;
 
     final palette = extractPalette(
       byteData.buffer.asUint8List(),
-      frame.image.width,
-      frame.image.height,
+      image.width,
+      image.height,
     );
 
     if (_paletteLruCache.length >= 32) {
@@ -241,6 +252,9 @@ Future<CoverPalette> paletteForCover(String? coverKey) async {
     return palette;
   } catch (_) {
     return CoverPalette.fallback;
+  } finally {
+    image?.dispose();
+    codec?.dispose();
   }
 }
 

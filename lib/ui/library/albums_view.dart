@@ -3,13 +3,16 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../library/album_identity.dart';
 import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../../library/text_normalizer.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
+import '../settings/settings_scope.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
@@ -45,6 +48,7 @@ class AlbumYearGroup {
 List<AlbumYearGroup> groupAlbumsByYear(
   List<AlbumSummary> albums, {
   bool reversed = false,
+  String Function(AlbumSummary)? artistResolver,
 }) {
   final byYear = <int, List<AlbumSummary>>{};
   final unknown = <AlbumSummary>[];
@@ -58,12 +62,13 @@ List<AlbumYearGroup> groupAlbumsByYear(
     }
   }
 
+  String resolveArtist(AlbumSummary album) =>
+      artistResolver?.call(album) ?? album.displayArtist ?? album.albumArtist ?? '';
+
   int compareWithinGroup(AlbumSummary a, AlbumSummary b) {
-    final artistA = (a.displayArtist ?? a.albumArtist ?? '').toLowerCase();
-    final artistB = (b.displayArtist ?? b.albumArtist ?? '').toLowerCase();
-    final artistCmp = artistA.compareTo(artistB);
+    final artistCmp = compareLocaleAware(resolveArtist(a), resolveArtist(b));
     if (artistCmp != 0) return artistCmp;
-    return a.album.toLowerCase().compareTo(b.album.toLowerCase());
+    return compareLocaleAware(a.album, b.album);
   }
 
   final years = byYear.keys.toList()
@@ -116,6 +121,7 @@ class _AlbumsViewState extends State<AlbumsView> {
   List<ArtistSummary> _rawArtists = [];
   Set<String> _selectedArtistKeys = const {};
   int _artistFilterRequestId = 0;
+  int _searchRequestId = 0;
   String _searchQuery = '';
   bool _isLoading = true;
   LibraryDataCache? _activeCache;
@@ -167,8 +173,78 @@ class _AlbumsViewState extends State<AlbumsView> {
           _isLoading = false;
         });
       }
+      if (_searchQuery.isNotEmpty) {
+        _refreshSearch();
+      }
     } else {
       _loadAlbums();
+    }
+  }
+
+  Future<void> _refreshSearch() async {
+    final query = _searchQuery;
+    if (query.isEmpty) return;
+    final reqId = ++_searchRequestId;
+    await _executeAlbumSearch(query, reqId);
+  }
+
+  Future<void> _executeAlbumSearch(String query, int reqId) async {
+    final nameStore = ArtistNameScope.maybeOf(context);
+    final settings =
+        SettingsScope.maybeOf(context)?.settings ?? widget.settingsStore.settings;
+    final expandedQueries =
+        (nameStore != null && settings.artistNameMode != 'asTagged')
+            ? nameStore.expandedSearchQueries(query)
+            : const <String>[];
+
+    final futures = <Future<List<AlbumSummary>>>[
+      widget.repository.searchAlbums(query),
+      for (final extra in expandedQueries) widget.repository.searchAlbums(extra),
+    ];
+
+    final resultLists = await Future.wait(futures);
+    if (!mounted || _searchRequestId != reqId || _searchQuery != query) {
+      return;
+    }
+
+    final merged = <AlbumSummary>[];
+    final seen = <String>{};
+    for (final list in resultLists) {
+      for (final album in list) {
+        if (seen.add(AlbumIdentity.forSummary(album))) {
+          merged.add(album);
+        }
+      }
+    }
+
+    if (nameStore != null && settings.artistNameMode != 'asTagged') {
+      final normQuery = TextNormalizer.normalize(query);
+      final terms = normQuery.split(' ').where((t) => t.isNotEmpty).toList();
+      if (terms.isNotEmpty) {
+        for (final album in _albums) {
+          final key = AlbumIdentity.forSummary(album);
+          if (seen.contains(key)) continue;
+          final rawArtist = album.displayArtist ?? album.albumArtist ?? '';
+          if (rawArtist.isEmpty) continue;
+          final displayed =
+              nameStore.displayArtist(rawArtist, settings: settings);
+          final entry = nameStore.getEntry(rawArtist);
+          if (displayed == rawArtist && entry == null) continue;
+          final normCombined = TextNormalizer.normalize(
+            '${album.album} $rawArtist $displayed ${entry?.ar ?? ''} ${entry?.en ?? ''}',
+          );
+          if (terms.every((t) => normCombined.contains(t))) {
+            seen.add(key);
+            merged.add(album);
+          }
+        }
+      }
+    }
+
+    if (!listEquals(_searchResults, merged)) {
+      setState(() {
+        _searchResults = merged;
+      });
     }
   }
 
@@ -230,23 +306,20 @@ class _AlbumsViewState extends State<AlbumsView> {
   }
 
   Future<void> _onSearchChanged(String query) async {
+    final trimmed = query.trim();
+    final reqId = ++_searchRequestId;
     setState(() {
-      _searchQuery = query.trim();
+      _searchQuery = trimmed;
+      if (trimmed.isEmpty) {
+        _searchResults = [];
+      }
     });
 
-    if (_searchQuery.isEmpty) {
-      setState(() {
-        _searchResults = [];
-      });
+    if (trimmed.isEmpty) {
       return;
     }
 
-    final results = await widget.repository.searchAlbums(_searchQuery);
-    if (mounted) {
-      setState(() {
-        _searchResults = results;
-      });
-    }
+    await _executeAlbumSearch(trimmed, reqId);
   }
 
   List<ArtistChipItem> _getArtistChips(BuildContext context) {
@@ -329,18 +402,25 @@ class _AlbumsViewState extends State<AlbumsView> {
     return items;
   }
 
-  List<AlbumSummary> _getSortedAlbums() {
+  List<AlbumSummary> _getSortedAlbums(BuildContext context) {
     List<AlbumSummary> base;
     if (_selectedArtistKeys.isNotEmpty) {
       base = _artistAlbums;
       if (_searchQuery.isNotEmpty) {
-        final q = _searchQuery.toLowerCase();
+        final normQuery = TextNormalizer.normalize(_searchQuery);
+        final terms =
+            normQuery.split(' ').where((t) => t.isNotEmpty).toList();
         base = base.where((a) {
-          final titleMatch = a.album.toLowerCase().contains(q);
-          final artistMatch = (a.displayArtist ?? a.albumArtist ?? '')
-              .toLowerCase()
-              .contains(q);
-          return titleMatch || artistMatch;
+          final displayedArtist =
+              context.displayArtist(a.displayArtist ?? a.albumArtist);
+          final rawArtist = a.displayArtist ?? a.albumArtist ?? '';
+          final nameStore = ArtistNameScope.maybeOf(context);
+          final entry =
+              rawArtist.isNotEmpty ? nameStore?.getEntry(rawArtist) : null;
+          final normCombined = TextNormalizer.normalize(
+            '${a.album} $displayedArtist $rawArtist ${a.albumArtist ?? ''} ${entry?.ar ?? ''} ${entry?.en ?? ''}',
+          );
+          return terms.every((t) => normCombined.contains(t));
         }).toList();
       }
     } else {
@@ -356,21 +436,31 @@ class _AlbumsViewState extends State<AlbumsView> {
       case 'title':
         list.sort((a, b) => compareLocaleAware(a.album, b.album));
       case 'artist':
-        list.sort((a, b) => compareLocaleAware(
-              a.displayArtist ?? a.albumArtist ?? '',
-              b.displayArtist ?? b.albumArtist ?? '',
-            ));
+        list.sort((a, b) {
+          final artistA =
+              context.displayArtist(a.displayArtist ?? a.albumArtist);
+          final artistB =
+              context.displayArtist(b.displayArtist ?? b.albumArtist);
+          final cmp = compareLocaleAware(artistA, artistB);
+          if (cmp != 0) return cmp;
+          return compareLocaleAware(a.album, b.album);
+        });
       case 'year':
         list.sort((a, b) => isReversed
             ? (b.year ?? 0).compareTo(a.year ?? 0)
             : (a.year ?? 0).compareTo(b.year ?? 0));
       case 'recentlyAdded':
       default:
-        // Keep natural repository order
-        break;
+        list.sort((a, b) {
+          final aMs = a.addedAt?.millisecondsSinceEpoch ?? 0;
+          final bMs = b.addedAt?.millisecondsSinceEpoch ?? 0;
+          final cmp = isReversed ? bMs.compareTo(aMs) : aMs.compareTo(bMs);
+          if (cmp != 0) return cmp;
+          return compareLocaleAware(a.album, b.album);
+        });
     }
 
-    if (isReversed && sortKey != 'year') {
+    if (isReversed && sortKey != 'year' && sortKey != 'recentlyAdded') {
       return list.reversed.toList();
     }
 
@@ -415,7 +505,7 @@ class _AlbumsViewState extends State<AlbumsView> {
       return AlbumsViewPlaceholder(settingsStore: widget.settingsStore);
     }
 
-    final sortedAlbums = _getSortedAlbums();
+    final sortedAlbums = _getSortedAlbums(context);
     final viewMode = widget.settingsStore.settings.libraryViewMode;
     final currentSort = widget.settingsStore.settings.albumSort;
     final isReversed = widget.settingsStore.settings.albumsSortReversed;
@@ -596,6 +686,7 @@ class _AlbumsViewState extends State<AlbumsView> {
       final groups = groupAlbumsByYear(
         albums,
         reversed: widget.settingsStore.settings.albumsSortReversed,
+        artistResolver: (a) => context.displayArtist(a.displayArtist ?? a.albumArtist),
       );
       return CustomScrollView(
         key: const Key('albums_year_grouped_scroll'),

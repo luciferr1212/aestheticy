@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/ui/l10n/app_strings.dart';
 
 /// Modal bottom sheet displaying active artist rules (merges and never-split entries).
 class ArtistRulesSheet extends StatefulWidget {
@@ -100,15 +101,15 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Artist Rules',
-                          style: TextStyle(
+                        Text(
+                          context.t('artistRules.title'),
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         Text(
-                          'Manage merges and never-split artist entries • by mido',
+                          '${context.t('artistRules.subtitle')} • ${context.t('app.credit')}',
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey.shade400,
@@ -133,9 +134,9 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                       padding: const EdgeInsets.all(16),
                       children: [
                         // Section: Merges
-                        const Text(
-                          'Merged Artists',
-                          style: TextStyle(
+                        Text(
+                          context.t('artistRules.mergedSection'),
+                          style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFFC3B1E1),
@@ -143,11 +144,11 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                         ),
                         const SizedBox(height: 6),
                         if (_aliases.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8.0),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
                             child: Text(
-                              'No merged artists.',
-                              style: TextStyle(
+                              context.t('artistRules.noMerged'),
+                              style: const TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey,
                               ),
@@ -167,7 +168,10 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                                   ),
                                 ),
                                 subtitle: Text(
-                                  'Merged into ${alias.canonicalName}',
+                                  context.t(
+                                    'artistRules.mergedInto',
+                                    args: {'name': alias.canonicalName},
+                                  ),
                                   style: const TextStyle(
                                     fontSize: 11,
                                     color: Colors.grey,
@@ -180,7 +184,9 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                                     size: 18,
                                     color: Colors.white70,
                                   ),
-                                  tooltip: 'Remove merge',
+                                  tooltip: context.t(
+                                    'artistRules.removeMergeTooltip',
+                                  ),
                                   onPressed: () => _removeAlias(alias.aliasKey),
                                 ),
                               ),
@@ -188,9 +194,9 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                           }),
                         const SizedBox(height: 18),
                         // Section: Never-Split
-                        const Text(
-                          'Never-Split Artists',
-                          style: TextStyle(
+                        Text(
+                          context.t('artistRules.neverSplitSection'),
+                          style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFFC3B1E1),
@@ -198,11 +204,11 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                         ),
                         const SizedBox(height: 6),
                         if (_noSplits.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8.0),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
                             child: Text(
-                              'No never-split rules.',
-                              style: TextStyle(
+                              context.t('artistRules.noNeverSplit'),
+                              style: const TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey,
                               ),
@@ -228,7 +234,9 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
                                     size: 18,
                                     color: Colors.white70,
                                   ),
-                                  tooltip: 'Remove rule',
+                                  tooltip: context.t(
+                                    'artistRules.removeRuleTooltip',
+                                  ),
                                   onPressed: () =>
                                       _removeNoSplit(entry.artistKey),
                                 ),

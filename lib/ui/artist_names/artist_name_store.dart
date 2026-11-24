@@ -143,6 +143,51 @@ class ArtistNameStore extends ChangeNotifier {
     return results;
   }
 
+  /// Returns original artist names and substituted queries derived from
+  /// display-only translation entries matching [query].
+  List<String> expandedSearchQueries(String query) {
+    final normQuery = TextNormalizer.normalize(query);
+    if (normQuery.isEmpty) return const [];
+
+    final queryTokens =
+        normQuery.split(' ').where((t) => t.isNotEmpty).toList();
+    final expanded = <String>{};
+
+    void checkField(String normField, String original) {
+      if (normField.isEmpty) return;
+      if (normField.contains(normQuery)) {
+        expanded.add(original);
+        return;
+      }
+      if (normQuery.contains(normField)) {
+        final replaced = normQuery.replaceAll(normField, original).trim();
+        if (replaced.isNotEmpty) expanded.add(replaced);
+        expanded.add(original);
+        return;
+      }
+      if (queryTokens.length > 1) {
+        final matchingTokens =
+            queryTokens.where((t) => normField.contains(t)).toList();
+        if (matchingTokens.isNotEmpty) {
+          var replaced = normQuery;
+          for (final token in matchingTokens) {
+            replaced = replaced.replaceAll(token, original);
+          }
+          final collapsed = replaced.replaceAll(RegExp(r'\s+'), ' ').trim();
+          if (collapsed.isNotEmpty) expanded.add(collapsed);
+        }
+      }
+    }
+
+    for (final entry in _entries.values) {
+      checkField(TextNormalizer.normalize(entry.ar), entry.original);
+      checkField(TextNormalizer.normalize(entry.en), entry.original);
+    }
+
+    expanded.removeWhere((q) => TextNormalizer.normalize(q) == normQuery);
+    return expanded.toList();
+  }
+
   /// Resolves the display artist name using current [AppSettings] mode and language.
   String displayArtist(
     String original, {

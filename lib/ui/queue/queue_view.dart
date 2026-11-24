@@ -138,10 +138,8 @@ class _QueueViewState extends State<QueueView> {
     );
 
     if (confirmed == true && mounted) {
-      await widget.controller.stop();
-      widget.controller.queue.clear();
-      widget.controller.notifyQueueChanged();
-      setState(() {});
+      await widget.controller.clearQueue();
+      if (mounted) setState(() {});
     }
   }
 

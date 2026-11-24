@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../library/library_repository.dart';
+import '../../library/library_scanner.dart';
 import '../../library/models.dart';
 import '../../library/scan_service.dart';
 
@@ -27,8 +28,13 @@ class LibraryDataCache extends ChangeNotifier {
   Set<String>? _mergedCanonicalKeys;
 
   bool _isRefreshing = false;
+  bool _pendingRefresh = false;
+  bool _pendingForceNotify = false;
   bool _disposed = false;
   bool _wasScanning = false;
+  int _lastLibraryVersion = 0;
+  int _revision = 0;
+  StreamSubscription<ScanProgress>? _progressSubscription;
 
   /// Creates a [LibraryDataCache].
   LibraryDataCache({
@@ -37,7 +43,13 @@ class LibraryDataCache extends ChangeNotifier {
   }) {
     if (scanService != null) {
       _wasScanning = scanService!.isScanning;
+      _lastLibraryVersion = scanService!.libraryVersion;
       scanService!.addListener(_onScanChanged);
+      _progressSubscription = scanService!.progressStream.listen((progress) {
+        if (progress.done && !_disposed) {
+          refresh(forceNotify: true);
+        }
+      });
     }
   }
 
@@ -56,6 +68,10 @@ class LibraryDataCache extends ChangeNotifier {
   /// Latest set of canonical merged artist keys.
   Set<String>? get mergedCanonicalKeys => _mergedCanonicalKeys;
 
+  /// Monotonically incremented revision counter for cache invalidation and
+  /// detail-view revalidation.
+  int get revision => _revision;
+
   /// Whether a background revalidation is in progress.
   bool get isRefreshing => _isRefreshing;
 
@@ -68,12 +84,18 @@ class LibraryDataCache extends ChangeNotifier {
       _albums != null && _artists != null && _tracks != null;
 
   void _onScanChanged() {
-    final scanning = scanService?.isScanning ?? false;
-    if (_wasScanning && !scanning) {
-      // Scan finished - invalidate and refresh lists
-      refresh();
-    }
+    final service = scanService;
+    if (service == null) return;
+    final scanning = service.isScanning;
+    final version = service.libraryVersion;
+    final scanFinished = _wasScanning && !scanning;
+    final versionChanged = version != _lastLibraryVersion;
     _wasScanning = scanning;
+    _lastLibraryVersion = version;
+    if (scanFinished || versionChanged) {
+      // Scan finished or folder added/removed - revalidate lists stale-while-revalidate.
+      refresh(forceNotify: true);
+    }
   }
 
   /// Seeds or updates the cache with explicit data (e.g. for testing).
@@ -91,15 +113,24 @@ class LibraryDataCache extends ChangeNotifier {
     if (mergedCanonicalKeys != null) {
       _mergedCanonicalKeys = Set.unmodifiable(mergedCanonicalKeys);
     }
+    _revision++;
     notifyListeners();
   }
 
-  /// Refreshes all cached library lists in the background.
+  /// Refreshes all cached library lists in the background without clearing
+  /// existing data (stale-while-revalidate).
   ///
-  /// Safe to call concurrently; only notifies listeners when data has changed
-  /// or upon initial load.
-  Future<void> refresh() async {
+  /// Concurrent calls are coalesced so a scan completion during an in-flight
+  /// refresh still triggers one trailing revalidation.
+  Future<void> refresh({bool forceNotify = false}) async {
     if (_disposed) return;
+    if (_isRefreshing) {
+      _pendingRefresh = true;
+      if (forceNotify) {
+        _pendingForceNotify = true;
+      }
+      return;
+    }
     _isRefreshing = true;
 
     try {
@@ -140,24 +171,35 @@ class LibraryDataCache extends ChangeNotifier {
       _recentTracks = newRecent;
       _mergedCanonicalKeys = newMergedKeys;
 
-      if (changed) {
+      if (changed || forceNotify) {
+        _revision++;
         notifyListeners();
       }
     } catch (_) {
       // Graceful error handling
     } finally {
       _isRefreshing = false;
+      if (_pendingRefresh && !_disposed) {
+        final followUpForce = _pendingForceNotify;
+        _pendingRefresh = false;
+        _pendingForceNotify = false;
+        await refresh(forceNotify: followUpForce);
+      } else {
+        _pendingRefresh = false;
+        _pendingForceNotify = false;
+      }
     }
   }
 
   /// Invalidate cache and trigger background revalidation.
   void invalidate() {
-    refresh();
+    refresh(forceNotify: true);
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _progressSubscription?.cancel();
     scanService?.removeListener(_onScanChanged);
     super.dispose();
   }

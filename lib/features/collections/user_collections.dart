@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 
@@ -309,6 +310,46 @@ class UserCollections extends ChangeNotifier {
   Future<void> refreshPlaylists() async {
     _playlists = await repository.listPlaylists();
     notifyListeners();
+  }
+
+  /// Revalidates favorites, ratings, and playlist summaries in memory without
+  /// clearing existing data first (stale-while-revalidate).
+  Future<void> refresh() async {
+    try {
+      final favTracks = await repository.favoriteTracks();
+      final favPaths = await repository.favoritePaths();
+      final rates = await repository.allRatings();
+      final pls = await repository.listPlaylists();
+
+      final changed = !_loaded ||
+          !listEquals(_favoriteTracks, favTracks) ||
+          !setEquals(_favorites, favPaths) ||
+          !mapEquals(_ratings, rates) ||
+          !listEquals(_playlists, pls);
+
+      _favoriteTracks
+        ..clear()
+        ..addAll(favTracks);
+      _favorites
+        ..clear()
+        ..addAll(favPaths);
+      _ratings
+        ..clear()
+        ..addAll(rates);
+      _playlists = pls;
+      _loaded = true;
+
+      if (changed) {
+        notifyListeners();
+      }
+    } catch (e, st) {
+      AppLogger.instance.warning(
+        'Collections',
+        'Failed to refresh user collections: $e',
+        e,
+        st,
+      );
+    }
   }
 }
 

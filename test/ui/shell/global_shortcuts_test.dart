@@ -9,6 +9,7 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/ui/glass/glass_button.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
@@ -180,6 +181,82 @@ void main() {
       // Playback must NOT toggle
       expect(controller.currentState, equals(PlaybackState.playing));
     });
+
+    testWidgets(
+      'S5: Space while GlassIconButton or GlassPillButton has focus does not trigger global play/pause',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 900);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await repository.addFolder('C:\\Music');
+        const track = AudioSource('file:///music/song.mp3');
+        await controller.playQueue([track], startIndex: 0);
+
+        await tester.pumpWidget(createTestApp());
+        await tester.pumpAndSettle();
+        navigator.navigateTo(AppDestination.settings);
+        await tester.pumpAndSettle();
+
+        expect(controller.currentState, equals(PlaybackState.playing));
+        expect(controller.queue.isShuffled, isFalse);
+
+        void focusButtonWidget(Finder buttonFinder) {
+          final target = find.descendant(
+            of: buttonFinder,
+            matching: find.byType(GestureDetector),
+          );
+          expect(target, findsWidgets);
+          Focus.of(tester.element(target.first)).requestFocus();
+        }
+
+        // 1. Focus a GlassIconButton (bottom bar shuffle button) and press Space
+        focusButtonWidget(find.byKey(const Key('bottom_bar_shuffle_button')));
+        await tester.pumpAndSettle();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pumpAndSettle();
+
+        // GlassIconButton handles activation, global play/pause must NOT toggle
+        expect(controller.currentState, equals(PlaybackState.playing));
+        expect(controller.queue.isShuffled, isTrue);
+
+        // 2. Navigate to Playlists and focus a GlassPillButton (New Playlist) -> Space must not toggle playback
+        navigator.navigateTo(AppDestination.playlists);
+        await tester.pumpAndSettle();
+
+        final pillBtnFinder = find.byKey(const Key('new_playlist_button'));
+        expect(pillBtnFinder, findsOneWidget);
+        expect(tester.widget(pillBtnFinder), isA<GlassPillButton>());
+        focusButtonWidget(pillBtnFinder);
+        await tester.pumpAndSettle();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pumpAndSettle();
+
+        // Global play/pause must STILL NOT toggle (instead the pill button opened the dialog)
+        expect(controller.currentState, equals(PlaybackState.playing));
+        expect(find.byType(AlertDialog), findsOneWidget);
+
+        // Close dialog, move focus back to AppShell's root Focus -> Space toggles pause normally
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        final shellScaffold = find.descendant(
+          of: find.byType(AppShell),
+          matching: find.byType(Scaffold),
+        );
+        Focus.of(tester.element(shellScaffold.first)).requestFocus();
+        await tester.pumpAndSettle();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.currentState, equals(PlaybackState.paused));
+      },
+    );
 
     testWidgets('Ctrl+Right, Ctrl+Left, Ctrl+Up, and Ctrl+Down act globally',
         timeout: const Timeout(Duration(seconds: 30)), (tester) async {

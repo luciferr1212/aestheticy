@@ -441,3 +441,17 @@ bool isAltModifierPressed() {
       HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.altLeft) ||
       HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.altRight);
 }
+
+/// Checks whether a Control modifier key is pressed.
+bool isCtrlModifierPressed() {
+  return HardwareKeyboard.instance.isControlPressed ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlRight);
+}
+
+/// Checks whether a Shift modifier key is pressed.
+bool isShiftModifierPressed() {
+  return HardwareKeyboard.instance.isShiftPressed ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+}

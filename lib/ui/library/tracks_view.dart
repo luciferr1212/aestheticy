@@ -48,6 +48,7 @@ class TracksView extends StatefulWidget {
 class _TracksViewState extends State<TracksView> {
   List<Track> _tracks = [];
   List<Track> _searchResults = [];
+  int _searchRequestId = 0;
   String _searchQuery = '';
   bool _isLoading = true;
   LibraryDataCache? _activeCache;
@@ -104,8 +105,31 @@ class _TracksViewState extends State<TracksView> {
           _isLoading = false;
         });
       }
+      if (_searchQuery.isNotEmpty) {
+        _refreshSearch();
+      }
     } else {
       _loadTracks();
+    }
+  }
+
+  Future<void> _refreshSearch() async {
+    final query = _searchQuery;
+    if (query.isEmpty) return;
+    final reqId = ++_searchRequestId;
+    final results = await widget.repository.search(query);
+    _applySort(
+      results,
+      widget.settingsStore.settings.trackSort,
+      widget.settingsStore.settings.tracksSortReversed,
+    );
+    if (mounted &&
+        _searchRequestId == reqId &&
+        _searchQuery == query &&
+        !listEquals(_searchResults, results)) {
+      setState(() {
+        _searchResults = results;
+      });
     }
   }
 
@@ -141,25 +165,27 @@ class _TracksViewState extends State<TracksView> {
   }
 
   Future<void> _onSearchChanged(String query) async {
+    final trimmed = query.trim();
+    final reqId = ++_searchRequestId;
     setState(() {
-      _searchQuery = query.trim();
+      _searchQuery = trimmed;
+      if (trimmed.isEmpty) {
+        _searchResults = [];
+      }
     });
 
-    if (_searchQuery.isEmpty) {
-      setState(() {
-        _searchResults = [];
-      });
+    if (trimmed.isEmpty) {
       return;
     }
 
-    final results = await widget.repository.search(_searchQuery);
+    final results = await widget.repository.search(trimmed);
     _applySort(
       results,
       widget.settingsStore.settings.trackSort,
       widget.settingsStore.settings.tracksSortReversed,
     );
 
-    if (mounted) {
+    if (mounted && _searchRequestId == reqId && _searchQuery == trimmed) {
       setState(() {
         _searchResults = results;
       });
@@ -273,8 +299,11 @@ class _TracksViewState extends State<TracksView> {
                       emptyPlaceholder: Center(
                         child: Text(
                           _searchQuery.isNotEmpty
-                              ? 'No tracks match "$_searchQuery"'
-                              : 'No tracks in library',
+                              ? context.t(
+                                  'tracks.emptySearch',
+                                  args: {'query': _searchQuery},
+                                )
+                              : context.t('tracks.emptyLibrary'),
                           style: AppTypography.body
                               .copyWith(color: AppColors.textMuted),
                         ),

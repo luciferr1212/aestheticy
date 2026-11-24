@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
+import 'saved_session.dart';
 import 'session_store.dart';
 
 /// Summarizes the outcome of a session restore operation.
@@ -70,10 +71,10 @@ Future<SessionRestoreResult> restoreSession({
 
   // Batched async existence checks (process in chunks of 50 to keep UI isolate responsive)
   const batchSize = 50;
-  final survivingSources = <AudioSource>[];
-  final survivingFlags = <bool>[];
+  final survivingItems = <SavedSessionItem>[];
   var droppedCount = 0;
   int? survivingCurrentIndex;
+  var savedCurrentSurvived = false;
 
   for (var i = 0; i < saved.queue.length; i += batchSize) {
     final batchEnd = min(i + batchSize, saved.queue.length);
@@ -89,14 +90,14 @@ Future<SessionRestoreResult> restoreSession({
 
       if (exists) {
         if (originalIndex == saved.currentIndex) {
-          survivingCurrentIndex = survivingSources.length;
+          survivingCurrentIndex = survivingItems.length;
+          savedCurrentSurvived = true;
         } else if (originalIndex > saved.currentIndex &&
             survivingCurrentIndex == null) {
           // If the current item was dropped, start at the next surviving item with position 0
-          survivingCurrentIndex = survivingSources.length;
+          survivingCurrentIndex = survivingItems.length;
         }
-        survivingSources.add(batch[j].toAudioSource());
-        survivingFlags.add(batch[j].isUserQueued);
+        survivingItems.add(batch[j]);
       } else {
         droppedCount++;
       }
@@ -104,7 +105,7 @@ Future<SessionRestoreResult> restoreSession({
     await Future<void>.delayed(Duration.zero);
   }
 
-  if (survivingSources.isEmpty) {
+  if (survivingItems.isEmpty) {
     return SessionRestoreResult(
       restoredCount: 0,
       droppedCount: droppedCount,
@@ -113,42 +114,75 @@ Future<SessionRestoreResult> restoreSession({
     );
   }
 
-  int targetIndex = -1;
-  if (saved.currentUri != null && saved.currentUri!.isNotEmpty) {
-    targetIndex = survivingSources.indexWhere((s) => s.uri == saved.currentUri);
-  }
-  if (targetIndex < 0) {
-    targetIndex = survivingCurrentIndex ?? 0;
+  final restoredEntries = <QueueEntry>[];
+  final usedEntryIds = <int>{};
+  for (final item in survivingItems) {
+    final savedId = item.entryId;
+    if (savedId != null && usedEntryIds.add(savedId)) {
+      restoredEntries.add(
+        QueueEntry(
+          id: savedId,
+          source: item.toAudioSource(),
+          isUserQueued: item.isUserQueued,
+        ),
+      );
+    } else {
+      final created = controller.queue.createEntry(
+        item.toAudioSource(),
+        isUserQueued: item.isUserQueued,
+      );
+      usedEntryIds.add(created.id);
+      restoredEntries.add(created);
+    }
   }
 
-  final originalItemSurvived = targetIndex >= 0 &&
-      targetIndex < survivingSources.length &&
-      ((saved.currentUri != null &&
-              survivingSources[targetIndex].uri == saved.currentUri) ||
-          (survivingCurrentIndex != null &&
-              saved.currentIndex < saved.queue.length &&
-              survivingSources[targetIndex].uri ==
-                  saved.queue[saved.currentIndex].uri));
+  int targetIndex = -1;
+  bool originalItemSurvived = false;
+
+  if (saved.currentEntryId != null) {
+    final byId = restoredEntries.indexWhere((e) => e.id == saved.currentEntryId);
+    if (byId >= 0) {
+      targetIndex = byId;
+      originalItemSurvived = true;
+    } else {
+      targetIndex = survivingCurrentIndex ?? 0;
+      originalItemSurvived = false;
+    }
+  } else if (savedCurrentSurvived && survivingCurrentIndex != null) {
+    targetIndex = survivingCurrentIndex;
+    originalItemSurvived = saved.currentUri == null ||
+        saved.currentUri!.isEmpty ||
+        restoredEntries[targetIndex].source.uri == saved.currentUri;
+  } else {
+    if (saved.currentUri != null && saved.currentUri!.isNotEmpty) {
+      targetIndex =
+          restoredEntries.indexWhere((e) => e.source.uri == saved.currentUri);
+    }
+    if (targetIndex < 0) {
+      targetIndex = survivingCurrentIndex ?? 0;
+    }
+    originalItemSurvived = targetIndex >= 0 &&
+        targetIndex < restoredEntries.length &&
+        saved.currentUri != null &&
+        restoredEntries[targetIndex].source.uri == saved.currentUri;
+  }
 
   final targetPositionMs = originalItemSurvived ? saved.positionMs : 0;
 
-  // Rebuild the queue with PlaybackQueue.replaceAll(startIndex) without opening engine or playing
-  controller.queue.replaceAll(
-    survivingSources,
-    startIndex: targetIndex,
-    userQueuedFlags: survivingFlags,
+  // Restore exact saved order, entry identities, shuffle flag, and repeat mode without re-shuffling.
+  controller.restoreQueueSnapshot(
+    entries: restoredEntries,
+    currentIndex: targetIndex,
+    shuffled: saved.shuffle,
+    repeatMode: saved.repeatModeEnum,
   );
-  controller.queue.repeatMode = saved.repeatModeEnum;
-  if (saved.shuffle != controller.queue.isShuffled) {
-    controller.queue.setShuffle(saved.shuffle);
-  }
 
   if (targetPositionMs > 0) {
     controller.armResume(Duration(milliseconds: targetPositionMs));
   }
 
   return SessionRestoreResult(
-    restoredCount: survivingSources.length,
+    restoredCount: restoredEntries.length,
     droppedCount: droppedCount,
     restoredIndex: targetIndex,
     armedPositionMs: targetPositionMs,

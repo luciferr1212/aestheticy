@@ -114,36 +114,91 @@ class PlaybackQueue {
     _rebuildOrder(prevEntryId: curId);
   }
 
+  /// Returns the index in active playback order of the entry with [entryId], or `-1`.
+  int indexOfEntryId(int entryId) {
+    for (var i = 0; i < _order.length; i++) {
+      if (_entries[_order[i]].id == entryId) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /// Removes the entry with [entryId] while keeping the active cursor on the
+  /// current entry (or advancing to the next surviving item if current was removed).
+  bool removeById(int entryId) {
+    return removeByIds([entryId]) > 0;
+  }
+
+  /// Removes all entries matching [entryIds] in one atomic step, preserving
+  /// active order and keeping the current-entry pointer accurate.
+  int removeByIds(Iterable<int> entryIds) {
+    final idsSet = entryIds.toSet();
+    if (idsSet.isEmpty || _entries.isEmpty) return 0;
+
+    final existingMatchCount =
+        _entries.where((e) => idsSet.contains(e.id)).length;
+    if (existingMatchCount == 0) return 0;
+
+    final oldCurId = currentEntry?.id;
+    final oldCurOrderIdx = _orderIndex;
+
+    int? targetCurId;
+    if (oldCurId != null && !idsSet.contains(oldCurId)) {
+      targetCurId = oldCurId;
+    } else if (oldCurOrderIdx >= 0 && oldCurOrderIdx < _order.length) {
+      for (var i = oldCurOrderIdx + 1; i < _order.length; i++) {
+        final candidateId = _entries[_order[i]].id;
+        if (!idsSet.contains(candidateId)) {
+          targetCurId = candidateId;
+          break;
+        }
+      }
+      if (targetCurId == null) {
+        for (var i = oldCurOrderIdx - 1; i >= 0; i--) {
+          final candidateId = _entries[_order[i]].id;
+          if (!idsSet.contains(candidateId)) {
+            targetCurId = candidateId;
+            break;
+          }
+        }
+      }
+    }
+
+    final survivingOrderIds = <int>[
+      for (final origIdx in _order)
+        if (!idsSet.contains(_entries[origIdx].id)) _entries[origIdx].id,
+    ];
+
+    _entries.removeWhere((e) => idsSet.contains(e.id));
+    if (_entries.isEmpty) {
+      _order = [];
+      _orderIndex = -1;
+      return existingMatchCount;
+    }
+
+    final idToOrigIdx = <int, int>{
+      for (var i = 0; i < _entries.length; i++) _entries[i].id: i,
+    };
+    _order = [for (final id in survivingOrderIds) idToOrigIdx[id]!];
+
+    if (targetCurId != null) {
+      final newOrderIdx = survivingOrderIds.indexOf(targetCurId);
+      _orderIndex = newOrderIdx >= 0 ? newOrderIdx : 0;
+    } else {
+      _orderIndex = 0;
+    }
+
+    return existingMatchCount;
+  }
+
   /// Removes the item at [index] in active playback order.
   ///
   /// If the removed item is the current one, the cursor stays at the
   /// same order position (or moves to the last valid one).
   void remove(int index) {
     if (index < 0 || index >= _order.length) return;
-    final wasCurrent = _orderIndex == index;
-    final originalIdx = _order.removeAt(index);
-
-    _entries.removeAt(originalIdx);
-
-    if (_entries.isEmpty) {
-      _order = [];
-      _orderIndex = -1;
-      return;
-    }
-
-    for (var i = 0; i < _order.length; i++) {
-      if (_order[i] > originalIdx) {
-        _order[i]--;
-      }
-    }
-
-    if (wasCurrent) {
-      _orderIndex = index.clamp(0, _order.length - 1);
-    } else if (index < _orderIndex) {
-      _orderIndex--;
-    } else if (_orderIndex >= _order.length) {
-      _orderIndex = _order.length - 1;
-    }
+    removeById(_entries[_order[index]].id);
   }
 
   /// Moves the item at [from] to [to] in active playback order.
@@ -201,12 +256,42 @@ class PlaybackQueue {
   void replaceAllEntries(List<QueueEntry> entries, {int startIndex = 0}) {
     _entries.clear();
     _entries.addAll(entries);
+    for (final entry in entries) {
+      if (entry.id >= _nextEntryId) {
+        _nextEntryId = entry.id + 1;
+      }
+    }
     _shuffled = false;
     _order = List<int>.generate(_entries.length, (i) => i);
     if (_entries.isEmpty) {
       _orderIndex = -1;
     } else {
       _orderIndex = startIndex.clamp(0, _entries.length - 1);
+    }
+  }
+
+  /// Restores a persisted queue snapshot with exact [entries] order,
+  /// [currentIndex], [shuffled] flag, and [repeatMode] without re-shuffling.
+  void restoreSnapshot({
+    required List<QueueEntry> entries,
+    int currentIndex = 0,
+    bool shuffled = false,
+    RepeatMode repeatMode = RepeatMode.off,
+  }) {
+    _entries.clear();
+    _entries.addAll(entries);
+    for (final entry in entries) {
+      if (entry.id >= _nextEntryId) {
+        _nextEntryId = entry.id + 1;
+      }
+    }
+    _order = List<int>.generate(_entries.length, (i) => i);
+    _shuffled = shuffled;
+    this.repeatMode = repeatMode;
+    if (_entries.isEmpty) {
+      _orderIndex = -1;
+    } else {
+      _orderIndex = currentIndex.clamp(0, _entries.length - 1);
     }
   }
 

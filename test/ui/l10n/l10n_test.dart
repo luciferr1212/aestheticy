@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -232,6 +234,60 @@ void main() {
         store.dispose();
         controller.dispose();
       }
+    });
+
+    test('KEY COVERAGE TEST: every static AppStrings lookup in lib/ exists in en and ar', () {
+      // Explicitly verify the three newly restored keys in both languages.
+      for (final requiredKey in const [
+        'artists.albumsAndTracks',
+        'common.save',
+        'miniPlayer.enterTooltip',
+      ]) {
+        expect(AppStrings.en[requiredKey], isNotNull);
+        expect(AppStrings.en[requiredKey]!.trim(), isNotEmpty);
+        expect(AppStrings.ar[requiredKey], isNotNull);
+        expect(AppStrings.ar[requiredKey]!.trim(), isNotEmpty);
+      }
+
+      final libDir = Directory('lib');
+      expect(libDir.existsSync(), isTrue);
+
+      // Matches .t('key') or AppStrings.t('key') across single and multi-line calls.
+      final lookupPattern = RegExp(
+        r'''\b(?:\w+\.)?t\(\s*['"]([a-zA-Z0-9_.\-]+)['"]''',
+        multiLine: true,
+      );
+
+      final missingInEn = <String, List<String>>{};
+      final missingInAr = <String, List<String>>{};
+
+      for (final entity in libDir.listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        final normalizedPath = entity.path.replaceAll('\\', '/');
+        if (normalizedPath.endsWith('/app_strings.dart')) continue;
+
+        final content = entity.readAsStringSync();
+        for (final match in lookupPattern.allMatches(content)) {
+          final key = match.group(1)!;
+          if (!AppStrings.en.containsKey(key) || AppStrings.en[key]!.isEmpty) {
+            missingInEn.putIfAbsent(key, () => []).add(normalizedPath);
+          }
+          if (!AppStrings.ar.containsKey(key) || AppStrings.ar[key]!.isEmpty) {
+            missingInAr.putIfAbsent(key, () => []).add(normalizedPath);
+          }
+        }
+      }
+
+      expect(
+        missingInEn,
+        isEmpty,
+        reason: 'AppStrings keys used in lib/ but missing in en: $missingInEn',
+      );
+      expect(
+        missingInAr,
+        isEmpty,
+        reason: 'AppStrings keys used in lib/ but missing in ar: $missingInAr',
+      );
     });
   });
 }

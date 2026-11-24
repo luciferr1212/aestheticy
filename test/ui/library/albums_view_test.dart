@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/library/albums_view.dart';
@@ -138,6 +139,7 @@ void main() {
         initialSettings: const AppSettings(
           language: 'en',
           albumSort: 'year',
+          albumsSortReversed: false,
           libraryViewMode: 'square',
         ),
       );
@@ -877,6 +879,193 @@ void main() {
 
         expect(find.text('Aurora'), findsOneWidget);
         expect(tester.takeException(), isNull);
+      },
+    );
+  });
+
+  group('AlbumsView Recently Added Sort Tests (S2)', () {
+    late Directory tempDir;
+    late SqliteLibraryRepository repo;
+    late SettingsStore settingsStore;
+    late ArtistNameStore artistNameStore;
+    late AppNavigator navigator;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('aestheticy_albums_s2_');
+      repo = SqliteLibraryRepository.inMemory();
+      settingsStore = SettingsStore(
+        directory: tempDir,
+        initialSettings: const AppSettings(
+          language: 'en',
+          libraryViewMode: 'list',
+        ),
+      );
+      await settingsStore.init();
+      artistNameStore = ArtistNameStore(directory: tempDir);
+      await artistNameStore.init();
+      navigator = AppNavigator();
+    });
+
+    tearDown(() async {
+      await repo.close();
+      settingsStore.dispose();
+      artistNameStore.dispose();
+      if (tempDir.existsSync()) {
+        try {
+          await tempDir.delete(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    test('SqliteLibraryRepository.listAlbums computes addedAt as newest track addedAt per album', () async {
+      final folder = await repo.addFolder('C:\\Music\\S2');
+      await repo.upsertTracks([
+        Track(
+          path: 'C:\\Music\\S2\\a1.mp3',
+          folderId: folder.id!,
+          title: 'Old Alpha 1',
+          artist: 'Artist A',
+          album: 'Alpha Album',
+          durationMs: 120000,
+          mtimeMs: 1,
+          sizeBytes: 100,
+          addedAt: DateTime.utc(2026, 1, 1),
+        ),
+        Track(
+          path: 'C:\\Music\\S2\\a2.mp3',
+          folderId: folder.id!,
+          title: 'Old Alpha 2',
+          artist: 'Artist A',
+          album: 'Alpha Album',
+          durationMs: 120000,
+          mtimeMs: 1,
+          sizeBytes: 100,
+          addedAt: DateTime.utc(2026, 1, 5),
+        ),
+        Track(
+          path: 'C:\\Music\\S2\\z1.mp3',
+          folderId: folder.id!,
+          title: 'Newest Zebra',
+          artist: 'Artist Z',
+          album: 'Zebra Album',
+          durationMs: 120000,
+          mtimeMs: 1,
+          sizeBytes: 100,
+          addedAt: DateTime.utc(2026, 3, 10),
+        ),
+      ]);
+
+      final albums = await repo.listAlbums();
+      final alpha = albums.firstWhere((a) => a.album == 'Alpha Album');
+      final zebra = albums.firstWhere((a) => a.album == 'Zebra Album');
+
+      expect(alpha.addedAt, equals(DateTime.utc(2026, 1, 5)));
+      expect(zebra.addedAt, equals(DateTime.utc(2026, 3, 10)));
+    });
+
+    testWidgets(
+      'defaults to recentlyAdded newest first (not alphabetical) and direction button reverses to oldest first',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final folder = await repo.addFolder('C:\\Music\\S2UI');
+        await repo.upsertTracks([
+          Track(
+            path: 'C:\\Music\\S2UI\\alpha.mp3',
+            folderId: folder.id!,
+            title: 'Alpha Song',
+            artist: 'Artist A',
+            album: 'Alpha Oldest',
+            durationMs: 120000,
+            mtimeMs: 1,
+            sizeBytes: 100,
+            addedAt: DateTime.utc(2026, 1, 1),
+          ),
+          Track(
+            path: 'C:\\Music\\S2UI\\mid.mp3',
+            folderId: folder.id!,
+            title: 'Mid Song',
+            artist: 'Artist M',
+            album: 'Mango Middle',
+            durationMs: 120000,
+            mtimeMs: 1,
+            sizeBytes: 100,
+            addedAt: DateTime.utc(2026, 2, 1),
+          ),
+          Track(
+            path: 'C:\\Music\\S2UI\\zebra.mp3',
+            folderId: folder.id!,
+            title: 'Zebra Song',
+            artist: 'Artist Z',
+            album: 'Zebra Newest',
+            durationMs: 120000,
+            mtimeMs: 1,
+            sizeBytes: 100,
+            addedAt: DateTime.utc(2026, 3, 1),
+          ),
+        ]);
+
+        expect(settingsStore.settings.albumSort, equals('recentlyAdded'));
+        expect(settingsStore.settings.albumsSortReversed, isTrue);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: buildAppTheme(),
+            home: SettingsScope(
+              store: settingsStore,
+              child: ArtistNameScope(
+                store: artistNameStore,
+                child: Scaffold(
+                  body: AlbumsView(
+                    repository: repo,
+                    settingsStore: settingsStore,
+                    navigator: navigator,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final alphaFinder = find.text('Alpha Oldest');
+        final mangoFinder = find.text('Mango Middle');
+        final zebraFinder = find.text('Zebra Newest');
+
+        // Newest first (descending): Zebra Newest -> Mango Middle -> Alpha Oldest
+        expect(tester.getTopLeft(zebraFinder).dy, lessThan(tester.getTopLeft(mangoFinder).dy));
+        expect(tester.getTopLeft(mangoFinder).dy, lessThan(tester.getTopLeft(alphaFinder).dy));
+
+        // Toggle SortDirectionButton -> oldest first (ascending)
+        await tester.tap(find.byKey(const Key('albums_sort_direction')));
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumsSortReversed, isFalse);
+
+        expect(tester.getTopLeft(alphaFinder).dy, lessThan(tester.getTopLeft(mangoFinder).dy));
+        expect(tester.getTopLeft(mangoFinder).dy, lessThan(tester.getTopLeft(zebraFinder).dy));
+
+        // Switch sort to title, then back to recentlyAdded -> newest-first default restored
+        await tester.tap(find.byKey(const Key('sort_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Title').last);
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumSort, equals('title'));
+        expect(settingsStore.settings.albumsSortReversed, isFalse);
+
+        await tester.tap(find.byKey(const Key('sort_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Recently added').last);
+        await tester.pumpAndSettle();
+        expect(settingsStore.settings.albumSort, equals('recentlyAdded'));
+        expect(settingsStore.settings.albumsSortReversed, isTrue);
+        expect(tester.getTopLeft(zebraFinder).dy, lessThan(tester.getTopLeft(alphaFinder).dy));
       },
     );
   });

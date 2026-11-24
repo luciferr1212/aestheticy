@@ -182,7 +182,7 @@ class AppSettings {
     this.artistsViewMode = 'circle',
     this.playlistsViewMode = 'square',
     this.albumSort = 'recentlyAdded',
-    this.albumsSortReversed = false,
+    this.albumsSortReversed = true,
     this.trackSort = 'title',
     this.tracksSortReversed = false,
     this.artistsSort = 'name',
@@ -512,8 +512,9 @@ class AppSettings {
         : 'recentlyAdded';
 
     final rawAlbumsReversed = json['albumsSortReversed'];
-    final albumsSortReversed =
-        rawAlbumsReversed is bool ? rawAlbumsReversed : false;
+    final albumsSortReversed = rawAlbumsReversed is bool
+        ? rawAlbumsReversed
+        : (albumSort == 'recentlyAdded' || albumSort == 'year');
 
     final rawTrackSort = json['trackSort'];
     final trackSort = (rawTrackSort is String &&

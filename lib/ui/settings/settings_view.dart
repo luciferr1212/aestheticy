@@ -12,6 +12,8 @@ import '../../library/library_repository.dart';
 import '../../library/migrations.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../artist_names/artist_name_store.dart';
+import '../audio_panels/eq_controller.dart';
+import '../audio_panels/eq_scope.dart';
 import '../glass/glass_button.dart';
 import '../glass/glass_quality.dart';
 import '../glass/glass_surface.dart';
@@ -24,6 +26,7 @@ import '../theme/app_typography.dart';
 import '../theme/font_manager.dart';
 import 'app_settings.dart';
 import 'app_shortcuts.dart';
+import 'artist_name_translations_panel.dart';
 import 'audio_settings_applier.dart';
 import 'settings_store.dart';
 import 'shortcuts_cheat_sheet_dialog.dart';
@@ -48,6 +51,9 @@ class SettingsView extends StatefulWidget {
   /// Artist display names store.
   final ArtistNameStore? artistNameStore;
 
+  /// Optional EQ controller to reflect real EQ enabled state.
+  final EqController? eqController;
+
   /// Optional callback to open folder management sheet directly.
   final VoidCallback? onOpenFolders;
 
@@ -69,6 +75,7 @@ class SettingsView extends StatefulWidget {
     required this.navigator,
     this.audioSettingsApplier,
     this.artistNameStore,
+    this.eqController,
     this.onOpenFolders,
     this.isWindowsOverride,
     this.trayWindowController,
@@ -555,61 +562,8 @@ class _SettingsViewState extends State<SettingsView> {
         ),
         const SizedBox(height: 16),
 
-        // Virtualized entries / suggestions list capped at 200
-        if (nameStore != null) ...[
-          ListenableBuilder(
-            listenable: nameStore,
-            builder: (context, _) {
-              final allEntries = nameStore.entries;
-              final cappedEntries = allEntries.take(200).toList();
-
-              if (cappedEntries.isEmpty) {
-                return const SizedBox.shrink();
-              }
-
-              return SizedBox(
-                height: 180,
-                child: ListView.builder(
-                  itemCount: cappedEntries.length,
-                  itemExtent: 44.0,
-                  itemBuilder: (context, index) {
-                    final entry = cappedEntries[index];
-                    return Container(
-                      margin: const EdgeInsets.symmetric(vertical: 2),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.fillControl,
-                        borderRadius: BorderRadius.circular(AppSpacing.r10),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              entry.original,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTypography.body,
-                            ),
-                          ),
-                          if (entry.ar.isNotEmpty) ...[
-                            const SizedBox(width: 12),
-                            Text(
-                              entry.ar,
-                              style: AppTypography.body.copyWith(
-                                color: AppColors.accent,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-        ],
+        if (nameStore != null)
+          ArtistNameTranslationsPanel(nameStore: nameStore),
       ],
     );
   }
@@ -1352,6 +1306,10 @@ class _SettingsViewState extends State<SettingsView> {
               try {
                 final messenger = ScaffoldMessenger.of(context);
                 final copiedText = context.t('settings.diagnosticsCopied');
+                final eqEnabled =
+                    (widget.eqController ?? EqScope.maybeOf(context))
+                        ?.enabled ??
+                    widget.engine.isEqEnabled;
                 final logLines =
                     await AppLogger.instance.readRecentLines(limit: 100);
                 final activeDevice = widget.engine.devices.firstWhere(
@@ -1366,7 +1324,7 @@ class _SettingsViewState extends State<SettingsView> {
                   capabilities: widget.engine.capabilities,
                   outputDeviceName: activeDevice.name,
                   exclusiveMode: settings.exclusiveMode,
-                  eqEnabled: false,
+                  eqEnabled: eqEnabled,
                   replayGainMode: switch (settings.replayGainMode) {
                     'track' => ReplayGainMode.track,
                     'album' => ReplayGainMode.album,

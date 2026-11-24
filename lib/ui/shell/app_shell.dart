@@ -8,6 +8,7 @@ import '../../audio/audio_engine.dart';
 import '../../audio/playback_controller.dart';
 import '../../features/audio_lab/audio_lab_screen.dart';
 import '../../features/library/folder_management_sheet.dart';
+import '../../library/album_identity.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../features/collections/user_collections.dart';
@@ -149,6 +150,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _needsMaximizeRestore = false;
   bool _isSyncingFullScreen = false;
   bool _fullScreenSyncRequested = false;
+  int _lastLibraryVersion = 0;
 
   @override
   void initState() {
@@ -165,6 +167,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _createdDataCacheLocally = true;
       unawaited(_dataCache.refresh());
     }
+    _lastLibraryVersion = widget.scanService.libraryVersion;
     if (widget.lyricsController != null) {
       _lyricsController = widget.lyricsController!;
     } else {
@@ -188,6 +191,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!_userCollections.isLoaded) {
       _userCollections.init();
     }
+    _dataCache.addListener(_onDataCacheChanged);
     _loadFolders();
     widget.navigator.addListener(_onNavigatorChange);
     widget.scanService.addListener(_onScanChange);
@@ -258,6 +262,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
     }
+    _dataCache.removeListener(_onDataCacheChanged);
     if (_createdDataCacheLocally) {
       _dataCache.dispose();
     }
@@ -350,8 +355,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  void _onDataCacheChanged() {
+    if (!mounted) return;
+    unawaited(_userCollections.refresh());
+  }
+
   void _onScanChange() {
-    if (!widget.scanService.isScanning) {
+    final currentVersion = widget.scanService.libraryVersion;
+    if (!widget.scanService.isScanning ||
+        currentVersion != _lastLibraryVersion) {
+      _lastLibraryVersion = currentVersion;
       _loadFolders();
     }
   }
@@ -441,12 +454,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               trackCount: 0,
             );
         return AlbumDetailView(
-          key: ValueKey('view_album_detail_${album.album}'),
+          key: ValueKey(
+            'view_album_detail_${AlbumIdentity.forSummary(album)}',
+          ),
           album: album,
           repository: widget.repository,
           controller: widget.controller,
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
+          dataCache: _dataCache,
         );
       case AppDestination.artistDetail:
         final artist = widget.navigator.selectedArtist ??
@@ -462,6 +478,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           controller: widget.controller,
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
+          dataCache: _dataCache,
         );
       case AppDestination.audioLab:
         return AudioLabScreen(
@@ -478,6 +495,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           navigator: widget.navigator,
           audioSettingsApplier: widget.audioSettingsApplier,
           artistNameStore: widget.artistNameStore,
+          eqController: widget.eqController,
           onOpenFolders: _openFolders,
           trayWindowController: widget.trayWindowController,
         );
@@ -498,6 +516,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           controller: widget.controller,
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
+          dataCache: _dataCache,
         );
       case AppDestination.playlistDetail:
         final playlistId = widget.navigator.selectedPlaylistId ?? 0;
@@ -511,6 +530,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           controller: widget.controller,
           settingsStore: widget.settingsStore,
           navigator: widget.navigator,
+          dataCache: _dataCache,
         );
       case AppDestination.favorites:
         return FavoritesView(
@@ -519,6 +539,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           collections: _userCollections,
           controller: widget.controller,
           settingsStore: widget.settingsStore,
+          dataCache: _dataCache,
         );
       case AppDestination.recentlyPlayed:
         return RecentlyPlayedView(

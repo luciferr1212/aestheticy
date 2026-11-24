@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,63 @@ import 'package:path/path.dart' as p;
 
 import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/ui/now_playing/cover_palette.dart';
+
+class _TrackingImage extends Fake implements ui.Image {
+  final Future<ByteData?> Function()? onToByteData;
+  int disposeCount = 0;
+
+  _TrackingImage({this.onToByteData});
+
+  @override
+  int get width => 2;
+
+  @override
+  int get height => 2;
+
+  @override
+  Future<ByteData?> toByteData({
+    ui.ImageByteFormat format = ui.ImageByteFormat.rawRgba,
+  }) async {
+    if (onToByteData != null) {
+      return onToByteData!();
+    }
+    final bytes = Uint8List(width * height * 4);
+    for (int i = 0; i < bytes.length; i += 4) {
+      bytes[i] = 180;
+      bytes[i + 1] = 60;
+      bytes[i + 2] = 60;
+      bytes[i + 3] = 255;
+    }
+    return ByteData.view(bytes.buffer);
+  }
+
+  @override
+  void dispose() {
+    disposeCount++;
+  }
+}
+
+class _TrackingFrameInfo extends Fake implements ui.FrameInfo {
+  @override
+  final ui.Image image;
+
+  _TrackingFrameInfo(this.image);
+}
+
+class _TrackingCodec extends Fake implements ui.Codec {
+  final Future<ui.FrameInfo> Function() onGetNextFrame;
+  int disposeCount = 0;
+
+  _TrackingCodec(this.onGetNextFrame);
+
+  @override
+  Future<ui.FrameInfo> getNextFrame() => onGetNextFrame();
+
+  @override
+  void dispose() {
+    disposeCount++;
+  }
+}
 
 void main() {
   group('CoverPalette Tests', () {
@@ -156,6 +214,52 @@ void main() {
           await tempDir.delete(recursive: true);
         }
       }
+    });
+
+    test('paletteForCover disposes image and codec in finally block across success, null ByteData, and errors', () async {
+      // Write a non-empty dummy cover file for three distinct keys
+      final fileOk = File(CoverCache.pathFor('dispose_ok'))
+        ..writeAsBytesSync(const [1, 2, 3]);
+      final fileNull = File(CoverCache.pathFor('dispose_null'))
+        ..writeAsBytesSync(const [1, 2, 3]);
+      final fileErr = File(CoverCache.pathFor('dispose_err'))
+        ..writeAsBytesSync(const [1, 2, 3]);
+      expect(fileOk.existsSync() && fileNull.existsSync() && fileErr.existsSync(), isTrue);
+
+      // 1. Success path
+      final okImage = _TrackingImage();
+      final okCodec = _TrackingCodec(() async => _TrackingFrameInfo(okImage));
+      final okPalette = await paletteForCover(
+        'dispose_ok',
+        codecDecoder: (bytes, {targetWidth, targetHeight}) async => okCodec,
+      );
+      expect(okPalette, isNot(equals(CoverPalette.fallback)));
+      expect(okImage.disposeCount, equals(1));
+      expect(okCodec.disposeCount, equals(1));
+
+      // 2. Null ByteData path
+      final nullImage = _TrackingImage(onToByteData: () async => null);
+      final nullCodec = _TrackingCodec(() async => _TrackingFrameInfo(nullImage));
+      final nullPalette = await paletteForCover(
+        'dispose_null',
+        codecDecoder: (bytes, {targetWidth, targetHeight}) async => nullCodec,
+      );
+      expect(nullPalette, equals(CoverPalette.fallback));
+      expect(nullImage.disposeCount, equals(1));
+      expect(nullCodec.disposeCount, equals(1));
+
+      // 3. Exception thrown inside toByteData
+      final errImage = _TrackingImage(
+        onToByteData: () async => throw StateError('decode boom'),
+      );
+      final errCodec = _TrackingCodec(() async => _TrackingFrameInfo(errImage));
+      final errPalette = await paletteForCover(
+        'dispose_err',
+        codecDecoder: (bytes, {targetWidth, targetHeight}) async => errCodec,
+      );
+      expect(errPalette, equals(CoverPalette.fallback));
+      expect(errImage.disposeCount, equals(1));
+      expect(errCodec.disposeCount, equals(1));
     });
   });
 }

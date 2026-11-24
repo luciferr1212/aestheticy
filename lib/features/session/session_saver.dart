@@ -139,6 +139,7 @@ class SessionSaver {
 
     final queueItems = controller.queue.entries.map((entry) {
       return SavedSessionItem(
+        entryId: entry.id,
         uri: entry.source.uri,
         extras: entry.source.extras,
         isUserQueued: entry.isUserQueued,
@@ -150,6 +151,7 @@ class SessionSaver {
       currentIndex: controller.queue.currentIndex >= 0
           ? controller.queue.currentIndex
           : 0,
+      currentEntryId: controller.queue.currentEntry?.id,
       currentUri: currentTrack?.uri,
       positionMs: _lastPosition.inMilliseconds,
       shuffle: controller.queue.isShuffled,

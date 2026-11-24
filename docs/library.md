@@ -286,25 +286,28 @@ The `UserCollections` controller (`lib/features/collections/user_collections.dar
 
 The `M3u` subsystem (`lib/features/collections/m3u.dart`) provides robust playlist interoperability:
 
-### Export (`M3u.exportPlaylist` / `buildM3u`)
+### Export (`M3u.exportPlaylist` / `buildM3u` / `validateExportTarget` / `writeM3uAtomically`)
 - Writes extended M3U format (`#EXTM3U`, `#PLAYLIST:<name>`, `#EXTINF:<seconds>,<Artist> - <Title>`).
 - Missing tracks write `#EXTINF:-1,<Title>`.
 - Emits UTF-8 with Byte Order Mark (`\uFEFF`) to prevent character encoding corruption when opened in Windows Notepad, VLC, foobar2000, or mobile players.
-- Prompts user destination via `FilePicker.saveFile` with default filename `<playlist-name>.m3u8` (sanitized against invalid filesystem characters `\ / : * ? " < > |`).
+- Selects destination folder via `FilePicker.getDirectoryPath` (with mockable `saveFilePicker` / `pickDirectory` hooks for tests) and defaults filename to `<playlist-name>.m3u8` (sanitized against invalid filesystem characters `\ / : * ? " < > |`).
+- Enforces `.m3u` or `.m3u8` extensions (forcing `.m3u8` when missing), refuses all known audio extensions (`.mp3`, `.flac`, `.m4a`, `.wav`, `.ogg`, `.opus`, `.wma`, `.aac`, `.alac`, `.ape`, `.wv`, `.aiff`, `.dsf`, `.dff`) and any existing file with a different extension via localized messages, prompts a localized confirmation dialog before overwriting an existing `.m3u`/`.m3u8`, and writes atomically (temp sibling file + `flush: true` + `rename`).
 
-### Import (`M3u.importPlaylist` / `parseM3u`)
-- Strips UTF-8 BOM if present; handles both Windows CRLF (`\r\n`) and UNIX LF (`\n`).
-- Resolves relative file paths against the M3U file's parent folder.
-- Detects and filters out web streams (`http://`, `https://`), reporting the count of skipped streams to the user.
+### Import (`M3u.importPlaylist` / `importPlaylistWithSummary` / `parseM3u`)
+- Strips UTF-8 BOM if present; handles both Windows CRLF (`\r\n`) and UNIX LF (`\n`), parses `#EXTINF` titles, and preserves valid Windows backslash paths without blindly converting `\` to `/`.
+- Decodes `file://` URIs (including Windows drive URIs, UNC paths, and POSIX URIs) via `FilePathUtils` and resolves relative file paths against the M3U file's parent folder.
+- Matches playlist paths and `play_events` history against library tracks using `FilePathUtils.canonicalKey` / SQLite `normalize_file_path(...)` so `file://` URIs and plain Windows/POSIX paths resolve to the same track.
+- Detects and filters out web streams (`http://`, `https://`), reporting added count, missing tracks (`missingCount` / `missingPaths` in `M3uImportSummary`), and skipped web links to the user via localized SnackBar.
 - Extracts playlist title from `#PLAYLIST:` header or falls back to the M3U file's basename.
 - Resolves name collisions automatically by appending `" (2)"`, `" (3)"`, etc., up to 60 characters.
-- Reports summary feedback to the user via localized SnackBar: `Added X tracks (Y not in library, Z web links skipped)`.
 - Pure functions and service helpers accept mockable picker interfaces for deterministic unit and widget testing without native file dialog popups.
 
 ---
 
-## Performance & Benchmark Note
+## Scanning & Performance Notes
 
+- `ScanService.rescanAll()` keeps `isScanning` continuously `true` across all registered folders and suppresses intermediate `done: true` stream events until the final folder completes (or scan is cancelled).
+- `LibraryScanner` (`computeMissingPaths`) skips removing missing paths whenever a scan is cancelled (`isCancelled`) or encounters unreadable directories (`unreadableDirsCount > 0`), ensuring tracks in unscanned files or folders are never deleted on cancellation.
 - `LibraryRepository.rebuildArtistLinks()` operates on **DISTINCT** artist strings (`SELECT DISTINCT COALESCE(NULLIF(artist, ''), 'Unknown Artist') FROM tracks`), rather than evaluating splitting rules and regexes per track.
 - In a library with 50,000 tracks, there are typically only ~1,000 to 3,000 distinct artist strings.
 - Measured rebuild time for 20,000 tracks with ~3,000 distinct artist strings: ~480ms on desktop hardware within a single immediate SQLite transaction using indexed temporary split joins and pre-filtered pure Dart parsing.
@@ -312,11 +315,20 @@ The `M3u` subsystem (`lib/features/collections/m3u.dart`) provides robust playli
 
 ---
 
+## Unified Album Identity (AlbumIdentity)
+
+Album grouping and caching share a single identity definition in `lib/library/album_identity.dart` (`AlbumIdentity`):
+
+- **Tagged albums:** `album title` paired with normalized `album_artist`, falling back to the track `artist` when `album_artist` is null or blank.
+- **Untagged singles:** When `album` is null or whitespace, `LibraryScanner` leaves `album` as `null` (no parent-folder name fallback) and `AlbumIdentity.key` keys the track by `track::<lowercased trimmed path>`.
+- **Consumers:** `SqliteLibraryRepository` registers the scalar SQLite function `album_identity_key(album, album_artist, artist, path)` for `listAlbums`, `listAlbumsByArtistKeys`, `searchAlbums`, `albumCount`, and `tracksOfAlbum` (`albumKey`), and populates `AlbumSummary.identityKey` and `AlbumSummary.addedAt` (`MAX(added_at)`). `CoverCache`, `ReleaseKindClassifier`, `AlbumsView` (sorting/grouping by displayed artist), and `AlbumDetailView` all use `AlbumIdentity`.
+
+---
+
 ## Known Limitations
 
 - **Flattened alias chain un-merging:** Un-merging B after A->B->C was flattened to A->C leaves A merged into C.
 - **Bands containing ambiguous separators with solo artists:** If a band's name contains an ambiguous separator (such as `&` in `Simon & Garfunkel`) and one of its members also exists as a standalone solo artist in the library (e.g. solo tracks tagged `'Simon'`), the splitter will treat the band as a collaboration until the user selects `'Treat "Simon & Garfunkel" as one artist'` (which adds it to `artist_no_split`).
-- **Album merging across artists:** Albums without an `Album Artist` tag merge across different artists when album names match (grouped by `COALESCE(NULLIF(album, ''), 'Unknown Album'), album_artist`).
 - **Paged GROUP BY performance:** Derived aggregation via paged `GROUP BY` is O(n) per page; performance should be benchmarked and measured at 50k+ tracks.
 - **ASCII-only collation:** SQLite `COLLATE NOCASE` only folds ASCII characters (A-Z to a-z), leaving non-ASCII uppercase/lowercase variations unfolded unless pre-normalized via `TextNormalizer`.
 - **Nested parent and child folders:** Adding both a parent directory and a child directory together can cause tracks to reassign their parent `folder_id` between folders on consecutive rescans.
@@ -325,4 +337,4 @@ The `M3u` subsystem (`lib/features/collections/m3u.dart`) provides robust playli
 
 ## UI Integration
 
-The library presentation layer is built on top of `LibraryRepository` and `ScanService`, fully documented in [`docs/ui.md`](file:///e:/dev/aestheticy/docs/ui.md). All library screens (`AlbumsView`, `ArtistsView`, `TracksView`, `AlbumDetailView`, `ArtistDetailView`, `WelcomeView`) interact purely with the existing repository and scan service contracts without invoking direct SQLite queries or audio engine primitives.
+The library presentation layer is built on top of `LibraryRepository` and `ScanService`, fully documented in `docs/ui.md`. All library screens (`AlbumsView`, `ArtistsView`, `TracksView`, `AlbumDetailView`, `ArtistDetailView`, `PlaylistDetailView`, `FavoritesView`, `PlaylistsView`, `RecentlyPlayedView`, `WelcomeView`) observe `LibraryDataCache`, `UserCollections`, and `ScanService` (`libraryVersion` / `removeFolder`) so scan completion and folder changes refresh views stale-while-revalidate without clearing existing content or flashing loading indicators.

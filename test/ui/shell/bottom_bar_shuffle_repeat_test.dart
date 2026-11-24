@@ -8,10 +8,12 @@ import 'package:aestheticy/audio/fake_audio_engine.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/features/collections/user_collections.dart';
+import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/ui/glass/glass_blur_budget.dart';
 import 'package:aestheticy/ui/glass/glass_button.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
+import 'package:aestheticy/ui/library/album_detail_view.dart';
 import 'package:aestheticy/ui/now_playing/now_playing_view.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_scope.dart';
@@ -416,6 +418,129 @@ void main() {
         expect(find.byTooltip('التكرار: أغنية واحدة'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'S2: AlbumDetailView shuffle button sets shuffle true across BottomNowPlayingBar and NowPlayingView',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        tester.view.physicalSize = const Size(1800, 960);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final folder = await repository.addFolder('C:/Music');
+        final now = DateTime(2026, 1, 1);
+        await repository.upsertTracks([
+          Track(
+            path: 'C:/Music/alb1.mp3',
+            folderId: folder.id!,
+            title: 'Album Track 1',
+            artist: 'Album Artist',
+            albumArtist: 'Album Artist',
+            album: 'Shared Shuffle Album',
+            durationMs: 180000,
+            mtimeMs: 1000,
+            sizeBytes: 1024,
+            addedAt: now,
+          ),
+          Track(
+            path: 'C:/Music/alb2.mp3',
+            folderId: folder.id!,
+            title: 'Album Track 2',
+            artist: 'Album Artist',
+            albumArtist: 'Album Artist',
+            album: 'Shared Shuffle Album',
+            durationMs: 190000,
+            mtimeMs: 1000,
+            sizeBytes: 1024,
+            addedAt: now,
+          ),
+        ]);
+
+        const album = AlbumSummary(
+          album: 'Shared Shuffle Album',
+          albumArtist: 'Album Artist',
+          trackCount: 2,
+        );
+
+        await tester.pumpWidget(
+          UserCollectionsScope(
+            collections: userCollections,
+            child: SettingsScope(
+              store: settingsStore,
+              child: GlassScope(
+                controller: GlassController(quality: GlassQuality.off),
+                child: MaterialApp(
+                  debugShowCheckedModeBanner: false,
+                  theme: buildAppTheme(),
+                  home: Scaffold(
+                    body: Column(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: AlbumDetailView(
+                                  album: album,
+                                  repository: repository,
+                                  controller: controller,
+                                  settingsStore: settingsStore,
+                                  navigator: navigator,
+                                ),
+                              ),
+                              Expanded(
+                                child: NowPlayingView(
+                                  controller: controller,
+                                  engine: engine,
+                                  navigator: navigator,
+                                  settingsStore: settingsStore,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        BottomNowPlayingBar(
+                          controller: controller,
+                          navigator: navigator,
+                          settingsStore: settingsStore,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(controller.queue.isShuffled, isFalse);
+        await tester.tap(find.byKey(const Key('album_shuffle_button')));
+        await tester.pumpAndSettle();
+
+        expect(controller.queue.isShuffled, isTrue);
+        expect(controller.queue.length, 2);
+        expect(
+          tester
+              .widget<GlassIconButton>(
+                find.byKey(const Key('bottom_bar_shuffle_button')),
+              )
+              .variant,
+          GlassButtonVariant.selected,
+        );
+        expect(
+          tester
+              .widget<GlassIconButton>(
+                find.byKey(const Key('now_playing_shuffle_button')),
+              )
+              .variant,
+          GlassButtonVariant.selected,
+        );
+        expect(tester.takeException(), isNull);
       },
     );
   });

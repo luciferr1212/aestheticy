@@ -10,7 +10,10 @@ import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/features/library/artist_rules_sheet.dart';
 import 'package:aestheticy/ui/library/artist_detail_view.dart';
+import 'package:aestheticy/ui/settings/app_settings.dart';
+import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
@@ -81,8 +84,12 @@ class FailingMergeRepository implements LibraryRepository {
   Future<int> artistCount() => _inner.artistCount();
 
   @override
-  Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist}) =>
-      _inner.tracksOfAlbum(album, albumArtist: albumArtist);
+  Future<List<Track>> tracksOfAlbum(
+    String album, {
+    String? albumArtist,
+    String? albumKey,
+  }) =>
+      _inner.tracksOfAlbum(album, albumArtist: albumArtist, albumKey: albumKey);
 
   @override
   Future<List<Track>> tracksOfArtist(String artist, {String? artistKey}) =>
@@ -579,5 +586,40 @@ void main() {
       expect(find.text('Fairouz'), findsOneWidget);
       expect(find.text('Fayrouz'), findsNothing);
     });
+
+    testWidgets(
+      'S5: ArtistRulesSheet renders localized Arabic RTL strings without overflow',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final arStore = SettingsStore(
+          initialSettings: const AppSettings(language: 'ar'),
+        );
+        addTearDown(arStore.dispose);
+
+        await repository.mergeArtists('artist x', 'artist y');
+        await repository.addNoSplit('AC/DC');
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: SettingsScope(
+                store: arStore,
+                child: Scaffold(
+                  body: ArtistRulesSheet(repository: repository),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('قواعد الفنانين'), findsOneWidget);
+        expect(find.text('الفنانون المدمجون'), findsOneWidget);
+        expect(find.text('تم دمجه في artist y'), findsOneWidget);
+        expect(find.text('فنانون لا يُقسمون'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

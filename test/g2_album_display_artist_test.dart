@@ -49,12 +49,12 @@ void main() {
           sizeBytes: 100,
           addedAt: now,
         ),
-        // 2. No album_artist + two different track artists -> displayArtist is 'various'
+        // 2. Explicit compilation albumArtist ('various') + two different track artists -> displayArtist is 'various'
         Track(
           path: 'C:\\Music\\track2a.mp3',
           folderId: folder.id!,
           album: 'Album Compilation',
-          albumArtist: null,
+          albumArtist: 'various',
           artist: 'Singer One',
           title: 'Comp 1',
           durationMs: 1000,
@@ -66,7 +66,7 @@ void main() {
           path: 'C:\\Music\\track2b.mp3',
           folderId: folder.id!,
           album: 'Album Compilation',
-          albumArtist: null,
+          albumArtist: 'various',
           artist: 'Singer Two',
           title: 'Comp 2',
           durationMs: 1000,
@@ -127,10 +127,16 @@ void main() {
       expect(sEmpty.displayArtist, isNull);
       expect(sTagged.displayArtist, equals('Band X'));
 
-      // Verify tracksOfAlbum remains unchanged and finds tracks
-      final tSingle = await repository.tracksOfAlbum('Album Single');
+      // Verify tracksOfAlbum uses canonical album identity
+      final tSingle = await repository.tracksOfAlbum(
+        'Album Single',
+        albumArtist: 'Solo Singer',
+      );
       expect(tSingle.length, equals(1));
-      final tComp = await repository.tracksOfAlbum('Album Compilation');
+      final tComp = await repository.tracksOfAlbum(
+        'Album Compilation',
+        albumArtist: 'various',
+      );
       expect(tComp.length, equals(2));
       final tTagged = await repository.tracksOfAlbum('Album Tagged', albumArtist: 'Band X');
       expect(tTagged.length, equals(1));
@@ -163,6 +169,7 @@ void main() {
           path: 'C:\\Music\\t2a.mp3',
           folderId: folder.id!,
           album: 'Album Compilation',
+          albumArtist: 'various',
           artist: 'Singer One',
           title: 'Comp 1',
           durationMs: 1000,
@@ -174,6 +181,7 @@ void main() {
           path: 'C:\\Music\\t2b.mp3',
           folderId: folder.id!,
           album: 'Album Compilation',
+          albumArtist: 'various',
           artist: 'Singer Two',
           title: 'Comp 2',
           durationMs: 1000,

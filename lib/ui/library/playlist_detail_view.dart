@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_models.dart';
@@ -18,6 +19,7 @@ import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'library_data_cache.dart';
 import 'track_table.dart';
 
 /// Screen displaying the tracklist and metadata of a specific playlist.
@@ -47,6 +49,9 @@ class PlaylistDetailView extends StatefulWidget {
   final Future<void> Function(BuildContext context, PlaylistSummary playlist)?
       onExportM3u;
 
+  /// Optional in-memory library data cache for automatic refresh after scans.
+  final LibraryDataCache? dataCache;
+
   /// Creates a [PlaylistDetailView].
   const PlaylistDetailView({
     super.key,
@@ -58,6 +63,7 @@ class PlaylistDetailView extends StatefulWidget {
     required this.settingsStore,
     required this.navigator,
     this.onExportM3u,
+    this.dataCache,
   });
 
   @override
@@ -67,6 +73,9 @@ class PlaylistDetailView extends StatefulWidget {
 class _PlaylistDetailViewState extends State<PlaylistDetailView> {
   List<PlaylistEntry> _entries = [];
   bool _isLoading = true;
+  int _loadRequestId = 0;
+  LibraryDataCache? _activeCache;
+  int _lastCacheRevision = -1;
 
   @override
   void initState() {
@@ -76,9 +85,55 @@ class _PlaylistDetailViewState extends State<PlaylistDetailView> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+    if (cache != _activeCache) {
+      _activeCache?.removeListener(_onCacheChanged);
+      _activeCache = cache;
+      _activeCache?.addListener(_onCacheChanged);
+      _lastCacheRevision = _activeCache?.revision ?? -1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(PlaylistDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dataCache != widget.dataCache) {
+      final cache = widget.dataCache ?? LibraryDataCacheScope.maybeOf(context);
+      if (cache != _activeCache) {
+        _activeCache?.removeListener(_onCacheChanged);
+        _activeCache = cache;
+        _activeCache?.addListener(_onCacheChanged);
+        _lastCacheRevision = _activeCache?.revision ?? -1;
+      }
+    }
+    if (oldWidget.collections != widget.collections) {
+      oldWidget.collections.removeListener(_onCollectionsChanged);
+      widget.collections.addListener(_onCollectionsChanged);
+    }
+    if (oldWidget.playlistId != widget.playlistId ||
+        oldWidget.repository != widget.repository) {
+      _isLoading = true;
+      _loadEntries();
+    }
+  }
+
+  @override
   void dispose() {
+    _activeCache?.removeListener(_onCacheChanged);
     widget.collections.removeListener(_onCollectionsChanged);
     super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    final cache = _activeCache;
+    if (cache == null) return;
+    if (cache.revision != _lastCacheRevision) {
+      _lastCacheRevision = cache.revision;
+      _loadEntries();
+    }
   }
 
   void _onCollectionsChanged() {
@@ -86,12 +141,15 @@ class _PlaylistDetailViewState extends State<PlaylistDetailView> {
   }
 
   Future<void> _loadEntries() async {
+    final reqId = ++_loadRequestId;
     final entries = await widget.repository.playlistEntries(widget.playlistId);
-    if (mounted) {
-      setState(() {
-        _entries = entries;
-        _isLoading = false;
-      });
+    if (mounted && reqId == _loadRequestId) {
+      if (!listEquals(_entries, entries) || _isLoading) {
+        setState(() {
+          _entries = entries;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -102,19 +160,31 @@ class _PlaylistDetailViewState extends State<PlaylistDetailView> {
     return widget.initialPlaylist;
   }
 
-  Future<void> _playPlaylist({bool shuffle = false, int startIndex = 0}) async {
-    final playable = _entries.where((e) => e.track != null).toList();
-    if (playable.isEmpty) return;
+  Future<void> _playPlaylist({bool shuffle = false, int? startIndex}) async {
+    if (startIndex != null) {
+      if (startIndex < 0 ||
+          startIndex >= _entries.length ||
+          _entries[startIndex].track == null) {
+        return;
+      }
+    }
 
-    final sources = playable.map((e) => e.track!.toAudioSource()).toList();
+    final sources = <AudioSource>[];
+    var mappedStartIndex = 0;
+    for (var i = 0; i < _entries.length; i++) {
+      final track = _entries[i].track;
+      if (track == null) continue;
+      if (startIndex == i) {
+        mappedStartIndex = sources.length;
+      }
+      sources.add(track.toAudioSource());
+    }
+    if (sources.isEmpty) return;
+
     if (shuffle) {
-      sources.shuffle();
-      await widget.controller.playQueue(sources, startIndex: 0);
+      await widget.controller.playShuffled(sources);
     } else {
-      final safeIndex = (startIndex >= 0 && startIndex < sources.length)
-          ? startIndex
-          : 0;
-      await widget.controller.playQueue(sources, startIndex: safeIndex);
+      await widget.controller.playQueue(sources, startIndex: mappedStartIndex);
     }
   }
 

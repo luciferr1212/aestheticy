@@ -220,20 +220,19 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
     await widget.controller.togglePlayPause();
   }
 
-  void _cycleRepeat() {
-    final next = switch (widget.controller.queue.repeatMode) {
-      RepeatMode.off => RepeatMode.all,
-      RepeatMode.all => RepeatMode.one,
-      RepeatMode.one => RepeatMode.off,
-    };
-    setState(() => widget.controller.queue.repeatMode = next);
-    _log('RepeatMode: ${next.name}');
+  Future<void> _cycleRepeat() async {
+    await widget.controller.cycleRepeatMode();
+    if (!mounted) return;
+    setState(() {});
+    _log('RepeatMode: ${widget.controller.queue.repeatMode.name}');
   }
 
-  void _toggleShuffle() {
-    final current = widget.controller.queue.isShuffled;
-    setState(() => widget.controller.queue.setShuffle(!current));
-    _log('Shuffle: ${!current ? 'ON' : 'OFF'}');
+  Future<void> _toggleShuffle() async {
+    final next = !widget.controller.queue.isShuffled;
+    await widget.controller.setShuffle(next);
+    if (!mounted) return;
+    setState(() {});
+    _log('Shuffle: ${next ? 'ON' : 'OFF'}');
   }
 
   Future<void> _resetEq() async {

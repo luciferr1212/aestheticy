@@ -70,6 +70,7 @@ class _ArtistsViewState extends State<ArtistsView> {
   List<ArtistSummary> _artists = [];
   List<ArtistSummary> _searchResults = [];
   Set<String> _mergedCanonicalKeys = <String>{};
+  int _searchRequestId = 0;
   String _searchQuery = '';
   bool _isLoading = true;
   LibraryDataCache? _activeCache;
@@ -123,8 +124,26 @@ class _ArtistsViewState extends State<ArtistsView> {
           _isLoading = false;
         });
       }
+      if (_searchQuery.isNotEmpty) {
+        _refreshSearch();
+      }
     } else {
       _loadArtists();
+    }
+  }
+
+  Future<void> _refreshSearch() async {
+    final query = _searchQuery;
+    if (query.isEmpty) return;
+    final reqId = ++_searchRequestId;
+    final results = await widget.repository.searchArtists(query);
+    if (mounted &&
+        _searchRequestId == reqId &&
+        _searchQuery == query &&
+        !listEquals(_searchResults, results)) {
+      setState(() {
+        _searchResults = results;
+      });
     }
   }
 
@@ -148,19 +167,21 @@ class _ArtistsViewState extends State<ArtistsView> {
   }
 
   Future<void> _onSearchChanged(String query) async {
+    final trimmed = query.trim();
+    final reqId = ++_searchRequestId;
     setState(() {
-      _searchQuery = query.trim();
+      _searchQuery = trimmed;
+      if (trimmed.isEmpty) {
+        _searchResults = [];
+      }
     });
 
-    if (_searchQuery.isEmpty) {
-      setState(() {
-        _searchResults = [];
-      });
+    if (trimmed.isEmpty) {
       return;
     }
 
-    final results = await widget.repository.searchArtists(_searchQuery);
-    if (mounted) {
+    final results = await widget.repository.searchArtists(trimmed);
+    if (mounted && _searchRequestId == reqId && _searchQuery == trimmed) {
       setState(() {
         _searchResults = results;
       });
@@ -426,8 +447,11 @@ class _ArtistsViewState extends State<ArtistsView> {
                 ? Center(
                     child: Text(
                       _searchQuery.isNotEmpty
-                          ? 'No artists match "$_searchQuery"'
-                          : 'No artists in library',
+                          ? context.t(
+                              'artists.emptySearch',
+                              args: {'query': _searchQuery},
+                            )
+                          : context.t('artists.emptyLibrary'),
                       style: AppTypography.body.copyWith(
                         color: AppColors.textMuted,
                       ),

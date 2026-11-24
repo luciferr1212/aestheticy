@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:aestheticy/library/album_identity.dart';
+
 /// Manages caching of album artwork images on the local filesystem.
 abstract final class CoverCache {
   static String? _customDirectory;
@@ -61,15 +63,23 @@ abstract final class CoverCache {
     return dir.path;
   }
 
-  /// Computes a stable, deterministic hexadecimal hash for an album.
+  /// Computes a stable, deterministic hexadecimal hash for an album or single.
   ///
-  /// Combines [albumArtist] (if present) and [album] to produce a collision-resistant
-  /// unique key used for file naming.
-  static String computeCoverKey({String? albumArtist, required String album}) {
-    final normalizedArtist = (albumArtist ?? '').trim().toLowerCase();
-    final normalizedAlbum = album.trim().toLowerCase();
-    final payload = '$normalizedArtist::$normalizedAlbum';
-    return md5.convert(utf8.encode(payload)).toString();
+  /// Delegates to [AlbumIdentity.key] so repository grouping, release
+  /// classification, and artwork caching share one canonical album identity.
+  static String computeCoverKey({
+    String? albumArtist,
+    String? artist,
+    String? album,
+    String? trackPath,
+  }) {
+    final identity = AlbumIdentity.key(
+      album: album,
+      albumArtist: albumArtist,
+      artist: artist,
+      trackPath: trackPath,
+    );
+    return md5.convert(utf8.encode(identity)).toString();
   }
 
   /// Returns the absolute filesystem path for a given [coverKey].
@@ -107,11 +117,18 @@ abstract final class CoverCache {
   /// are treated as missing and overwritten. Returns the computed [coverKey].
   static String saveCoverSync({
     String? albumArtist,
-    required String album,
+    String? artist,
+    String? album,
+    String? trackPath,
     required Uint8List bytes,
     String? coversDirectory,
   }) {
-    final key = computeCoverKey(albumArtist: albumArtist, album: album);
+    final key = computeCoverKey(
+      albumArtist: albumArtist,
+      artist: artist,
+      album: album,
+      trackPath: trackPath,
+    );
     final filePath = pathFor(key, coversDirectory: coversDirectory);
     final file = File(filePath);
 
@@ -152,11 +169,18 @@ abstract final class CoverCache {
   /// are treated as missing and overwritten. Returns the computed [coverKey].
   static Future<String> saveCover({
     String? albumArtist,
-    required String album,
+    String? artist,
+    String? album,
+    String? trackPath,
     required Uint8List bytes,
     String? coversDirectory,
   }) async {
-    final key = computeCoverKey(albumArtist: albumArtist, album: album);
+    final key = computeCoverKey(
+      albumArtist: albumArtist,
+      artist: artist,
+      album: album,
+      trackPath: trackPath,
+    );
     final filePath = pathFor(key, coversDirectory: coversDirectory);
     final file = File(filePath);
 

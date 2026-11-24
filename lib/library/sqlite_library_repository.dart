@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/library/album_identity.dart';
+import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
@@ -29,6 +31,31 @@ class SqliteLibraryRepository implements LibraryRepository {
         final val = args[0];
         if (val == null) return '';
         return TextNormalizer.normalize(val.toString());
+      },
+    );
+    db.createFunction(
+      functionName: 'album_identity_key',
+      argumentCount: const AllowedArgumentCount(4),
+      deterministic: true,
+      directOnly: false,
+      function: (args) {
+        return AlbumIdentity.key(
+          album: args[0]?.toString(),
+          albumArtist: args[1]?.toString(),
+          artist: args[2]?.toString(),
+          trackPath: args[3]?.toString(),
+        );
+      },
+    );
+    db.createFunction(
+      functionName: 'normalize_file_path',
+      argumentCount: const AllowedArgumentCount(1),
+      deterministic: true,
+      directOnly: false,
+      function: (args) {
+        final val = args[0];
+        if (val == null) return '';
+        return FilePathUtils.canonicalKey(val.toString());
       },
     );
   }
@@ -235,15 +262,17 @@ class SqliteLibraryRepository implements LibraryRepository {
   Future<List<AlbumSummary>> listAlbums({int? limit, int? offset}) async {
     final sql = StringBuffer('''
       SELECT
-        COALESCE(NULLIF(album, ''), 'Unknown Album') AS album_name,
-        album_artist,
+        album_identity_key(album, album_artist, artist, path) AS album_key,
+        MIN(COALESCE(NULLIF(TRIM(album), ''), 'Unknown Album')) AS album_name,
+        MAX(NULLIF(TRIM(album_artist), '')) AS album_artist,
         MAX(year) AS release_year,
         COUNT(*) AS track_count,
         MAX(cover_key) AS cover_key,
         COUNT(DISTINCT NULLIF(artist, '')) AS distinct_artist_count,
-        MIN(NULLIF(artist, '')) AS single_artist
+        MIN(NULLIF(artist, '')) AS single_artist,
+        MAX(added_at) AS latest_added_at
       FROM tracks
-      GROUP BY album_name, album_artist
+      GROUP BY album_key
       ORDER BY album_name COLLATE NOCASE ASC
     ''');
     final params = <Object?>[];
@@ -265,6 +294,7 @@ class SqliteLibraryRepository implements LibraryRepository {
     final rawAlbumArtist = row['album_artist'] as String?;
     final distinctArtistCount = row['distinct_artist_count'] as int;
     final singleArtist = row['single_artist'] as String?;
+    final addedAtVal = row['latest_added_at'] as int?;
 
     final String? displayArtist;
     if (rawAlbumArtist != null && rawAlbumArtist.isNotEmpty) {
@@ -286,6 +316,10 @@ class SqliteLibraryRepository implements LibraryRepository {
       trackCount: row['track_count'] as int,
       coverKey: row['cover_key'] as String?,
       displayArtist: displayArtist,
+      identityKey: row['album_key'] as String?,
+      addedAt: addedAtVal != null
+          ? DateTime.fromMillisecondsSinceEpoch(addedAtVal, isUtc: true)
+          : null,
     );
   }
 
@@ -316,7 +350,7 @@ class SqliteLibraryRepository implements LibraryRepository {
       final chunkAlbums = await _queryAlbumsByArtistKeyChunk(chunk);
       for (final album in chunkAlbums) {
         seen.putIfAbsent(
-          '${album.album}\u0000${album.albumArtist ?? ''}',
+          AlbumIdentity.forSummary(album),
           () => album,
         );
       }
@@ -341,21 +375,23 @@ class SqliteLibraryRepository implements LibraryRepository {
     final rows = _db.select(
       '''
       SELECT
-        COALESCE(NULLIF(t.album, ''), 'Unknown Album') AS album_name,
-        t.album_artist,
+        album_identity_key(t.album, t.album_artist, t.artist, t.path) AS album_key,
+        MIN(COALESCE(NULLIF(TRIM(t.album), ''), 'Unknown Album')) AS album_name,
+        MAX(NULLIF(TRIM(t.album_artist), '')) AS album_artist,
         MAX(t.year) AS release_year,
         COUNT(*) AS track_count,
         MAX(t.cover_key) AS cover_key,
         COUNT(DISTINCT NULLIF(t.artist, '')) AS distinct_artist_count,
-        MIN(NULLIF(t.artist, '')) AS single_artist
+        MIN(NULLIF(t.artist, '')) AS single_artist,
+        MAX(t.added_at) AS latest_added_at
       FROM tracks t
       WHERE t.album IS NOT NULL AND TRIM(t.album) != ''
         AND EXISTS (
           SELECT 1
           FROM tracks t2
           JOIN track_artists ta ON ta.track_id = t2.id
-          WHERE COALESCE(NULLIF(t2.album, ''), 'Unknown Album') = COALESCE(NULLIF(t.album, ''), 'Unknown Album')
-            AND NULLIF(t2.album_artist, '') IS NULLIF(t.album_artist, '')
+          WHERE album_identity_key(t2.album, t2.album_artist, t2.artist, t2.path) =
+              album_identity_key(t.album, t.album_artist, t.artist, t.path)
             AND (
               ta.artist_key IN ($placeholders)
               OR ta.artist_key IN ($normalizedPlaceholders)
@@ -370,7 +406,7 @@ class SqliteLibraryRepository implements LibraryRepository {
               )
             )
         )
-      GROUP BY album_name, t.album_artist
+      GROUP BY album_key
       ORDER BY album_name COLLATE NOCASE ASC;
       ''',
       [
@@ -445,22 +481,31 @@ class SqliteLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<List<Track>> tracksOfAlbum(String album, {String? albumArtist}) async {
+  Future<List<Track>> tracksOfAlbum(
+    String album, {
+    String? albumArtist,
+    String? albumKey,
+  }) async {
+    final trimmedKey = albumKey?.trim() ?? '';
+    final String targetKey;
+    if (trimmedKey.isNotEmpty) {
+      targetKey = trimmedKey;
+    } else {
+      final effectiveAlbum =
+          album.trim() == AlbumIdentity.unknownAlbumTitle ? null : album;
+      targetKey = AlbumIdentity.key(
+        album: effectiveAlbum,
+        albumArtist: albumArtist,
+      );
+    }
+
     final rows = _db.select(
       '''
       SELECT * FROM tracks
-      WHERE (
-        (? = 'Unknown Album' AND (album IS NULL OR album = ''))
-        OR album = ?
-      )
-      AND (
-        ? IS NULL
-        OR album_artist = ?
-        OR (album_artist IS NULL AND artist = ?)
-      )
+      WHERE album_identity_key(album, album_artist, artist, path) = ?
       ORDER BY COALESCE(disc_no, 1) ASC, COALESCE(track_no, 0) ASC, title COLLATE NOCASE ASC;
       ''',
-      [album, album, albumArtist, albumArtist, albumArtist],
+      [targetKey],
     );
 
     return rows.map(_mapTrackRow).toList();
@@ -567,23 +612,59 @@ class SqliteLibraryRepository implements LibraryRepository {
         .toList();
     if (terms.isEmpty) return [];
 
-    final whereClauses = terms.map((_) =>
-        "(normalize_text(COALESCE(NULLIF(album, ''), 'Unknown Album') || ' ' || COALESCE(album_artist, '')) LIKE ? ESCAPE '\\')"
-    ).join(' AND ');
+    final whereClauses = terms.map((_) => "searchable LIKE ? ESCAPE '\\'").join(' AND ');
 
     final effectiveLimit = limit ?? 50;
     final sql = '''
+      WITH album_rows AS (
+        SELECT
+          album_identity_key(t.album, t.album_artist, t.artist, t.path) AS album_key,
+          MIN(COALESCE(NULLIF(TRIM(t.album), ''), 'Unknown Album')) AS album_name,
+          MAX(NULLIF(TRIM(t.album_artist), '')) AS album_artist,
+          MAX(t.year) AS release_year,
+          COUNT(*) AS track_count,
+          MAX(t.cover_key) AS cover_key,
+          COUNT(DISTINCT NULLIF(t.artist, '')) AS distinct_artist_count,
+          MIN(NULLIF(t.artist, '')) AS single_artist,
+          MAX(t.added_at) AS latest_added_at,
+          COALESCE(GROUP_CONCAT(DISTINCT NULLIF(t.album_artist, '')), '') || ' ' ||
+          COALESCE(GROUP_CONCAT(DISTINCT NULLIF(t.artist, '')), '') AS raw_artists_text
+        FROM tracks t
+        GROUP BY album_key
+      ),
+      album_artists AS (
+        SELECT
+          album_identity_key(t.album, t.album_artist, t.artist, t.path) AS album_key,
+          COALESCE(GROUP_CONCAT(DISTINCT ta.artist_name), '') || ' ' ||
+          COALESCE(GROUP_CONCAT(DISTINCT aa.canonical_name), '') AS linked_artists_text
+        FROM track_artists ta
+        JOIN tracks t ON t.id = ta.track_id
+        LEFT JOIN artist_aliases aa ON aa.canonical_key = ta.artist_key
+        GROUP BY album_key
+      ),
+      searchable_albums AS (
+        SELECT
+          ar.*,
+          normalize_text(
+            ar.album_name || ' ' ||
+            ar.raw_artists_text || ' ' ||
+            COALESCE(aar.linked_artists_text, '')
+          ) AS searchable
+        FROM album_rows ar
+        LEFT JOIN album_artists aar ON aar.album_key = ar.album_key
+      )
       SELECT
-        COALESCE(NULLIF(album, ''), 'Unknown Album') AS album_name,
+        album_key,
+        album_name,
         album_artist,
-        MAX(year) AS release_year,
-        COUNT(*) AS track_count,
-        MAX(cover_key) AS cover_key,
-        COUNT(DISTINCT NULLIF(artist, '')) AS distinct_artist_count,
-        MIN(NULLIF(artist, '')) AS single_artist
-      FROM tracks
+        release_year,
+        track_count,
+        cover_key,
+        distinct_artist_count,
+        single_artist,
+        latest_added_at
+      FROM searchable_albums
       WHERE $whereClauses
-      GROUP BY album_name, album_artist
       ORDER BY album_name COLLATE NOCASE ASC
       LIMIT ?;
     ''';
@@ -668,7 +749,7 @@ class SqliteLibraryRepository implements LibraryRepository {
     final row = _db.select('''
       SELECT COUNT(*) AS total FROM (
         SELECT 1 FROM tracks
-        GROUP BY COALESCE(NULLIF(album, ''), 'Unknown Album'), album_artist
+        GROUP BY album_identity_key(album, album_artist, artist, path)
       );
     ''').first;
     return row['total'] as int;
@@ -1121,7 +1202,7 @@ class SqliteLibraryRepository implements LibraryRepository {
              t.album, t.track_no, t.disc_no, t.year, t.duration_ms, t.mtime_ms, t.size_bytes,
              t.cover_key, t.added_at
       FROM playlist_items pi
-      LEFT JOIN tracks t ON pi.path = t.path
+      LEFT JOIN tracks t ON normalize_file_path(pi.path) = normalize_file_path(t.path)
       WHERE pi.playlist_id = ?
       ORDER BY pi.position ASC;
     ''';
@@ -1300,12 +1381,12 @@ class SqliteLibraryRepository implements LibraryRepository {
     const sql = '''
       SELECT t.* FROM tracks t
       INNER JOIN (
-        SELECT (CASE WHEN uri LIKE 'file://%' THEN SUBSTR(uri, 8) ELSE uri END) AS clean_uri,
+        SELECT normalize_file_path(uri) AS clean_uri,
                MAX(started_at_ms) AS last_played
         FROM play_events
         WHERE counted = 1
         GROUP BY clean_uri
-      ) p ON t.path = p.clean_uri
+      ) p ON normalize_file_path(t.path) = p.clean_uri
       ORDER BY p.last_played DESC
       LIMIT ?;
     ''';
