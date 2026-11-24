@@ -1,91 +1,28 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../library/album_identity.dart';
-import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/text_normalizer.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../glass/glass_button.dart';
 import '../l10n/app_strings.dart';
-import '../l10n/number_format.dart';
 import '../settings/settings_scope.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'album_year_grouping.dart';
 import 'albums_artist_chips.dart';
 import 'library_data_cache.dart';
 import 'library_header.dart';
 import 'library_placeholders.dart';
 import 'library_view_controls.dart';
 import 'sort_direction_button.dart';
+import 'widgets/album_tiles.dart';
 
-/// A section of albums sharing the same release [year] (or `null` for unknown).
-class AlbumYearGroup {
-  /// Release year for this group, or `null` when the release year is unknown.
-  final int? year;
-
-  /// Albums belonging to this year, sorted alphabetically by artist then title.
-  final List<AlbumSummary> albums;
-
-  /// Creates an [AlbumYearGroup].
-  const AlbumYearGroup({
-    required this.year,
-    required this.albums,
-  });
-}
-
-/// Groups [albums] by release year (newest first by default, oldest first when [reversed] is true, unknown years last).
-///
-/// Within each year group, albums are sorted alphabetically by artist then
-/// title. Null or non-positive (`<= 0`) years are placed together in a single
-/// trailing group with `year == null`.
-List<AlbumYearGroup> groupAlbumsByYear(
-  List<AlbumSummary> albums, {
-  bool reversed = false,
-  String Function(AlbumSummary)? artistResolver,
-}) {
-  final byYear = <int, List<AlbumSummary>>{};
-  final unknown = <AlbumSummary>[];
-
-  for (final album in albums) {
-    final year = album.year;
-    if (year != null && year > 0) {
-      byYear.putIfAbsent(year, () => <AlbumSummary>[]).add(album);
-    } else {
-      unknown.add(album);
-    }
-  }
-
-  String resolveArtist(AlbumSummary album) =>
-      artistResolver?.call(album) ?? album.displayArtist ?? album.albumArtist ?? '';
-
-  int compareWithinGroup(AlbumSummary a, AlbumSummary b) {
-    final artistCmp = compareLocaleAware(resolveArtist(a), resolveArtist(b));
-    if (artistCmp != 0) return artistCmp;
-    return compareLocaleAware(a.album, b.album);
-  }
-
-  final years = byYear.keys.toList()
-    ..sort((a, b) => reversed ? a.compareTo(b) : b.compareTo(a));
-  final groups = <AlbumYearGroup>[];
-  for (final year in years) {
-    final items = byYear[year]!..sort(compareWithinGroup);
-    groups.add(AlbumYearGroup(year: year, albums: items));
-  }
-
-  if (unknown.isNotEmpty) {
-    unknown.sort(compareWithinGroup);
-    groups.add(AlbumYearGroup(year: null, albums: unknown));
-  }
-
-  return groups;
-}
+export 'album_year_grouping.dart';
 
 /// Albums library screen supporting square, wide, and list layout modes.
 class AlbumsView extends StatefulWidget {
@@ -598,49 +535,13 @@ class _AlbumsViewState extends State<AlbumsView> {
     void openDetail() => widget.navigator.openAlbumDetail(album.album, album: album);
     switch (viewMode) {
       case 'wide':
-        return _WideAlbumTile(album: album, onTap: openDetail);
+        return WideAlbumTile(album: album, onTap: openDetail);
       case 'list':
-        return _ListAlbumTile(album: album, onTap: openDetail);
+        return ListAlbumTile(album: album, onTap: openDetail);
       case 'square':
       default:
-        return _SquareAlbumTile(album: album, onTap: openDetail);
+        return SquareAlbumTile(album: album, onTap: openDetail);
     }
-  }
-
-  Widget _buildYearSectionHeader(BuildContext context, AlbumYearGroup group) {
-    final yearLabel = group.year != null
-        ? context.localizeDigitsText(group.year.toString())
-        : context.t('albums.unknownYear');
-    final countLabel =
-        '${context.formatCountLocalized(group.albums.length)} ${context.t('albums.count')}';
-
-    return Semantics(
-      header: true,
-      child: Row(
-        key: ValueKey<String>(
-          'album_year_header_${group.year?.toString() ?? 'unknown'}',
-        ),
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Flexible(
-            child: Text(
-              yearLabel,
-              style: AppTypography.title.copyWith(color: AppColors.text),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            countLabel,
-            style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildAlbumContent(
@@ -686,7 +587,8 @@ class _AlbumsViewState extends State<AlbumsView> {
       final groups = groupAlbumsByYear(
         albums,
         reversed: widget.settingsStore.settings.albumsSortReversed,
-        artistResolver: (a) => context.displayArtist(a.displayArtist ?? a.albumArtist),
+        artistResolver: (a) =>
+            context.displayArtist(a.displayArtist ?? a.albumArtist),
       );
       return CustomScrollView(
         key: const Key('albums_year_grouped_scroll'),
@@ -698,7 +600,7 @@ class _AlbumsViewState extends State<AlbumsView> {
                 bottom: 12,
               ),
               sliver: SliverToBoxAdapter(
-                child: _buildYearSectionHeader(context, groups[i]),
+                child: AlbumYearSectionHeader(group: groups[i]),
               ),
             ),
             if (viewMode == 'list')
@@ -756,287 +658,5 @@ class _AlbumsViewState extends State<AlbumsView> {
               _buildTileForMode(albums[index], viewMode),
         );
     }
-  }
-}
-
-class _SquareAlbumTile extends StatelessWidget {
-  final AlbumSummary album;
-  final VoidCallback onTap;
-
-  const _SquareAlbumTile({required this.album, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: InkWell(
-        mouseCursor: SystemMouseCursors.click,
-        hoverColor: const Color(0x14FFFFFF),
-        borderRadius: BorderRadius.circular(AppSpacing.r12),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 1.0,
-              child: _AlbumCoverImage(
-                coverKey: album.coverKey,
-                borderRadius: AppSpacing.r12,
-                cacheSize: 180,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              album.album,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textDirection: textDirectionFor(album.album),
-              style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
-            ),
-            const SizedBox(height: 2),
-            Builder(
-              builder: (context) {
-                final artist = context.displayArtist(album.displayArtist ?? album.albumArtist);
-                return Text(
-                  artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: textDirectionFor(artist),
-                  style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WideAlbumTile extends StatelessWidget {
-  final AlbumSummary album;
-  final VoidCallback onTap;
-
-  const _WideAlbumTile({required this.album, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.fillControl,
-          borderRadius: BorderRadius.circular(AppSpacing.r12),
-          border: Border.all(color: AppColors.borderSubtle),
-        ),
-        child: InkWell(
-          mouseCursor: SystemMouseCursors.click,
-          hoverColor: const Color(0x14FFFFFF),
-          borderRadius: BorderRadius.circular(AppSpacing.r12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 84,
-                  height: 84,
-                  child: _AlbumCoverImage(
-                    coverKey: album.coverKey,
-                    borderRadius: AppSpacing.r10,
-                    cacheSize: 90,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        album.album,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textDirection: textDirectionFor(album.album),
-                        style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
-                      ),
-                      const SizedBox(height: 3),
-                      Builder(
-                        builder: (context) {
-                          final artist = context.displayArtist(album.displayArtist ?? album.albumArtist);
-                          return Text(
-                            artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textDirection: textDirectionFor(artist),
-                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 2),
-                      Builder(
-                        builder: (context) {
-                          final countStr = context.formatCountLocalized(album.trackCount);
-                          final yearStr = album.year != null
-                              ? ' • ${context.localizeDigitsText(album.year.toString())}'
-                              : '';
-                          return Text(
-                            '$countStr ${context.t('album.tracksCount')}$yearStr',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTypography.micro.copyWith(color: AppColors.textMuted),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ListAlbumTile extends StatelessWidget {
-  final AlbumSummary album;
-  final VoidCallback onTap;
-
-  const _ListAlbumTile({required this.album, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: InkWell(
-        mouseCursor: SystemMouseCursors.click,
-        hoverColor: const Color(0x14FFFFFF),
-        borderRadius: BorderRadius.circular(AppSpacing.r10),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: _AlbumCoverImage(
-                  coverKey: album.coverKey,
-                  borderRadius: AppSpacing.r10,
-                  cacheSize: 50,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 3,
-                child: Text(
-                  album.album,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: textDirectionFor(album.album),
-                  style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Builder(
-                  builder: (context) {
-                    final artist = context.displayArtist(album.displayArtist ?? album.albumArtist);
-                    return Text(
-                      artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textDirection: textDirectionFor(artist),
-                      style: AppTypography.body.copyWith(color: AppColors.textSecondary),
-                    );
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 60,
-                child: Builder(
-                  builder: (context) {
-                    final yearStr = album.year != null
-                        ? context.localizeDigitsText(album.year.toString())
-                        : '—';
-                    return Text(
-                      yearStr,
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                    );
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 70,
-                child: Builder(
-                  builder: (context) {
-                    final countStr = context.formatCountLocalized(album.trackCount);
-                    return Text(
-                      '$countStr ${context.t('album.tracksCount')}',
-                      textAlign: TextAlign.end,
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AlbumCoverImage extends StatelessWidget {
-  final String? coverKey;
-  final double borderRadius;
-  final int cacheSize;
-
-  const _AlbumCoverImage({
-    required this.coverKey,
-    required this.borderRadius,
-    required this.cacheSize,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Widget imageWidget;
-    if (coverKey != null && CoverCache.hasCover(coverKey!)) {
-      final file = File(CoverCache.pathFor(coverKey!));
-      imageWidget = Image.file(
-        file,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        gaplessPlayback: true,
-        cacheWidth: cacheSize * 2,
-        cacheHeight: cacheSize * 2,
-        frameBuilder: (context, child, frame, wasSync) {
-          if (wasSync || frame != null) return child;
-          return _buildPlaceholder();
-        },
-        errorBuilder: (_, _, _) => _buildPlaceholder(),
-      );
-    } else {
-      imageWidget = _buildPlaceholder();
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: imageWidget,
-    );
-  }
-
-  Widget _buildPlaceholder() {
-    return Container(
-      width: double.infinity,
-      height: double.infinity,
-      decoration: BoxDecoration(
-        color: const Color(0xFF22212C),
-        borderRadius: BorderRadius.circular(borderRadius),
-      ),
-      child: const Center(
-        child: Icon(Icons.album_outlined, color: Colors.white24, size: 28),
-      ),
-    );
   }
 }

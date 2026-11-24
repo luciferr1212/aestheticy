@@ -7,6 +7,7 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
 - **Pure Dart value types:** Domain models (`Track`, `LibraryFolder`) and read summaries (`AlbumSummary`, `ArtistSummary`) are immutable with `const` constructors.
 - **Derived hierarchies & multi-artist mapping:** Albums are derived on the fly from track metadata. Artists are derived from `track_artists`, enabling duets and collaborations to appear under all involved artists without redundant duplicate files or combined artist entries.
 - **Decoupled audio bridge:** A dedicated mapper extension (`Track.toAudioSource()`) maps library entities to pure Dart audio models without polluting the storage layer.
+- **Modular SQLite repository layout:** `SqliteLibraryRepository` (`lib/library/sqlite_library_repository.dart`) preserves the `LibraryRepository` contract while delegating domain queries and mutations to focused stores under `lib/library/sqlite/` (`sqlite_db_initializer.dart`, `sqlite_row_mappers.dart`, `sqlite_tracks_store.dart`, `sqlite_albums_store.dart`, `sqlite_artists_store.dart`, `sqlite_collections_store.dart`, and `sqlite_history_store.dart`).
 
 ---
 

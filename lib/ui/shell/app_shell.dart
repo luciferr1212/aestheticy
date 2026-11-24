@@ -6,41 +6,26 @@ import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/playback_controller.dart';
-import '../../features/audio_lab/audio_lab_screen.dart';
-import '../../features/library/folder_management_sheet.dart';
-import '../../library/album_identity.dart';
-import '../../library/library_repository.dart';
-import '../../library/models.dart';
 import '../../features/collections/user_collections.dart';
 import '../../features/integration/tray_window_controller.dart';
-import '../../library/scan_service.dart';
-import '../../platform/window_service.dart';
-import '../mini_player/mini_player_controller.dart';
-import '../library/album_detail_view.dart';
-import '../library/albums_view.dart';
-import '../library/artist_detail_view.dart';
-import '../library/artists_view.dart';
-import '../library/favorites_view.dart';
-import '../library/library_data_cache.dart';
-import '../library/playlist_detail_view.dart';
-import '../library/playlists_view.dart';
-import '../library/recently_played_view.dart';
-import '../library/tracks_view.dart';
-import '../library/welcome_view.dart';
-import '../now_playing/full_screen_view.dart';
-import '../now_playing/now_playing_view.dart';
-import '../artist_names/artist_name_store.dart';
-import '../audio_panels/audio_panels_view.dart';
-import '../audio_panels/eq_controller.dart';
+import '../../features/library/folder_management_sheet.dart';
 import '../../features/lyrics/lyrics_controller.dart';
 import '../../features/lyrics/lyrics_repository.dart';
+import '../../library/library_repository.dart';
+import '../../library/models.dart';
+import '../../library/scan_service.dart';
+import '../../platform/window_service.dart';
+import '../artist_names/artist_name_store.dart';
+import '../audio_panels/eq_controller.dart';
+import '../library/library_data_cache.dart';
 import '../lyrics/lyrics_view.dart';
-import '../queue/queue_view.dart';
+import '../mini_player/mini_player_controller.dart';
+import '../now_playing/full_screen_view.dart';
+import '../now_playing/now_playing_view.dart';
 import '../quick_search/quick_search_overlay.dart';
 import '../settings/app_shortcuts.dart';
 import '../settings/audio_settings_applier.dart';
 import '../settings/settings_store.dart';
-import '../settings/settings_view.dart';
 import '../settings/shortcuts_cheat_sheet_dialog.dart';
 import 'ambient_background.dart';
 import 'app_navigator.dart';
@@ -51,6 +36,8 @@ import 'side_panel.dart';
 import 'side_panel_controller.dart';
 import 'sidebar.dart';
 import 'volume_hud.dart';
+import 'widgets/app_shell_destination_view.dart';
+import 'widgets/view_state_restorer.dart';
 
 /// Flagship application shell hosting the ambient background, navigation sidebar,
 /// dynamic content area, top scanning progress bar, and floating bottom player bar.
@@ -414,164 +401,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildContent(AppDestination destination) {
-    if (_folders.isEmpty) {
-      return WelcomeView(
-        settingsStore: widget.settingsStore,
-        onAddFolder: _onAddFolder,
-      );
-    }
-
-    switch (destination) {
-      case AppDestination.albums:
-        return AlbumsView(
-          key: const ValueKey('view_albums'),
-          repository: widget.repository,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          dataCache: _dataCache,
-        );
-      case AppDestination.artists:
-        return ArtistsView(
-          key: const ValueKey('view_artists'),
-          repository: widget.repository,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          dataCache: _dataCache,
-        );
-      case AppDestination.tracks:
-        return TracksView(
-          key: const ValueKey('view_tracks'),
-          repository: widget.repository,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          dataCache: _dataCache,
-        );
-      case AppDestination.albumDetail:
-        final album = widget.navigator.selectedAlbum ??
-            AlbumSummary(
-              album: widget.navigator.selectedAlbumId ?? '',
-              trackCount: 0,
-            );
-        return AlbumDetailView(
-          key: ValueKey(
-            'view_album_detail_${AlbumIdentity.forSummary(album)}',
-          ),
-          album: album,
-          repository: widget.repository,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          dataCache: _dataCache,
-        );
-      case AppDestination.artistDetail:
-        final artist = widget.navigator.selectedArtist ??
-            ArtistSummary(
-              name: widget.navigator.selectedArtistId ?? '',
-              albumCount: 0,
-              trackCount: 0,
-            );
-        return ArtistDetailView(
-          key: ValueKey('view_artist_detail_${artist.name}'),
-          artist: artist,
-          repository: widget.repository,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          dataCache: _dataCache,
-        );
-      case AppDestination.audioLab:
-        return AudioLabScreen(
-          key: const ValueKey('view_audio_lab'),
-          engine: widget.engine,
-          controller: widget.controller,
-        );
-      case AppDestination.settings:
-        return SettingsView(
-          key: const ValueKey('view_settings'),
-          engine: widget.engine,
-          repository: widget.repository,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          audioSettingsApplier: widget.audioSettingsApplier,
-          artistNameStore: widget.artistNameStore,
-          eqController: widget.eqController,
-          onOpenFolders: _openFolders,
-          trayWindowController: widget.trayWindowController,
-        );
-      case AppDestination.audioPanels:
-        return AudioPanelsView(
-          key: const ValueKey('view_audio_panels'),
-          engine: widget.engine,
-          eqController: widget.eqController,
-          audioSettingsApplier: widget.audioSettingsApplier,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-        );
-      case AppDestination.playlists:
-        return PlaylistsView(
-          key: const ValueKey('view_playlists'),
-          collections: _userCollections,
-          repository: widget.repository,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          dataCache: _dataCache,
-        );
-      case AppDestination.playlistDetail:
-        final playlistId = widget.navigator.selectedPlaylistId ?? 0;
-        final playlist = widget.navigator.selectedPlaylist;
-        return PlaylistDetailView(
-          key: ValueKey('view_playlist_detail_$playlistId'),
-          playlistId: playlistId,
-          initialPlaylist: playlist,
-          repository: widget.repository,
-          collections: _userCollections,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          navigator: widget.navigator,
-          dataCache: _dataCache,
-        );
-      case AppDestination.favorites:
-        return FavoritesView(
-          key: const ValueKey('view_favorites'),
-          repository: widget.repository,
-          collections: _userCollections,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          dataCache: _dataCache,
-        );
-      case AppDestination.recentlyPlayed:
-        return RecentlyPlayedView(
-          key: const ValueKey('view_recently_played'),
-          repository: widget.repository,
-          controller: widget.controller,
-          settingsStore: widget.settingsStore,
-          collections: _userCollections,
-          dataCache: _dataCache,
-        );
-      case AppDestination.queue:
-        return QueueView(
-          key: const ValueKey('view_queue'),
-          controller: widget.controller,
-          navigator: widget.navigator,
-          settingsStore: widget.settingsStore,
-          userCollections: _userCollections,
-        );
-      case AppDestination.folders:
-        // Revert to albums and open modal
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          widget.navigator.navigateTo(AppDestination.albums);
-          _openFolders();
-        });
-        return const SizedBox.shrink();
-      case AppDestination.lyrics:
-      case AppDestination.nowPlaying:
-      case AppDestination.fullScreen:
-        return const SizedBox.shrink();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoadingFolders) {
@@ -715,15 +544,35 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                                 child: child,
                                               );
                                             },
-                                            child: _ViewStateRestorer(
+                                            child: ViewStateRestorer(
                                               key: ValueKey(
                                                 'view_state_${widget.navigator.currentEntry.id}',
                                               ),
                                               entry:
                                                   widget.navigator.currentEntry,
                                               navigator: widget.navigator,
-                                              child: _buildContent(
-                                                currentDestination,
+                                              child: AppShellDestinationView(
+                                                destination: currentDestination,
+                                                hasFolders: _folders.isNotEmpty,
+                                                engine: widget.engine,
+                                                controller: widget.controller,
+                                                repository: widget.repository,
+                                                settingsStore:
+                                                    widget.settingsStore,
+                                                navigator: widget.navigator,
+                                                dataCache: _dataCache,
+                                                userCollections:
+                                                    _userCollections,
+                                                audioSettingsApplier:
+                                                    widget.audioSettingsApplier,
+                                                artistNameStore:
+                                                    widget.artistNameStore,
+                                                eqController:
+                                                    widget.eqController,
+                                                trayWindowController:
+                                                    widget.trayWindowController,
+                                                onAddFolder: _onAddFolder,
+                                                onOpenFolders: _openFolders,
                                               ),
                                             ),
                                           ),
@@ -805,128 +654,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ViewStateRestorer extends StatefulWidget {
-  final NavEntry entry;
-  final AppNavigator navigator;
-  final Widget child;
-
-  const _ViewStateRestorer({
-    super.key,
-    required this.entry,
-    required this.navigator,
-    required this.child,
-  });
-
-  @override
-  State<_ViewStateRestorer> createState() => _ViewStateRestorerState();
-}
-
-class _ViewStateRestorerState extends State<_ViewStateRestorer> {
-  late ScrollController _scrollController;
-  bool _restored = false;
-
-  bool get _isActive => widget.navigator.currentEntry.id == widget.entry.id;
-
-  @override
-  void initState() {
-    super.initState();
-    final savedOffset =
-        (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
-    _scrollController = ScrollController(initialScrollOffset: savedOffset);
-    _restored = savedOffset == 0.0;
-    if (_isActive) {
-      widget.navigator.onCaptureViewState = _captureOffset;
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_isActive) {
-        widget.navigator.onCaptureViewState = _captureOffset;
-        _restoreScrollIfNeeded();
-      }
-    });
-  }
-
-  void _captureOffset(Map<String, Object?> state) {
-    if (_isActive && _scrollController.hasClients) {
-      state['scrollOffset'] = _scrollController.offset;
-    }
-  }
-
-  void _restoreScrollIfNeeded() {
-    if (_restored || !_isActive) return;
-    final savedOffset =
-        (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
-    if (savedOffset > 0 && _scrollController.hasClients) {
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      if (maxScroll > 0) {
-        _scrollController.jumpTo(savedOffset.clamp(0.0, maxScroll));
-        _restored = true;
-      }
-    } else if (savedOffset == 0.0) {
-      _restored = true;
-    }
-  }
-
-  @override
-  void didUpdateWidget(_ViewStateRestorer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.entry.id != widget.entry.id) {
-      final savedOffset =
-          (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ?? 0.0;
-      _restored = savedOffset == 0.0;
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(savedOffset);
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _isActive) {
-          widget.navigator.onCaptureViewState = _captureOffset;
-          _restoreScrollIfNeeded();
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    if (widget.navigator.onCaptureViewState == _captureOffset) {
-      widget.navigator.onCaptureViewState = null;
-    }
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PrimaryScrollController(
-      controller: _scrollController,
-      automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (notif) {
-          if (!_isActive) return false;
-          if (notif.depth == 0) {
-            if (!_restored && notif.metrics.maxScrollExtent > 0) {
-              final savedOffset =
-                  (widget.entry.viewState['scrollOffset'] as num?)?.toDouble() ??
-                      0.0;
-              if (savedOffset > 0 && _scrollController.hasClients) {
-                _scrollController.jumpTo(
-                  savedOffset.clamp(0.0, notif.metrics.maxScrollExtent),
-                );
-              }
-              _restored = true;
-            } else if (_restored) {
-              widget.entry.viewState['scrollOffset'] = notif.metrics.pixels;
-            }
-          }
-          return false;
-        },
-        child: widget.child,
       ),
     );
   }

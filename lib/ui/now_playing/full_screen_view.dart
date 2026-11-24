@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -10,12 +8,9 @@ import 'package:flutter/services.dart';
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
-import '../../features/collections/user_collections.dart';
 import '../../features/lyrics/lyrics_controller.dart';
 import '../../features/lyrics/lyrics_repository.dart';
-import '../../library/cover_cache.dart';
 import '../artist_names/artist_name_scope.dart';
-import '../glass/glass_button.dart';
 import '../glass/glass_quality.dart';
 import '../glass/glass_scope.dart';
 import '../glass/glass_surface.dart';
@@ -30,8 +25,11 @@ import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 import '../theme/dither_noise.dart';
 import 'cover_palette.dart';
-import 'metadata_link.dart';
-import 'seek_bar_helper.dart';
+import 'widgets/full_screen_blob_painters.dart';
+import 'widgets/full_screen_chrome.dart';
+import 'widgets/full_screen_seek_bar.dart';
+
+export 'widgets/full_screen_seek_bar.dart' show FullScreenSeekDragState;
 
 /// Immersive full-screen playback view featuring drifting ambient color blobs,
 /// optional floating glass shapes, responsive typography, and slender timeline.
@@ -103,6 +101,9 @@ class FullScreenViewState extends State<FullScreenView>
 
   /// Exposes whether the animation ticker is active.
   bool get isTickerActive => _ticker.isActive;
+
+  static Alignment _resolveFillAlignment(bool isRtl) =>
+      isRtl ? Alignment.centerRight : Alignment.centerLeft;
 
   @override
   void initState() {
@@ -321,7 +322,8 @@ class FullScreenViewState extends State<FullScreenView>
 
   void _toggleGlassShapes() {
     final current = widget.settingsStore.settings.fullScreenGlassShapes;
-    widget.settingsStore.update((s) => s.copyWith(fullScreenGlassShapes: !current));
+    widget.settingsStore
+        .update((s) => s.copyWith(fullScreenGlassShapes: !current));
     _resetControlsTimer();
   }
 
@@ -367,7 +369,7 @@ class FullScreenViewState extends State<FullScreenView>
                   child: IgnorePointer(
                     child: RepaintBoundary(
                       child: CustomPaint(
-                        painter: _BlobPainter(
+                        painter: createFullScreenBlobPainter(
                           palette: _palette,
                           phaseListenable: _phaseNotifier,
                         ),
@@ -385,7 +387,7 @@ class FullScreenViewState extends State<FullScreenView>
                   child: IgnorePointer(
                     child: RepaintBoundary(
                       child: CustomPaint(
-                        painter: _StaticBlobPainter(
+                        painter: createFullScreenStaticBlobPainter(
                           palette: _palette,
                         ),
                       ),
@@ -457,7 +459,10 @@ class FullScreenViewState extends State<FullScreenView>
               Positioned.fill(
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 48,
+                      vertical: 32,
+                    ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final artworkSize = math.min(
@@ -471,109 +476,19 @@ class FullScreenViewState extends State<FullScreenView>
                             // Start side: Artwork + Metadata
                             Expanded(
                               flex: 5,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  _buildArtwork(coverKey, artworkSize),
-                                  const SizedBox(height: 28),
-                                  KeyedSubtree(
-                                    key: _controlsColumnKey,
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          children: [
-                                            Flexible(
-                                              child: Text(
-                                                title,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                textAlign: TextAlign.center,
-                                                textDirection:
-                                                    textDirectionFor(title),
-                                                style: AppTypography.title.copyWith(
-                                                  fontSize: 32,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: AppColors.text,
-                                                ),
-                                              ),
-                                            ),
-                                            if (hasTrack) ...[
-                                              const SizedBox(width: 10),
-                                              _FullScreenFavoriteButton(
-                                                  path: current.uri),
-                                            ],
-                                          ],
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Builder(
-                                          builder: (context) {
-                                            final canLink = hasTrack &&
-                                                rawArtist != null &&
-                                                rawArtist.trim().isNotEmpty;
-                                            return MetadataLink(
-                                              text: artist,
-                                              style: AppTypography.title.copyWith(
-                                                fontSize: 20,
-                                                color: AppColors.textSecondary,
-                                              ),
-                                              textAlign: TextAlign.center,
-                                              reduceMotion: widget.settingsStore.settings.reduceMotion,
-                                              semanticLabel: canLink
-                                                  ? context.t(
-                                                      'common.goToArtist',
-                                                      args: {'name': artist},
-                                                    )
-                                                  : null,
-                                              onTap: canLink
-                                                  ? () => MetadataNavHelper.openArtist(
-                                                        context: context,
-                                                        navigator: widget.navigator,
-                                                        rawArtist: rawArtist,
-                                                        leaveFullScreenFirst: true,
-                                                      )
-                                                  : null,
-                                            );
-                                          },
-                                        ),
-                                        if (album.isNotEmpty) ...[
-                                          const SizedBox(height: 4),
-                                          Builder(
-                                            builder: (context) {
-                                              final canLink = hasTrack &&
-                                                  album.trim().isNotEmpty;
-                                              return MetadataLink(
-                                                text: album,
-                                                style: AppTypography.bodyStrong.copyWith(
-                                                  fontSize: 16,
-                                                  color: AppColors.textMuted,
-                                                ),
-                                                textAlign: TextAlign.center,
-                                                reduceMotion: widget.settingsStore.settings.reduceMotion,
-                                                semanticLabel: canLink
-                                                    ? context.t(
-                                                        'common.goToAlbum',
-                                                        args: {'name': album},
-                                                      )
-                                                    : null,
-                                                onTap: canLink
-                                                    ? () => MetadataNavHelper.openAlbum(
-                                                          navigator: widget.navigator,
-                                                          albumTitle: album,
-                                                          leaveFullScreenFirst: true,
-                                                        )
-                                                    : null,
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                              child: FullScreenArtworkColumn(
+                                coverKey: coverKey,
+                                artworkSize: artworkSize,
+                                controlsColumnKey: _controlsColumnKey,
+                                hasTrack: hasTrack,
+                                trackUri: current?.uri,
+                                title: title,
+                                artist: artist,
+                                rawArtist: rawArtist,
+                                album: album,
+                                reduceMotion:
+                                    widget.settingsStore.settings.reduceMotion,
+                                navigator: widget.navigator,
                               ),
                             ),
                             if (widget.settingsStore.settings.showLyricsInFullScreen) ...[
@@ -608,60 +523,12 @@ class FullScreenViewState extends State<FullScreenView>
                 right: 0,
                 child: SafeArea(
                   key: _topBarKey,
-                  child: AnimatedOpacity(
-                    opacity: _showControls ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                      child: Row(
-                        children: [
-                          // Credit text "by mido"
-                          Text(
-                            context.t('app.credit'),
-                            style: AppTypography.caption.copyWith(
-                              color: AppColors.textMuted,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          const Spacer(),
-
-                          // Glass shapes toggle button
-                          GlassIconButton(
-                            key: const Key('fullscreen_toggle_glass_shapes'),
-                            icon: showGlassShapes ? Icons.grain : Icons.blur_off,
-                            tooltip: context.t('fullScreen.glassShapesTooltip'),
-                            semanticLabel: context.t('fullScreen.glassShapesTooltip'),
-                            variant: showGlassShapes
-                                ? GlassButtonVariant.selected
-                                : GlassButtonVariant.normal,
-                            onPressed: _toggleGlassShapes,
-                          ),
-                          if (widget.miniPlayerController != null) ...[
-                            const SizedBox(width: 12),
-                            GlassIconButton(
-                              key: const Key('fullscreen_mini_player_button'),
-                              icon: Icons.picture_in_picture_alt_outlined,
-                              tooltip: context.t('miniPlayer.enterTooltip'),
-                              semanticLabel: context.t('miniPlayer.enterTooltip'),
-                              onPressed: () {
-                                widget.navigator.goBack();
-                                widget.miniPlayerController?.enter();
-                              },
-                            ),
-                          ],
-                          const SizedBox(width: 12),
-
-                          // Exit full screen button
-                          GlassIconButton(
-                            key: const Key('fullscreen_exit_button'),
-                            icon: Icons.fullscreen_exit,
-                            tooltip: context.t('fullScreen.exitTooltip'),
-                            semanticLabel: context.t('fullScreen.exitTooltip'),
-                            onPressed: () => widget.navigator.goBack(),
-                          ),
-                        ],
-                      ),
-                    ),
+                  child: FullScreenTopBar(
+                    showControls: _showControls,
+                    showGlassShapes: showGlassShapes,
+                    navigator: widget.navigator,
+                    miniPlayerController: widget.miniPlayerController,
+                    onToggleGlassShapes: _toggleGlassShapes,
                   ),
                 ),
               ),
@@ -676,11 +543,12 @@ class FullScreenViewState extends State<FullScreenView>
                   textDirection: TextDirection.ltr,
                   child: RepaintBoundary(
                     key: _seekBarKey,
-                    child: _SlenderProgressLine(
+                    child: FullScreenSeekBar(
                       key: const ValueKey('fullscreen_seek_bar_line'),
                       engine: widget.engine,
                       controller: widget.controller,
                       reduceMotion: widget.settingsStore.settings.reduceMotion,
+                      resolveFillAlignment: _resolveFillAlignment,
                       onInteractionChanged: _onScrubberInteractionChanged,
                       onDragStateChanged: (state) {
                         if (mounted) {
@@ -735,558 +603,6 @@ class FullScreenViewState extends State<FullScreenView>
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildArtwork(String? coverKey, double size) {
-    final hasCover = coverKey != null && CoverCache.hasCover(coverKey);
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(32.0),
-        border: Border.all(color: AppColors.border, width: 1.0),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x55000000),
-            blurRadius: 36.0,
-            offset: Offset(0, 14.0),
-          ),
-        ],
-        color: AppColors.surface,
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(31.0),
-        child: hasCover
-            ? Image.file(
-                File(CoverCache.pathFor(coverKey)),
-                fit: BoxFit.cover,
-                cacheWidth: 1024,
-                gaplessPlayback: true,
-                errorBuilder: (_, _, _) => _placeholderIcon(),
-              )
-            : _placeholderIcon(),
-      ),
-    );
-  }
-
-  Widget _placeholderIcon() {
-    return const Center(
-      child: Icon(
-        Icons.music_note,
-        size: 80,
-        color: AppColors.textMuted,
-      ),
-    );
-  }
-}
-
-/// Single CustomPainter rendering 3 large drifting color blobs.
-class _BlobPainter extends CustomPainter {
-  final CoverPalette palette;
-  final ValueListenable<double> phaseListenable;
-
-  _BlobPainter({
-    required this.palette,
-    required this.phaseListenable,
-  }) : super(repaint: phaseListenable);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    if (w <= 0 || h <= 0) return;
-
-    final phase = phaseListenable.value;
-
-    // Blob 1: primary color
-    final p1 = Offset(
-      w * (0.32 + 0.10 * math.sin(phase * 0.3)),
-      h * (0.38 + 0.10 * math.cos(phase * 0.2)),
-    );
-    final r1 = w * 0.35;
-    final paint1 = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          palette.primary.withValues(alpha: 0.20),
-          palette.primary.withValues(alpha: 0.14),
-          palette.primary.withValues(alpha: 0.07),
-          palette.primary.withValues(alpha: 0.0),
-        ],
-        stops: const [0.0, 0.45, 0.75, 1.0],
-      ).createShader(Rect.fromCircle(center: p1, radius: r1));
-    canvas.drawCircle(p1, r1, paint1);
-
-    // Blob 2: secondary color
-    final p2 = Offset(
-      w * (0.68 + 0.12 * math.cos(phase * 0.25)),
-      h * (0.55 + 0.08 * math.sin(phase * 0.35)),
-    );
-    final r2 = w * 0.38;
-    final paint2 = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          palette.secondary.withValues(alpha: 0.20),
-          palette.secondary.withValues(alpha: 0.14),
-          palette.secondary.withValues(alpha: 0.07),
-          palette.secondary.withValues(alpha: 0.0),
-        ],
-        stops: const [0.0, 0.45, 0.75, 1.0],
-      ).createShader(Rect.fromCircle(center: p2, radius: r2));
-    canvas.drawCircle(p2, r2, paint2);
-
-    // Blob 3: tertiary color
-    final p3 = Offset(
-      w * (0.48 + 0.10 * math.sin(phase * 0.18)),
-      h * (0.75 + 0.08 * math.cos(phase * 0.22)),
-    );
-    final r3 = w * 0.34;
-    final paint3 = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          palette.tertiary.withValues(alpha: 0.20),
-          palette.tertiary.withValues(alpha: 0.14),
-          palette.tertiary.withValues(alpha: 0.07),
-          palette.tertiary.withValues(alpha: 0.0),
-        ],
-        stops: const [0.0, 0.45, 0.75, 1.0],
-      ).createShader(Rect.fromCircle(center: p3, radius: r3));
-    canvas.drawCircle(p3, r3, paint3);
-  }
-
-  @override
-  bool shouldRepaint(_BlobPainter oldDelegate) {
-    return oldDelegate.palette != palette ||
-        oldDelegate.phaseListenable != phaseListenable;
-  }
-}
-
-/// Static cheap gradient blob painter for [GlassQuality.light] with zero per-frame animation.
-class _StaticBlobPainter extends CustomPainter {
-  final CoverPalette palette;
-
-  const _StaticBlobPainter({required this.palette});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    if (w <= 0 || h <= 0) return;
-
-    final paint1 = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          palette.primary.withValues(alpha: 0.20),
-          Colors.transparent,
-        ],
-      ).createShader(Rect.fromCircle(center: Offset(w * 0.35, h * 0.4), radius: w * 0.35));
-    canvas.drawCircle(Offset(w * 0.35, h * 0.4), w * 0.35, paint1);
-
-    final paint2 = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          palette.secondary.withValues(alpha: 0.20),
-          Colors.transparent,
-        ],
-      ).createShader(Rect.fromCircle(center: Offset(w * 0.65, h * 0.6), radius: w * 0.38));
-    canvas.drawCircle(Offset(w * 0.65, h * 0.6), w * 0.38, paint2);
-  }
-
-  @override
-  bool shouldRepaint(_StaticBlobPainter oldDelegate) => oldDelegate.palette != palette;
-}
-
-/// Represents the drag scrub state for the full-screen seek bar tooltip overlay.
-class FullScreenSeekDragState {
-  /// The local horizontal pointer offset.
-  final double pointerDx;
-
-  /// The targeted scrub duration.
-  final Duration position;
-
-  /// Creates a [FullScreenSeekDragState].
-  const FullScreenSeekDragState({
-    required this.pointerDx,
-    required this.position,
-  });
-}
-
-/// Interactive progress line spanning the bottom edge of the screen.
-class _SlenderProgressLine extends StatefulWidget {
-  final AudioEngine engine;
-  final PlaybackController? controller;
-  final bool reduceMotion;
-  final ValueChanged<bool>? onInteractionChanged;
-  final ValueChanged<FullScreenSeekDragState?>? onDragStateChanged;
-
-  const _SlenderProgressLine({
-    super.key,
-    required this.engine,
-    this.controller,
-    this.reduceMotion = false,
-    this.onInteractionChanged,
-    this.onDragStateChanged,
-  });
-
-  @override
-  State<_SlenderProgressLine> createState() => _SlenderProgressLineState();
-}
-
-class _SlenderProgressLineState extends State<_SlenderProgressLine> {
-  static const Duration _kDragSeekThrottle = Duration(milliseconds: 120);
-  static const Duration _kSemanticsSeekStep = Duration(seconds: 5);
-
-  bool _isHovered = false;
-  bool _isDragging = false;
-  double? _dragFraction;
-  Timer? _seekThrottleTimer;
-  Duration? _pendingSeekTarget;
-  Duration _activeTotalDuration = Duration.zero;
-  StreamSubscription<Duration>? _seekSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _subscribeSeekStream();
-  }
-
-  @override
-  void didUpdateWidget(_SlenderProgressLine oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      _seekSub?.cancel();
-      _subscribeSeekStream();
-    }
-  }
-
-  void _subscribeSeekStream() {
-    _seekSub = widget.controller?.seekStream.listen((_) {
-      if (mounted && widget.controller?.currentState == PlaybackState.idle) {
-        setState(() {});
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _seekThrottleTimer?.cancel();
-    _seekSub?.cancel();
-    super.dispose();
-  }
-
-  void _setHover(bool hovered) {
-    if (_isHovered == hovered) return;
-    final wasActive = _isHovered || _isDragging;
-    setState(() => _isHovered = hovered);
-    final isActive = _isHovered || _isDragging;
-    if (wasActive != isActive) {
-      widget.onInteractionChanged?.call(isActive);
-    }
-  }
-
-  void _dispatchSeekImmediate(Duration target, Duration total) {
-    if (total <= Duration.zero) return;
-    dispatchSeekBarSeek(
-      engine: widget.engine,
-      controller: widget.controller,
-      target: target,
-      totalDuration: total,
-    );
-    if (widget.controller?.currentState == PlaybackState.idle && mounted) {
-      setState(() {});
-    }
-  }
-
-  void _scheduleThrottledSeek(Duration target, Duration total) {
-    _activeTotalDuration = total;
-    if (total <= Duration.zero) return;
-    if (_seekThrottleTimer == null) {
-      _dispatchSeekImmediate(target, total);
-      _seekThrottleTimer = Timer(_kDragSeekThrottle, _onThrottleElapsed);
-    } else {
-      _pendingSeekTarget = target;
-    }
-  }
-
-  void _onThrottleElapsed() {
-    _seekThrottleTimer = null;
-    if (!_isDragging) {
-      _pendingSeekTarget = null;
-      return;
-    }
-    final pending = _pendingSeekTarget;
-    _pendingSeekTarget = null;
-    if (pending != null && _activeTotalDuration > Duration.zero) {
-      _dispatchSeekImmediate(pending, _activeTotalDuration);
-      _seekThrottleTimer = Timer(_kDragSeekThrottle, _onThrottleElapsed);
-    }
-  }
-
-  void _handleTapUp(
-    TapUpDetails details,
-    double width,
-    bool isRtl,
-    Duration total,
-  ) {
-    if (total <= Duration.zero) return;
-    final frac = seekBarFractionForDx(
-      dx: details.localPosition.dx,
-      width: width,
-      isRtl: isRtl,
-    );
-    final target = seekBarDurationForFraction(
-      fraction: frac,
-      totalDuration: total,
-    );
-    _dispatchSeekImmediate(target, total);
-  }
-
-  void _handleDragStart(
-    DragStartDetails details,
-    double width,
-    bool isRtl,
-    Duration total,
-  ) {
-    final wasActive = _isHovered || _isDragging;
-    final frac = seekBarFractionForDx(
-      dx: details.localPosition.dx,
-      width: width,
-      isRtl: isRtl,
-    );
-    final pointerDx = details.localPosition.dx.clamp(0.0, width);
-    final target = total > Duration.zero
-        ? seekBarDurationForFraction(fraction: frac, totalDuration: total)
-        : Duration.zero;
-
-    setState(() {
-      _isDragging = true;
-      _dragFraction = total > Duration.zero ? frac : null;
-    });
-
-    if (total > Duration.zero) {
-      widget.onDragStateChanged?.call(
-        FullScreenSeekDragState(pointerDx: pointerDx, position: target),
-      );
-      _scheduleThrottledSeek(target, total);
-    }
-
-    if (!wasActive) {
-      widget.onInteractionChanged?.call(true);
-    }
-  }
-
-  void _handleDragUpdate(
-    DragUpdateDetails details,
-    double width,
-    bool isRtl,
-    Duration total,
-  ) {
-    final frac = seekBarFractionForDx(
-      dx: details.localPosition.dx,
-      width: width,
-      isRtl: isRtl,
-    );
-    final pointerDx = details.localPosition.dx.clamp(0.0, width);
-    final target = total > Duration.zero
-        ? seekBarDurationForFraction(fraction: frac, totalDuration: total)
-        : Duration.zero;
-
-    setState(() {
-      _dragFraction = total > Duration.zero ? frac : null;
-    });
-
-    if (total > Duration.zero) {
-      widget.onDragStateChanged?.call(
-        FullScreenSeekDragState(pointerDx: pointerDx, position: target),
-      );
-      _scheduleThrottledSeek(target, total);
-    }
-  }
-
-  void _finishDrag(Duration total, {required bool commitSeek}) {
-    _seekThrottleTimer?.cancel();
-    _seekThrottleTimer = null;
-    final pending = _pendingSeekTarget;
-    _pendingSeekTarget = null;
-    final frac = _dragFraction;
-    if (commitSeek && total > Duration.zero) {
-      final target = pending ??
-          (frac != null
-              ? seekBarDurationForFraction(fraction: frac, totalDuration: total)
-              : null);
-      if (target != null) {
-        _dispatchSeekImmediate(target, total);
-      }
-    }
-    final wasActive = _isHovered || _isDragging;
-    setState(() {
-      _isDragging = false;
-      _dragFraction = null;
-    });
-    widget.onDragStateChanged?.call(null);
-    final isActive = _isHovered || _isDragging;
-    if (wasActive != isActive) {
-      widget.onInteractionChanged?.call(isActive);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isRtl = Directionality.of(context) == TextDirection.rtl;
-
-    return StreamBuilder<Duration>(
-      stream: widget.engine.durationStream,
-      initialData:
-          widget.controller?.currentDuration ?? widget.engine.currentDuration,
-      builder: (context, durSnapshot) {
-        final total = resolveSeekBarDuration(
-          engine: widget.engine,
-          controller: widget.controller,
-          streamDuration: durSnapshot.data,
-        );
-
-        return StreamBuilder<Duration>(
-          stream: widget.engine.positionStream,
-          initialData: widget.controller?.currentPosition ??
-              widget.engine.currentPosition,
-          builder: (context, posSnapshot) {
-            final pos = resolveSeekBarPosition(
-              engine: widget.engine,
-              controller: widget.controller,
-              streamPosition: posSnapshot.data,
-            );
-            final displayFraction = _dragFraction ??
-                (total.inMilliseconds > 0
-                    ? (pos.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
-                    : 0.0);
-            final displayPos = _dragFraction != null
-                ? seekBarDurationForFraction(
-                    fraction: displayFraction,
-                    totalDuration: total,
-                  )
-                : pos;
-
-            return Semantics(
-              slider: true,
-              label: context.t('fullScreen.seekBarLabel'),
-              value: context.formatDurationLocalized(displayPos),
-              increasedValue: total > Duration.zero
-                  ? context.formatDurationLocalized(
-                      clampSeekTarget(displayPos + _kSemanticsSeekStep, total),
-                    )
-                  : null,
-              decreasedValue: total > Duration.zero
-                  ? context.formatDurationLocalized(
-                      clampSeekTarget(displayPos - _kSemanticsSeekStep, total),
-                    )
-                  : null,
-              onIncrease: total > Duration.zero
-                  ? () => _dispatchSeekImmediate(
-                        displayPos + _kSemanticsSeekStep,
-                        total,
-                      )
-                  : null,
-              onDecrease: total > Duration.zero
-                  ? () => _dispatchSeekImmediate(
-                        displayPos - _kSemanticsSeekStep,
-                        total,
-                      )
-                  : null,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = constraints.maxWidth;
-
-                  return SizedBox(
-                    height: 28.0,
-                    width: double.infinity,
-                    child: MouseRegion(
-                      cursor: total > Duration.zero
-                          ? SystemMouseCursors.click
-                          : SystemMouseCursors.basic,
-                      onEnter: (_) => _setHover(true),
-                      onExit: (_) => _setHover(false),
-                      child: GestureDetector(
-                        key: const Key('fullscreen_seek_bar'),
-                        behavior: HitTestBehavior.opaque,
-                        onTapUp: (details) =>
-                            _handleTapUp(details, width, isRtl, total),
-                        onHorizontalDragStart: (details) =>
-                            _handleDragStart(details, width, isRtl, total),
-                        onHorizontalDragUpdate: (details) =>
-                            _handleDragUpdate(details, width, isRtl, total),
-                        onHorizontalDragEnd: (_) =>
-                            _finishDrag(total, commitSeek: true),
-                        onHorizontalDragCancel: () =>
-                            _finishDrag(total, commitSeek: false),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                key: const Key('fullscreen_seek_track'),
-                                height: 3.0,
-                                color: Colors.white.withValues(alpha: 0.24),
-                                child: FractionallySizedBox(
-                                  alignment: isRtl
-                                      ? Alignment.centerRight
-                                      : Alignment.centerLeft,
-                                  widthFactor: displayFraction,
-                                  child: Container(
-                                    key: const Key('fullscreen_seek_fill'),
-                                    height: 3.0,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _FullScreenFavoriteButton extends StatelessWidget {
-  final String path;
-
-  const _FullScreenFavoriteButton({required this.path});
-
-  @override
-  Widget build(BuildContext context) {
-    final collections = UserCollectionsScope.maybeOf(context);
-    if (collections == null) return const SizedBox.shrink();
-
-    return ListenableBuilder(
-      listenable: collections,
-      builder: (context, _) {
-        final isFav = collections.isFavorite(path);
-
-        return IconButton(
-          key: const Key('fullscreen_favorite_button'),
-          icon: Icon(
-            isFav ? Icons.favorite : Icons.favorite_border,
-            size: 24,
-            color: isFav ? AppColors.accent : AppColors.textMuted,
-          ),
-          tooltip: isFav
-              ? context.t('track.unfavorite')
-              : context.t('track.favorite'),
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-          onPressed: () => collections.toggleFavorite(path),
-        );
-      },
     );
   }
 }

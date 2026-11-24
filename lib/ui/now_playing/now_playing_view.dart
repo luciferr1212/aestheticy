@@ -2,14 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart' hide RepeatMode;
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
-import '../../audio/playback_queue.dart';
-import '../../features/collections/user_collections.dart';
 import '../../features/lyrics/lyrics_controller.dart';
 import '../../features/lyrics/lyrics_repository.dart';
 import '../../library/cover_cache.dart';
@@ -19,21 +17,21 @@ import '../glass/glass_quality.dart';
 import '../glass/glass_scope.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
-import '../l10n/number_format.dart';
 import '../lyrics/lyrics_view.dart';
 import '../settings/app_shortcuts.dart';
-import '../settings/settings_scope.dart';
 import '../settings/settings_store.dart';
 import '../shell/app_navigator.dart';
-import '../shell/volume_hud.dart';
-import '../shell/volume_wheel_region.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import '../theme/dither_noise.dart';
 import 'cover_palette.dart';
-import 'metadata_link.dart';
-import 'seek_bar_helper.dart';
+import 'widgets/now_playing_controls.dart';
+import 'widgets/now_playing_metadata_area.dart';
+import 'widgets/now_playing_seek_bar.dart';
+import 'widgets/now_playing_up_next_list.dart';
+
+export 'widgets/now_playing_seek_bar.dart';
 
 /// Full-window Now Playing screen with two-column responsive layout,
 /// artwork, transport controls, isolated seekbar, up next queue, and stream info.
@@ -299,13 +297,14 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                         const SizedBox(height: 8),
                                         _buildArtwork(coverKey, artworkSize),
                                         const SizedBox(height: 20),
-                                        _MetadataArea(
+                                        NowPlayingMetadataArea(
                                           title: title,
                                           artist: artist,
                                           album: album,
                                           rawArtist: rawArtist,
                                           navigator: widget.navigator,
-                                          reduceMotion: widget.settingsStore.settings.reduceMotion,
+                                          reduceMotion: widget.settingsStore
+                                              .settings.reduceMotion,
                                           trackPath: current?.uri,
                                           onBuild: widget.onMetadataBuild,
                                         ),
@@ -313,7 +312,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                         // Isolated seekbar leaf widget (zero rebuilds on ticks)
                                         Directionality(
                                           textDirection: TextDirection.ltr,
-                                          child: _IsolatedSeekBar(
+                                          child: NowPlayingSeekBar(
                                             engine: widget.engine,
                                             controller: widget.controller,
                                           ),
@@ -322,7 +321,11 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                                         // Transport row (strictly LTR)
                                         Directionality(
                                           textDirection: TextDirection.ltr,
-                                          child: _buildTransportRow(context),
+                                          child: NowPlayingTransportRow(
+                                            controller: widget.controller,
+                                            onToggleShuffle: _toggleShuffle,
+                                            onCycleRepeat: _cycleRepeat,
+                                          ),
                                         ),
                                         const SizedBox(height: 16),
                                       ],
@@ -428,136 +431,6 @@ class _NowPlayingViewState extends State<NowPlayingView> {
     );
   }
 
-  Widget _buildTransportRow(BuildContext context) {
-    final isShuffled = widget.controller.queue.isShuffled;
-    final repeatMode = widget.controller.queue.repeatMode;
-
-    return StreamBuilder<PlaybackState>(
-      stream: widget.controller.stateStream,
-      initialData: widget.controller.currentState,
-      builder: (context, snapshot) {
-        final state = snapshot.data ?? PlaybackState.idle;
-        final isPlaying = state == PlaybackState.playing;
-
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Shuffle
-            GlassIconButton(
-              key: const Key('now_playing_shuffle_button'),
-              icon: Icons.shuffle,
-              tooltip: context.t('player.shuffle'),
-              semanticLabel: context.t('player.shuffle'),
-              variant: isShuffled
-                  ? GlassButtonVariant.selected
-                  : GlassButtonVariant.normal,
-              onPressed: _toggleShuffle,
-            ),
-            const SizedBox(width: 12),
-
-            // Previous
-            GlassIconButton(
-              key: const Key('now_playing_prev_button'),
-              icon: Icons.skip_previous,
-              tooltip: context.t('common.previous'),
-              semanticLabel: context.t('common.previous'),
-              onPressed: () => widget.controller.skipPrevious(),
-            ),
-            const SizedBox(width: 16),
-
-            // Play / Pause (Large 60dp)
-            SizedBox(
-              width: 60,
-              height: 60,
-              child: GlassIconButton(
-                key: const Key('now_playing_play_pause_button'),
-                icon: isPlaying ? Icons.pause : Icons.play_arrow,
-                tooltip: isPlaying
-                    ? context.t('common.pause')
-                    : context.t('common.play'),
-                semanticLabel: isPlaying
-                    ? context.t('common.pause')
-                    : context.t('common.play'),
-                variant: GlassButtonVariant.primary,
-                size: GlassButtonSize.large,
-                onPressed: () => widget.controller.togglePlayPause(),
-              ),
-            ),
-            const SizedBox(width: 16),
-
-            // Next
-            GlassIconButton(
-              key: const Key('now_playing_next_button'),
-              icon: Icons.skip_next,
-              tooltip: context.t('common.next'),
-              semanticLabel: context.t('common.next'),
-              onPressed: () => widget.controller.skipNext(),
-            ),
-            const SizedBox(width: 12),
-
-            // Repeat (off -> all -> one -> off)
-            _buildRepeatButton(context, repeatMode),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildRepeatButton(BuildContext context, RepeatMode mode) {
-    final (variant, tooltip) = switch (mode) {
-      RepeatMode.off => (GlassButtonVariant.normal, context.t('player.repeatOff')),
-      RepeatMode.all => (GlassButtonVariant.selected, context.t('player.repeatAll')),
-      RepeatMode.one => (GlassButtonVariant.selected, context.t('player.repeatOne')),
-    };
-
-    if (mode == RepeatMode.one) {
-      return Stack(
-        alignment: Alignment.center,
-        children: [
-          GlassIconButton(
-            key: const Key('now_playing_repeat_button'),
-            icon: Icons.repeat_one,
-            tooltip: tooltip,
-            semanticLabel: tooltip,
-            variant: variant,
-            onPressed: _cycleRepeat,
-          ),
-          PositionedDirectional(
-            end: 4,
-            top: 4,
-            child: IgnorePointer(
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: const BoxDecoration(
-                  color: AppColors.accent,
-                  shape: BoxShape.circle,
-                ),
-                child: const Text(
-                  '1',
-                  style: TextStyle(
-                    color: AppColors.base,
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold,
-                    height: 1,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return GlassIconButton(
-      key: const Key('now_playing_repeat_button'),
-      icon: Icons.repeat,
-      tooltip: tooltip,
-      semanticLabel: tooltip,
-      variant: variant,
-      onPressed: _cycleRepeat,
-    );
-  }
-
   Widget _buildEndCard(BuildContext context) {
     return GlassSurface(
       density: GlassDensity.clear,
@@ -576,7 +449,8 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                   borderRadius: BorderRadius.circular(AppSpacing.r12),
                   onTap: () => setState(() => _activeTabIndex = 0),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     child: Text(
                       context.t('nowPlaying.upNext'),
                       style: AppTypography.bodyStrong.copyWith(
@@ -597,7 +471,8 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                   borderRadius: BorderRadius.circular(AppSpacing.r12),
                   onTap: () => setState(() => _activeTabIndex = 1),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     child: Text(
                       context.t('nowPlaying.lyrics'),
                       style: AppTypography.bodyStrong.copyWith(
@@ -620,11 +495,15 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                     onPressed: () => widget.navigator.openQueue(),
                     style: TextButton.styleFrom(
                       foregroundColor: AppColors.textSecondary,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                     ),
                     child: Text(
                       context.t('nowPlaying.openQueue'),
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                      style: AppTypography.caption
+                          .copyWith(color: AppColors.textMuted),
                     ),
                   ),
                   const SizedBox(width: 4),
@@ -632,11 +511,15 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                     onPressed: _clearUpcoming,
                     style: TextButton.styleFrom(
                       foregroundColor: AppColors.textSecondary,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                     ),
                     child: Text(
                       context.t('nowPlaying.clearUpcoming'),
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                      style: AppTypography.caption
+                          .copyWith(color: AppColors.textMuted),
                     ),
                   ),
                 ],
@@ -648,7 +531,10 @@ class _NowPlayingViewState extends State<NowPlayingView> {
           // Tab content area
           Expanded(
             child: _activeTabIndex == 0
-                ? _buildUpcomingList(context)
+                ? NowPlayingUpNextList(
+                    controller: widget.controller,
+                    onPlayUpcoming: _playUpcoming,
+                  )
                 : _buildLyricsView(context),
           ),
           const SizedBox(height: 12),
@@ -663,7 +549,7 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                   key: const Key('now_playing_stream_info_pill'),
                   borderRadius: BorderRadius.circular(AppSpacing.pill),
                   onTap: () => widget.navigator.openAudioPanels(),
-                  child: _StreamInfoPill(engine: widget.engine),
+                  child: NowPlayingStreamInfoPill(engine: widget.engine),
                 ),
                 const SizedBox(width: 8),
                 GlassIconButton(
@@ -683,111 +569,12 @@ class _NowPlayingViewState extends State<NowPlayingView> {
                 ),
                 const SizedBox(width: 16),
                 // Volume slider
-                _VolumeControl(engine: widget.engine),
+                NowPlayingVolumeControl(engine: widget.engine),
               ],
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildUpcomingList(BuildContext context) {
-    final queue = widget.controller.queue;
-    final items = queue.items;
-    final currentIndex = queue.currentIndex;
-
-    final upcomingIndices = <int>[];
-    for (int i = currentIndex + 1; i < items.length; i++) {
-      upcomingIndices.add(i);
-    }
-
-    if (upcomingIndices.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.queue_music, size: 40, color: AppColors.textMuted),
-            const SizedBox(height: 8),
-            Text(
-              context.t('nowPlaying.nothingQueued'),
-              style: AppTypography.body.copyWith(color: AppColors.textMuted),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: upcomingIndices.length,
-      itemBuilder: (context, index) {
-        final queueIndex = upcomingIndices[index];
-        final source = items[queueIndex];
-        final trackTitle =
-            source.extras?['title'] ?? context.t('library.unknownTitle');
-        final rawTrackArtist = source.extras?['artist'];
-        final trackArtist = rawTrackArtist != null && rawTrackArtist.isNotEmpty
-            ? context.displayArtist(rawTrackArtist)
-            : '—';
-        final durationMsStr = source.extras?['durationMs'];
-        final durationMs = int.tryParse(durationMsStr ?? '');
-        final durationText = durationMs != null
-            ? context.formatDurationLocalized(Duration(milliseconds: durationMs))
-            : '—';
-
-        return RepaintBoundary(
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              mouseCursor: SystemMouseCursors.click,
-              hoverColor: const Color(0x14FFFFFF),
-              borderRadius: BorderRadius.circular(AppSpacing.r12),
-              onTap: () => _playUpcoming(queueIndex),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 24,
-                      child: Text(
-                        '${index + 1}',
-                        style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            trackTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textDirection: textDirectionFor(trackTitle),
-                            style: AppTypography.bodyStrong.copyWith(color: AppColors.text),
-                          ),
-                          Text(
-                            trackArtist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textDirection: textDirectionFor(trackArtist),
-                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      durationText,
-                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -798,505 +585,6 @@ class _NowPlayingViewState extends State<NowPlayingView> {
       settingsStore: widget.settingsStore,
       navigator: widget.navigator,
       showHeader: false,
-    );
-  }
-}
-
-/// Metadata area isolated from seek ticks.
-class _MetadataArea extends StatelessWidget {
-  final String title;
-  final String artist;
-  final String album;
-  final String? rawArtist;
-  final AppNavigator navigator;
-  final bool reduceMotion;
-  final String? trackPath;
-  final VoidCallback? onBuild;
-
-  const _MetadataArea({
-    required this.title,
-    required this.artist,
-    required this.album,
-    this.rawArtist,
-    required this.navigator,
-    this.reduceMotion = false,
-    this.trackPath,
-    this.onBuild,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    onBuild?.call();
-
-    final canLinkArtist = rawArtist != null && rawArtist!.trim().isNotEmpty;
-    final canLinkAlbum = album.trim().isNotEmpty;
-
-    return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Flexible(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                textDirection: textDirectionFor(title),
-                style: AppTypography.title
-                    .copyWith(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-            ),
-            if (trackPath != null) ...[
-              const SizedBox(width: 8),
-              _NowPlayingFavoriteButton(path: trackPath!),
-            ],
-          ],
-        ),
-        const SizedBox(height: 4),
-        MetadataLink(
-          text: artist,
-          style: AppTypography.bodyStrong.copyWith(
-            color: AppColors.textSecondary,
-            fontSize: 16,
-          ),
-          textAlign: TextAlign.center,
-          reduceMotion: reduceMotion,
-          semanticLabel: canLinkArtist
-              ? context.t('common.goToArtist', args: {'name': artist})
-              : null,
-          onTap: canLinkArtist
-              ? () => MetadataNavHelper.openArtist(
-                    context: context,
-                    navigator: navigator,
-                    rawArtist: rawArtist!,
-                  )
-              : null,
-        ),
-        if (album.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          MetadataLink(
-            text: album,
-            style: AppTypography.caption.copyWith(
-              color: AppColors.textMuted,
-              fontSize: 14,
-            ),
-            textAlign: TextAlign.center,
-            reduceMotion: reduceMotion,
-            semanticLabel: canLinkAlbum
-                ? context.t('common.goToAlbum', args: {'name': album})
-                : null,
-            onTap: canLinkAlbum
-                ? () => MetadataNavHelper.openAlbum(
-                      navigator: navigator,
-                      albumTitle: album,
-                    )
-                : null,
-          ),
-        ],
-        if (trackPath != null) ...[
-          const SizedBox(height: 10),
-          _TrackStarRatingControl(trackPath: trackPath!),
-        ],
-      ],
-    );
-  }
-}
-
-class _NowPlayingFavoriteButton extends StatelessWidget {
-  final String path;
-
-  const _NowPlayingFavoriteButton({required this.path});
-
-  @override
-  Widget build(BuildContext context) {
-    final collections = UserCollectionsScope.maybeOf(context);
-    if (collections == null) return const SizedBox.shrink();
-
-    return ListenableBuilder(
-      listenable: collections,
-      builder: (context, _) {
-        final isFav = collections.isFavorite(path);
-
-        return IconButton(
-          key: const Key('now_playing_favorite_button'),
-          icon: Icon(
-            isFav ? Icons.favorite : Icons.favorite_border,
-            size: 22,
-            color: isFav ? AppColors.accent : AppColors.textMuted,
-          ),
-          tooltip: isFav
-              ? context.t('track.unfavorite')
-              : context.t('track.favorite'),
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          onPressed: () => collections.toggleFavorite(path),
-        );
-      },
-    );
-  }
-}
-
-class _TrackStarRatingControl extends StatelessWidget {
-  final String trackPath;
-
-  const _TrackStarRatingControl({required this.trackPath});
-
-  @override
-  Widget build(BuildContext context) {
-    final collections = UserCollectionsScope.maybeOf(context);
-    if (collections == null) return const SizedBox.shrink();
-
-    return ListenableBuilder(
-      listenable: collections,
-      builder: (context, _) {
-        final currentRating = collections.ratingOf(trackPath);
-
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            for (var s = 1; s <= 5; s++)
-              IconButton(
-                key: Key('rating_star_$s'),
-                icon: Icon(
-                  currentRating >= s ? Icons.star : Icons.star_border,
-                  size: 20,
-                  color: currentRating >= s
-                      ? AppColors.accent
-                      : AppColors.textMuted,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                constraints:
-                    const BoxConstraints(minWidth: 28, minHeight: 28),
-                tooltip: currentRating == s
-                    ? context.t('track.clearRating')
-                    : context.t('track.rateStars', args: {
-                        'stars': context.localizeDigitsText('$s'),
-                      }),
-                onPressed: () {
-                  if (currentRating == s) {
-                    collections.setRating(trackPath, 0);
-                  } else {
-                    collections.setRating(trackPath, s);
-                  }
-                },
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Isolated seekbar leaf listening to position and duration streams.
-class NowPlayingSeekBar extends StatefulWidget {
-  final AudioEngine engine;
-  final PlaybackController? controller;
-
-  const NowPlayingSeekBar({super.key, required this.engine, this.controller});
-
-  @override
-  State<NowPlayingSeekBar> createState() => _NowPlayingSeekBarState();
-}
-
-typedef _IsolatedSeekBar = NowPlayingSeekBar;
-
-class _NowPlayingSeekBarState extends State<NowPlayingSeekBar> {
-  StreamSubscription<Duration>? _seekSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _seekSub = widget.controller?.seekStream.listen((_) {
-      if (mounted && widget.controller?.currentState == PlaybackState.idle) {
-        setState(() {});
-      }
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant NowPlayingSeekBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      _seekSub?.cancel();
-      _seekSub = widget.controller?.seekStream.listen((_) {
-        if (mounted && widget.controller?.currentState == PlaybackState.idle) {
-          setState(() {});
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _seekSub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = widget.controller;
-    final engine = widget.engine;
-
-    return StreamBuilder<Duration>(
-      stream: engine.durationStream,
-      initialData: controller?.currentDuration ?? engine.currentDuration,
-      builder: (context, durSnapshot) {
-        final totalDuration = resolveSeekBarDuration(
-          engine: engine,
-          controller: controller,
-          streamDuration: durSnapshot.data,
-        );
-
-        return StreamBuilder<Duration>(
-          stream: engine.positionStream,
-          initialData: controller?.currentPosition ?? engine.currentPosition,
-          builder: (context, posSnapshot) {
-            final position = resolveSeekBarPosition(
-              engine: engine,
-              controller: controller,
-              streamPosition: posSnapshot.data,
-            );
-            final maxMs = totalDuration.inMilliseconds.toDouble();
-            final currentMs =
-                position.inMilliseconds.toDouble().clamp(0.0, maxMs > 0 ? maxMs : 1.0);
-
-            return Directionality(
-              textDirection: TextDirection.ltr,
-              child: SizedBox(
-                height: 24,
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 36,
-                      child: Text(
-                        context.formatDurationLocalized(position),
-                        textAlign: TextAlign.end,
-                        style: AppTypography.caption.copyWith(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: SliderTheme(
-                        data: SliderThemeData(
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.0),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
-                          trackHeight: 3.5,
-                          activeTrackColor: AppColors.accent,
-                          inactiveTrackColor: AppColors.border,
-                          thumbColor: AppColors.accent,
-                          mouseCursor: WidgetStateProperty.resolveWith<MouseCursor>((states) =>
-                              states.contains(WidgetState.disabled)
-                                  ? SystemMouseCursors.basic
-                                  : SystemMouseCursors.click),
-                        ),
-                        child: Slider(
-                          value: maxMs > 0 ? currentMs : 0.0,
-                          max: maxMs > 0 ? maxMs : 1.0,
-                          onChanged: (val) {
-                            final target = Duration(milliseconds: val.toInt());
-                            dispatchSeekBarSeek(
-                              engine: engine,
-                              controller: controller,
-                              target: target,
-                              totalDuration: totalDuration,
-                            );
-                            if (controller?.currentState == PlaybackState.idle) {
-                              setState(() {});
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    SizedBox(
-                      width: 36,
-                      child: Text(
-                        context.formatDurationLocalized(totalDuration),
-                        textAlign: TextAlign.start,
-                        style: AppTypography.caption.copyWith(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-/// Isolated audio stream info pill leaf widget.
-class _StreamInfoPill extends StatelessWidget {
-  final AudioEngine engine;
-
-  const _StreamInfoPill({required this.engine});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<AudioStreamInfo?>(
-      stream: engine.streamInfoStream,
-      builder: (context, snapshot) {
-        final info = snapshot.data;
-        if (info == null ||
-            ((info.codec == null || info.codec!.isEmpty) &&
-                (info.sampleRate == null || info.sampleRate! <= 0) &&
-                (info.bitDepth == null || info.bitDepth! <= 0) &&
-                (info.channels == null || info.channels! <= 0) &&
-                (info.bitrateKbps == null || info.bitrateKbps! <= 0))) {
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.fillControl,
-              borderRadius: BorderRadius.circular(AppSpacing.r12),
-              border: Border.all(color: AppColors.borderSubtle),
-            ),
-            child: Text(
-              context.t('nowPlaying.standardAudio'),
-              style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-            ),
-          );
-        }
-
-        final parts = <String>[];
-        if (info.codec != null && info.codec!.isNotEmpty) {
-          parts.add(info.codec!.toUpperCase());
-        }
-        if (info.sampleRate != null && info.sampleRate! > 0) {
-          final khz = (info.sampleRate! / 1000.0)
-              .toStringAsFixed(1)
-              .replaceAll('.0', '');
-          parts.add('$khz kHz');
-        }
-        if (info.bitDepth != null && info.bitDepth! > 0) {
-          parts.add('${info.bitDepth}-bit');
-        }
-        if (info.channels != null && info.channels! > 0) {
-          parts.add(info.channels == 2
-              ? 'Stereo'
-              : (info.channels == 1 ? 'Mono' : '${info.channels} ch'));
-        }
-        if (info.bitrateKbps != null && info.bitrateKbps! > 0) {
-          parts.add('${info.bitrateKbps!.round()} kbps');
-        }
-
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: AppColors.fillControl,
-            borderRadius: BorderRadius.circular(AppSpacing.r12),
-            border: Border.all(color: AppColors.borderSubtle),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (info.isLossless == true) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  margin: const EdgeInsetsDirectional.only(end: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.accentFill,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    context.t('nowPlaying.lossless'),
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-              ],
-              Text(
-                parts.isEmpty
-                    ? context.t('nowPlaying.standardAudio')
-                    : parts.join(' · '),
-                style: AppTypography.caption.copyWith(color: AppColors.textMuted),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Compact volume slider control.
-class _VolumeControl extends StatelessWidget {
-  final AudioEngine engine;
-
-  const _VolumeControl({required this.engine});
-
-  @override
-  Widget build(BuildContext context) {
-    final settingsStore = SettingsScope.maybeOf(context);
-    final hudCtrl = VolumeHudScope.maybeOf(context);
-
-    return VolumeWheelRegion(
-      engine: engine,
-      settingsStore: settingsStore,
-      hudController: hudCtrl,
-      behavior: HitTestBehavior.opaque,
-      child: StreamBuilder<double>(
-        stream: engine.volumeStream,
-        initialData: engine.currentVolume,
-        builder: (context, snapshot) {
-          final vol = (snapshot.data ?? 1.0).clamp(0.0, 1.0);
-          return SizedBox(
-            width: 140,
-            height: 32,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.volume_down,
-                  size: 16,
-                  color: AppColors.textMuted,
-                ),
-                Expanded(
-                  child: SliderTheme(
-                    data: const SliderThemeData(
-                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 4.0),
-                      overlayShape: RoundSliderOverlayShape(overlayRadius: 8.0),
-                      trackHeight: 2.5,
-                      activeTrackColor: AppColors.accent,
-                      inactiveTrackColor: AppColors.border,
-                      thumbColor: AppColors.accent,
-                    ),
-                    child: Slider(
-                      value: vol,
-                      onChanged: (newVol) {
-                        setVolumeDirect(
-                          engine: engine,
-                          volume: newVol,
-                          settingsStore: settingsStore,
-                          hudController: hudCtrl,
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                const Icon(
-                  Icons.volume_up,
-                  size: 16,
-                  color: AppColors.textMuted,
-                ),
-              ],
-            ),
-          );
-        },
-      ),
     );
   }
 }

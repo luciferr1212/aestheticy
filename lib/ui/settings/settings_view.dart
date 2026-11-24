@@ -1,35 +1,25 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../audio/audio_engine.dart';
-import '../../audio/audio_models.dart';
-import '../../diagnostics/app_logger.dart';
-import '../../diagnostics/diagnostic_report.dart';
 import '../../features/integration/tray_window_controller.dart';
 import '../../library/library_repository.dart';
-import '../../library/migrations.dart';
-import '../artist_names/artist_name_scope.dart';
 import '../artist_names/artist_name_store.dart';
 import '../audio_panels/eq_controller.dart';
-import '../audio_panels/eq_scope.dart';
 import '../glass/glass_button.dart';
-import '../glass/glass_quality.dart';
 import '../glass/glass_surface.dart';
 import '../l10n/app_strings.dart';
-import '../l10n/number_format.dart';
 import '../shell/app_navigator.dart';
-import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import '../theme/font_manager.dart';
-import 'app_settings.dart';
 import 'app_shortcuts.dart';
-import 'artist_name_translations_panel.dart';
 import 'audio_settings_applier.dart';
 import 'settings_store.dart';
-import 'shortcuts_cheat_sheet_dialog.dart';
+import 'widgets/settings_general_sections.dart';
+import 'widgets/settings_playback_sections.dart';
+import 'widgets/settings_system_sections.dart';
 
 /// Full Settings screen organizing application preferences into 8 structured sections.
 class SettingsView extends StatefulWidget {
@@ -190,7 +180,8 @@ class _SettingsViewState extends State<SettingsView> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 880),
                 child: GlassSurface(
-                  margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   padding: const EdgeInsets.all(28),
                   borderRadius: AppSpacing.r22,
                   child: Column(
@@ -222,61 +213,129 @@ class _SettingsViewState extends State<SettingsView> {
                           padding: const EdgeInsets.only(bottom: 40),
                           children: [
                             // 1. Language and profile
-                            _buildLanguageSection(context, settings),
+                            SettingsLanguageSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                              nameController: _nameController,
+                              onNameSubmitted: _onNameSubmitted,
+                            ),
                             const SizedBox(height: 20),
 
                             // 2. Appearance
-                            _buildAppearanceSection(context, settings),
+                            SettingsAppearanceSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                            ),
                             const SizedBox(height: 20),
 
                             // 3. Fonts
-                            _buildFontsSection(context, settings),
+                            SettingsFontsSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                              fontOptions: _fontOptions,
+                            ),
                             const SizedBox(height: 20),
 
                             // 4. Artist names
-                            _buildArtistNamesSection(context, settings),
+                            SettingsArtistNamesSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                              artistNameStore: widget.artistNameStore,
+                            ),
                             const SizedBox(height: 20),
 
                             // 5. Audio
-                            _buildAudioSection(context, settings),
+                            SettingsAudioSection(
+                              engine: widget.engine,
+                              navigator: widget.navigator,
+                              applier: _applier,
+                              settings: settings,
+                              audioError: _audioError,
+                              onAudioErrorChanged: (err) =>
+                                  setState(() => _audioError = err),
+                            ),
                             const SizedBox(height: 20),
 
                             // 6. Playback
-                            _buildPlaybackSection(context, settings),
+                            SettingsPlaybackSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                            ),
                             const SizedBox(height: 20),
 
                             // Lyrics
-                            _buildLyricsSection(context, settings),
+                            SettingsLyricsSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                            ),
                             const SizedBox(height: 20),
 
                             // Windows integration (hidden off Windows)
                             if (_isWindows) ...[
-                              _buildWindowsSection(context, settings),
+                              SettingsWindowsSection(
+                                settingsStore: widget.settingsStore,
+                                settings: settings,
+                                trayWindowController:
+                                    widget.trayWindowController,
+                                trayUnavailableOverride:
+                                    widget.trayUnavailableOverride,
+                              ),
                               const SizedBox(height: 20),
                             ],
 
                             // Mini player
-                            _buildMiniPlayerSection(context, settings),
+                            SettingsMiniPlayerSection(
+                              settingsStore: widget.settingsStore,
+                              settings: settings,
+                            ),
                             const SizedBox(height: 20),
 
                             // 7. Library
-                            _buildLibrarySection(context),
+                            SettingsLibrarySection(
+                              isLoadingStats: _isLoadingStats,
+                              folderCount: _folderCount,
+                              trackCount: _trackCount,
+                              navigator: widget.navigator,
+                              onOpenFolders: widget.onOpenFolders,
+                            ),
                             const SizedBox(height: 20),
 
                             // 8. Listening history
-                            _buildHistorySection(context),
+                            SettingsHistorySection(
+                              repository: widget.repository,
+                              isLoadingStats: _isLoadingStats,
+                              playEventCount: _playEventCount,
+                              isConfirmingClear: _isConfirmingClear,
+                              onConfirmingClearChanged: (val) =>
+                                  setState(() => _isConfirmingClear = val),
+                              onHistoryCleared: () {
+                                setState(() {
+                                  _playEventCount = 0;
+                                  _isConfirmingClear = false;
+                                });
+                              },
+                            ),
                             const SizedBox(height: 20),
 
                             // 9. Shortcuts
-                            _buildShortcutsSection(context),
+                            const SettingsShortcutsSection(),
                             const SizedBox(height: 20),
 
                             // 10. Diagnostics
-                            _buildDiagnosticsSection(context, settings),
+                            SettingsDiagnosticsSection(
+                              engine: widget.engine,
+                              settings: settings,
+                              eqController: widget.eqController,
+                              trackCount: _trackCount,
+                              albumCount: _albumCount,
+                              artistCount: _artistCount,
+                              folderCount: _folderCount,
+                              playEventCount: _playEventCount,
+                            ),
                             const SizedBox(height: 20),
 
                             // 11. About
-                            _buildAboutSection(context),
+                            const SettingsAboutSection(),
                           ],
                         ),
                       ),
@@ -287,1267 +346,6 @@ class _SettingsViewState extends State<SettingsView> {
             );
           },
         ),
-      ),
-    );
-  }
-
-  // ── 1. Language and Profile ───────────────────────────────────────────
-  Widget _buildLanguageSection(BuildContext context, AppSettings settings) {
-    final isArabic = settings.language == 'ar';
-
-    return _SettingsCard(
-      title: context.t('settings.sectionLanguageProfile'),
-      children: [
-        // Interface language
-        _SettingsRow(
-          title: context.t('settings.interfaceLanguage'),
-          control: _SegmentedControl<String>(
-            value: settings.language,
-            options: const [
-              _SegmentedOption(value: 'en', label: 'English'),
-              _SegmentedOption(value: 'ar', label: 'العربية'),
-            ],
-            onChanged: (val) {
-              widget.settingsStore.update((s) => s.copyWith(language: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Arabic numerals
-        _SettingsRow(
-          title: context.t('settings.arabicNumerals'),
-          description: context.t('settings.arabicNumeralsHint'),
-          control: Switch(
-            key: const Key('settings_arabic_numerals_switch'),
-            value: settings.arabicNumerals,
-            activeThumbColor: AppColors.accent,
-            onChanged: isArabic
-                ? (val) {
-                    widget.settingsStore
-                        .update((s) => s.copyWith(arabicNumerals: val));
-                  }
-                : null,
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // User name
-        _SettingsRow(
-          title: context.t('settings.yourName'),
-          description: context.t('settings.yourNameHint'),
-          control: SizedBox(
-            width: 220,
-            child: TextField(
-              controller: _nameController,
-              maxLength: 40,
-              style: AppTypography.body,
-              decoration: InputDecoration(
-                counterText: '',
-                isDense: true,
-                filled: true,
-                fillColor: AppColors.fillControl,
-                hintText: context.t('welcome.namePlaceholder'),
-                hintStyle: AppTypography.caption,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.r10),
-                  borderSide: const BorderSide(color: AppColors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.r10),
-                  borderSide: const BorderSide(color: AppColors.borderSubtle),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.r10),
-                  borderSide: const BorderSide(color: AppColors.accent),
-                ),
-              ),
-              onChanged: _onNameSubmitted,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── 2. Appearance ─────────────────────────────────────────────────────
-  Widget _buildAppearanceSection(BuildContext context, AppSettings settings) {
-    final qualityHint = switch (settings.glassQuality) {
-      GlassQuality.full => context.t('settings.glassQualityFullHint'),
-      GlassQuality.light => context.t('settings.glassQualityLightHint'),
-      GlassQuality.off => context.t('settings.glassQualityOffHint'),
-    };
-
-    return _SettingsCard(
-      title: context.t('settings.sectionAppearance'),
-      children: [
-        // Glass quality
-        _SettingsRow(
-          title: context.t('settings.glassQuality'),
-          description: qualityHint,
-          control: _SegmentedControl<GlassQuality>(
-            value: settings.glassQuality,
-            options: [
-              _SegmentedOption(
-                value: GlassQuality.full,
-                label: context.t('settings.glassQualityFull'),
-              ),
-              _SegmentedOption(
-                value: GlassQuality.light,
-                label: context.t('settings.glassQualityLight'),
-              ),
-              _SegmentedOption(
-                value: GlassQuality.off,
-                label: context.t('settings.glassQualityOff'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore.update((s) => s.copyWith(glassQuality: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Reduce motion
-        _SettingsRow(
-          title: context.t('settings.reduceMotion'),
-          description: context.t('settings.reduceMotionHint'),
-          control: Switch(
-            value: settings.reduceMotion,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore.update((s) => s.copyWith(reduceMotion: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Glass shapes in full screen
-        _SettingsRow(
-          title: context.t('settings.fullScreenGlassShapes'),
-          description: context.t('settings.fullScreenGlassShapesHint'),
-          control: Switch(
-            value: settings.fullScreenGlassShapes,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(fullScreenGlassShapes: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Text size
-        _SettingsRow(
-          title: context.t('settings.textSize'),
-          control: _SegmentedControl<String>(
-            value: settings.textScale,
-            options: [
-              _SegmentedOption(
-                value: 'small',
-                label: context.t('settings.textSizeSmall'),
-              ),
-              _SegmentedOption(
-                value: 'normal',
-                label: context.t('settings.textSizeNormal'),
-              ),
-              _SegmentedOption(
-                value: 'large',
-                label: context.t('settings.textSizeLarge'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore.update((s) => s.copyWith(textScale: val));
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── 3. Fonts ──────────────────────────────────────────────────────────
-  Widget _buildFontsSection(BuildContext context, AppSettings settings) {
-    return _SettingsCard(
-      title: context.t('settings.sectionFonts'),
-      children: [
-        for (final font in _fontOptions) ...[
-          InkWell(
-            mouseCursor: SystemMouseCursors.click,
-            hoverColor: const Color(0x14FFFFFF),
-            borderRadius: BorderRadius.circular(AppSpacing.r10),
-            onTap: () {
-              widget.settingsStore.update((s) => s.copyWith(uiFont: font.id));
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: settings.uiFont == font.id
-                    ? AppColors.accentFill
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppSpacing.r10),
-                border: Border.all(
-                  color: settings.uiFont == font.id
-                      ? AppColors.accent
-                      : Colors.transparent,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      font.id == 'system'
-                          ? context.t('settings.font.system')
-                          : (font.displayName ?? font.id),
-                      style: AppTypography.bodyStrong,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      FontManager.previewSample,
-                      style: TextStyle(
-                        fontFamily:
-                            font.id == 'system' ? 'Segoe UI Variable' : font.id,
-                        fontFamilyFallback: AppTypography.fontFamilyFallback,
-                        fontSize: 13,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                  if (settings.uiFont == font.id)
-                    const Icon(Icons.check, color: AppColors.accent, size: 18),
-                ],
-              ),
-            ),
-          ),
-          if (font != _fontOptions.last) const SizedBox(height: 6),
-        ],
-      ],
-    );
-  }
-
-  // ── 4. Artist Names ───────────────────────────────────────────────────
-  Widget _buildArtistNamesSection(
-      BuildContext context, AppSettings settings) {
-    final nameStore =
-        widget.artistNameStore ?? ArtistNameScope.maybeOf(context);
-
-    return _SettingsCard(
-      title: context.t('settings.sectionArtistNames'),
-      description: context.t('settings.artistNamesHint'),
-      children: [
-        // Mode segmented
-        _SegmentedControl<String>(
-          value: settings.artistNameMode,
-          options: [
-            _SegmentedOption(
-              value: 'asTagged',
-              label: context.t('settings.artistModeAsTagged'),
-            ),
-            _SegmentedOption(
-              value: 'followLanguage',
-              label: context.t('settings.artistModeFollowLanguage'),
-            ),
-            _SegmentedOption(
-              value: 'alwaysArabic',
-              label: context.t('settings.artistModeAlwaysArabic'),
-            ),
-          ],
-          onChanged: (val) {
-            widget.settingsStore
-                .update((s) => s.copyWith(artistNameMode: val));
-          },
-        ),
-        const SizedBox(height: 16),
-
-        if (nameStore != null)
-          ArtistNameTranslationsPanel(nameStore: nameStore),
-      ],
-    );
-  }
-
-  // ── 5. Audio ──────────────────────────────────────────────────────────
-  Widget _buildAudioSection(BuildContext context, AppSettings settings) {
-    final capabilities = widget.engine.capabilities;
-
-    return _SettingsCard(
-      title: context.t('settings.sectionAudio'),
-      children: [
-        if (_audioError != null) ...[
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.danger.withAlpha(35),
-              borderRadius: BorderRadius.circular(AppSpacing.r10),
-              border: Border.all(color: AppColors.danger),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.error_outline,
-                    color: AppColors.danger, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    switch (_audioError!) {
-                      AudioSettingsError.unsupported =>
-                        context.t('settings.audio.errorUnsupported'),
-                      AudioSettingsError.failed =>
-                        context.t('settings.audio.errorFailed'),
-                    },
-                    style: AppTypography.caption
-                        .copyWith(color: AppColors.danger),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-        ],
-
-        // Output device
-        StreamBuilder<List<AudioDevice>>(
-          stream: widget.engine.devicesStream,
-          initialData: widget.engine.devices,
-          builder: (context, snapshot) {
-            final devices = snapshot.data ?? [AudioDevice.auto];
-            final currentId = settings.outputDeviceId;
-            final selectedDevice = devices.any((d) => d.id == currentId)
-                ? currentId
-                : AudioDevice.auto.id;
-
-            return _SettingsRow(
-              title: context.t('settings.outputDevice'),
-              control: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.fillControl,
-                      borderRadius: BorderRadius.circular(AppSpacing.r10),
-                      border: Border.all(color: AppColors.borderSubtle),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: selectedDevice,
-                        dropdownColor: AppColors.surface,
-                        style: AppTypography.body,
-                        items: devices.map((d) {
-                          return DropdownMenuItem<String>(
-                            value: d.id,
-                            child: Text(d.name),
-                          );
-                        }).toList(),
-                        onChanged: (val) async {
-                          if (val == null) return;
-                          final err = await _applier.setDevice(val);
-                          setState(() => _audioError = err);
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GlassIconButton(
-                    icon: Icons.refresh,
-                    tooltip: context.t('settings.refreshDevices'),
-                    semanticLabel: context.t('settings.refreshDevices'),
-                    onPressed: () async {
-                      await widget.engine.refreshDevices();
-                    },
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Exclusive mode
-        _SettingsRow(
-          title: context.t('settings.exclusiveMode'),
-          description: capabilities.exclusiveMode
-              ? null
-              : context.t('settings.exclusiveUnsupported'),
-          control: Switch(
-            value: settings.exclusiveMode,
-            activeThumbColor: AppColors.accent,
-            onChanged: capabilities.exclusiveMode
-                ? (val) async {
-                    final err = await _applier.setExclusive(val);
-                    setState(() => _audioError = err);
-                  }
-                : null,
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // ReplayGain mode
-        _SettingsRow(
-          title: context.t('settings.replayGainMode'),
-          control: _SegmentedControl<String>(
-            value: settings.replayGainMode,
-            options: [
-              _SegmentedOption(
-                value: 'off',
-                label: context.t('settings.replayGainOff'),
-              ),
-              _SegmentedOption(
-                value: 'track',
-                label: context.t('settings.replayGainTrack'),
-              ),
-              _SegmentedOption(
-                value: 'album',
-                label: context.t('settings.replayGainAlbum'),
-              ),
-            ],
-            onChanged: (val) async {
-              final mode = switch (val) {
-                'track' => ReplayGainMode.track,
-                'album' => ReplayGainMode.album,
-                _ => ReplayGainMode.off,
-              };
-              final err = await _applier.setReplayGainMode(mode);
-              setState(() => _audioError = err);
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // ReplayGain preamp slider (-15 to +15 dB)
-        _SettingsRow(
-          title: context.t('settings.replayGainPreamp'),
-          description:
-              '${settings.replayGainPreampDb > 0 ? '+' : ''}${settings.replayGainPreampDb.toStringAsFixed(1)} dB',
-          control: SizedBox(
-            width: 220,
-            child: SliderTheme(
-              data: const SliderThemeData(
-                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                trackHeight: 3,
-                activeTrackColor: AppColors.accent,
-                inactiveTrackColor: AppColors.border,
-                thumbColor: AppColors.accent,
-              ),
-              child: Slider(
-                value: settings.replayGainPreampDb.clamp(-15.0, 15.0),
-                min: -15.0,
-                max: 15.0,
-                divisions: 30,
-                onChanged: (val) async {
-                  final err = await _applier.setReplayGainPreamp(val);
-                  setState(() => _audioError = err);
-                },
-              ),
-            ),
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Crossfade (disabled Soon)
-        _SettingsRow(
-          title: context.t('settings.crossfade'),
-          control: GlassPillButton(
-            label: context.t('common.soon'),
-            onPressed: null,
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Equalizer and signal path
-        _SettingsRow(
-          title: context.t('settings.audio.panelsRow'),
-          control: GlassPillButton(
-            key: const Key('settings_open_audio_panels_button'),
-            label: context.t('settings.audio.panelsOpen'),
-            onPressed: () => widget.navigator.openAudioPanels(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── 6. Playback ───────────────────────────────────────────────────────
-  Widget _buildPlaybackSection(BuildContext context, AppSettings settings) {
-    return _SettingsCard(
-      title: context.t('settings.sectionPlayback'),
-      children: [
-        _SettingsRow(
-          title: context.t('settings.resumeSession'),
-          description: context.t('settings.resumeSessionHint'),
-          control: Switch(
-            key: const Key('settings_resume_session_switch'),
-            value: settings.resumeSession,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(resumeSession: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-        _SettingsRow(
-          title: context.t('settings.smoothTransitions'),
-          description: context.t('settings.smoothTransitionsHint'),
-          control: _SegmentedControl<String>(
-            key: const Key('settings_transition_smoothness_segmented'),
-            value: settings.transitionSmoothness,
-            options: [
-              _SegmentedOption(
-                value: 'off',
-                label: context.t('settings.transitionSmoothness.off'),
-              ),
-              _SegmentedOption(
-                value: 'soft',
-                label: context.t('settings.transitionSmoothness.soft'),
-              ),
-              _SegmentedOption(
-                value: 'smooth',
-                label: context.t('settings.transitionSmoothness.smooth'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(transitionSmoothness: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-        _SettingsRow(
-          title: context.t('settings.seekStep'),
-          description: context.t('settings.seekStepHint'),
-          control: _SegmentedControl<int>(
-            value: settings.seekStepSeconds,
-            options: [
-              _SegmentedOption(
-                value: 1,
-                label: context.t('settings.seekStep.1s'),
-              ),
-              _SegmentedOption(
-                value: 2,
-                label: context.t('settings.seekStep.2s'),
-              ),
-              _SegmentedOption(
-                value: 5,
-                label: context.t('settings.seekStep.5s'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(seekStepSeconds: val));
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Lyrics ───────────────────────────────────────────────────────────
-  Widget _buildLyricsSection(BuildContext context, AppSettings settings) {
-    final currentSource = switch (settings.lyricsSource) {
-      'onlineThenLocal' => 'onlineThenLocal',
-      'localOnly' => 'localOnly',
-      'onlineOnly' => 'onlineOnly',
-      'off' => 'off',
-      _ => 'localThenOnline',
-    };
-
-    return _SettingsCard(
-      title: context.t('settings.sectionLyrics'),
-      children: [
-        // Source
-        _SettingsRow(
-          title: context.t('settings.lyricsSource'),
-          description: context.t('settings.lyricsSourceHint'),
-          control: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: AppColors.fillControl,
-              borderRadius: BorderRadius.circular(AppSpacing.r10),
-              border: Border.all(color: AppColors.borderSubtle),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                key: const Key('settings_lyrics_source_dropdown'),
-                value: currentSource,
-                dropdownColor: AppColors.surface,
-                items: [
-                  DropdownMenuItem(
-                    value: 'localThenOnline',
-                    child: Text(
-                      context.t('settings.lyricsSource.localThenOnline'),
-                      style: AppTypography.body,
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'onlineThenLocal',
-                    child: Text(
-                      context.t('settings.lyricsSource.onlineThenLocal'),
-                      style: AppTypography.body,
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'localOnly',
-                    child: Text(
-                      context.t('settings.lyricsSource.localOnly'),
-                      style: AppTypography.body,
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'onlineOnly',
-                    child: Text(
-                      context.t('settings.lyricsSource.onlineOnly'),
-                      style: AppTypography.body,
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'off',
-                    child: Text(
-                      context.t('settings.lyricsSource.off'),
-                      style: AppTypography.body,
-                    ),
-                  ),
-                ],
-                onChanged: (val) {
-                  if (val != null) {
-                    widget.settingsStore
-                        .update((s) => s.copyWith(lyricsSource: val));
-                  }
-                },
-              ),
-            ),
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Highlight mode
-        _SettingsRow(
-          title: context.t('settings.lyricsHighlight'),
-          description: context.t('settings.lyricsHighlightHint'),
-          control: _SegmentedControl<String>(
-            value: settings.lyricsHighlight == 'line' ? 'line' : 'word',
-            options: [
-              _SegmentedOption(
-                value: 'line',
-                label: context.t('settings.lyricsHighlight.line'),
-              ),
-              _SegmentedOption(
-                value: 'word',
-                label: context.t('settings.lyricsHighlight.word'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(lyricsHighlight: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Show lyrics in full screen
-        _SettingsRow(
-          title: context.t('settings.showLyricsInFullScreen'),
-          description: context.t('settings.showLyricsInFullScreenHint'),
-          control: Switch(
-            key: const Key('settings_show_lyrics_full_screen_switch'),
-            value: settings.showLyricsInFullScreen,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(showLyricsInFullScreen: val));
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Windows Integration ───────────────────────────────────────────────
-  Widget _buildWindowsSection(BuildContext context, AppSettings settings) {
-    return _SettingsCard(
-      title: context.t('settings.sectionWindows'),
-      children: [
-        // Media controls
-        _SettingsRow(
-          title: context.t('settings.mediaControls'),
-          description: context.t('settings.mediaControlsSubtitle'),
-          control: Switch(
-            key: const Key('settings_media_controls_switch'),
-            value: settings.mediaControls,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(mediaControls: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Prevent sleep while playing
-        _SettingsRow(
-          title: context.t('settings.preventSleep'),
-          description: context.t('settings.preventSleepSubtitle'),
-          control: Switch(
-            key: const Key('settings_prevent_sleep_switch'),
-            value: settings.preventSleepWhilePlaying,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(preventSleepWhilePlaying: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // When closing the window
-        _SettingsRow(
-          title: context.t('settings.closeBehavior'),
-          description: context.t('settings.closeBehaviorSubtitle'),
-          control: _SegmentedControl<String>(
-            key: const Key('settings_close_behavior_segmented'),
-            value: settings.closeBehavior,
-            options: [
-              _SegmentedOption(
-                value: 'quit',
-                label: context.t('settings.closeBehaviorQuit'),
-              ),
-              _SegmentedOption(
-                value: 'tray',
-                label: context.t('settings.closeBehaviorTray'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(closeBehavior: val));
-            },
-          ),
-        ),
-        if (widget.trayUnavailableOverride ??
-            (widget.trayWindowController?.isTrayUnavailable ?? false))
-          Padding(
-            padding: const EdgeInsetsDirectional.only(top: AppSpacing.s8),
-            child: Row(
-              key: const Key('settings_tray_unavailable_hint'),
-              children: [
-                const Icon(
-                  Icons.info_outline,
-                  size: 16,
-                  color: AppColors.textMuted,
-                ),
-                const SizedBox(width: AppSpacing.s8),
-                Expanded(
-                  child: Text(
-                    context.t('settings.trayUnavailableHint'),
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.textMuted,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  // ── Mini Player ────────────────────────────────────────────────────────
-  Widget _buildMiniPlayerSection(BuildContext context, AppSettings settings) {
-    return _SettingsCard(
-      title: context.t('settings.sectionMiniPlayer'),
-      children: [
-        // Shape
-        _SettingsRow(
-          title: context.t('settings.miniPlayerShape'),
-          control: _SegmentedControl<String>(
-            key: const Key('settings_mini_player_shape_segmented'),
-            value: settings.miniPlayerShape,
-            options: [
-              _SegmentedOption(
-                value: 'wide',
-                label: context.t('miniPlayer.shapeWide'),
-              ),
-              _SegmentedOption(
-                value: 'square',
-                label: context.t('miniPlayer.shapeSquare'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(miniPlayerShape: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Position
-        _SettingsRow(
-          title: context.t('settings.miniPlayerPosition'),
-          control: _SegmentedControl<String>(
-            key: const Key('settings_mini_player_position_segmented'),
-            value: settings.miniPlayerPosition,
-            options: [
-              _SegmentedOption(
-                value: 'bottomRight',
-                label: context.t('miniPlayer.posBottomRight'),
-              ),
-              _SegmentedOption(
-                value: 'topCenter',
-                label: context.t('miniPlayer.posTopCenter'),
-              ),
-              _SegmentedOption(
-                value: 'remember',
-                label: context.t('miniPlayer.posRemember'),
-              ),
-            ],
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(miniPlayerPosition: val));
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-
-        // Always on top
-        _SettingsRow(
-          title: context.t('settings.miniPlayerAlwaysOnTop'),
-          control: Switch(
-            key: const Key('settings_mini_player_always_on_top_switch'),
-            value: settings.miniPlayerAlwaysOnTop,
-            activeThumbColor: AppColors.accent,
-            onChanged: (val) {
-              widget.settingsStore
-                  .update((s) => s.copyWith(miniPlayerAlwaysOnTop: val));
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── 7. Library ────────────────────────────────────────────────────────
-  Widget _buildLibrarySection(BuildContext context) {
-    return _SettingsCard(
-      title: context.t('settings.sectionLibrary'),
-      children: [
-        _SettingsRow(
-          title: context.t('settings.musicFolders'),
-          description: _isLoadingStats
-              ? '…'
-              : context.t('settings.libraryStats', args: {
-                  'folders': context.formatCountLocalized(_folderCount),
-                  'tracks': context.formatCountLocalized(_trackCount),
-                }),
-          control: GlassPillButton(
-            label: context.t('settings.manage'),
-            onPressed: () {
-              if (widget.onOpenFolders != null) {
-                widget.onOpenFolders!();
-              } else {
-                widget.navigator.navigateTo(AppDestination.folders);
-              }
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── 8. Listening History ──────────────────────────────────────────────
-  Widget _buildHistorySection(BuildContext context) {
-    return _SettingsCard(
-      title: context.t('settings.sectionHistory'),
-      children: [
-        _SettingsRow(
-          title: context.t('settings.playsRecorded'),
-          description: _isLoadingStats
-              ? '…'
-              : context.formatCountLocalized(_playEventCount),
-          control: _isConfirmingClear
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      context.t('settings.clearHistoryConfirm'),
-                      style: AppTypography.caption.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    GlassPillButton(
-                      key: const Key('settings_clear_history_cancel_button'),
-                      label: context.t('common.cancel'),
-                      onPressed: () {
-                        setState(() => _isConfirmingClear = false);
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    GlassPillButton(
-                      key: const Key('settings_clear_history_confirm_button'),
-                      label: context.t('settings.clearHistoryAction'),
-                      onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final clearedText = context.t('settings.historyCleared');
-                        try {
-                          await widget.repository.clearPlayEvents();
-                          if (mounted) {
-                            setState(() {
-                              _playEventCount = 0;
-                              _isConfirmingClear = false;
-                            });
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text(clearedText),
-                              ),
-                            );
-                          }
-                        } catch (_) {
-                          if (mounted) {
-                            setState(() => _isConfirmingClear = false);
-                          }
-                        }
-                      },
-                    ),
-                  ],
-                )
-              : GlassPillButton(
-                  key: const Key('settings_clear_history_button'),
-                  label: context.t('settings.clearHistory'),
-                  onPressed: () {
-                    setState(() => _isConfirmingClear = true);
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  // ── 9. Shortcuts ──────────────────────────────────────────────────────
-  Widget _buildShortcutsSection(BuildContext context) {
-    return _SettingsCard(
-      title: context.t('settings.sectionShortcuts'),
-      children: [
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: GlassPillButton(
-            key: const Key('settings_open_shortcuts_cheat_sheet'),
-            label: context.t('settings.openShortcutsCheatSheet'),
-            leadingIcon: Icons.keyboard_outlined,
-            size: GlassButtonSize.small,
-            onPressed: () => showShortcutsCheatSheetDialog(context),
-          ),
-        ),
-        const SizedBox(height: 12),
-        for (final shortcut in kAppShortcuts) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    context.t(shortcut.descriptionKey),
-                    style: AppTypography.body,
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.fillGlass,
-                    borderRadius: BorderRadius.circular(AppSpacing.r10),
-                    border: Border.all(color: AppColors.borderSubtle),
-                  ),
-                  child: Text(
-                    context.t(shortcutScopeLabelKey(shortcut.scope)),
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.textMuted,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.fillControl,
-                    borderRadius: BorderRadius.circular(AppSpacing.r10),
-                    border: Border.all(color: AppColors.borderSubtle),
-                  ),
-                  child: Text(
-                    shortcut.keyCombination,
-                    style: AppTypography.micro.copyWith(
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (shortcut != kAppShortcuts.last)
-            const Divider(color: AppColors.borderSubtle, height: 16),
-        ],
-      ],
-    );
-  }
-
-  // ── 10. Diagnostics ───────────────────────────────────────────────────
-  Widget _buildDiagnosticsSection(BuildContext context, AppSettings settings) {
-    return _SettingsCard(
-      title: context.t('settings.sectionDiagnostics'),
-      children: [
-        _SettingsRow(
-          title: context.t('settings.copyDiagnostics'),
-          control: GlassPillButton(
-            key: const Key('settings_copy_diagnostics_button'),
-            label: context.t('settings.copyDiagnostics'),
-            onPressed: () async {
-              try {
-                final messenger = ScaffoldMessenger.of(context);
-                final copiedText = context.t('settings.diagnosticsCopied');
-                final eqEnabled =
-                    (widget.eqController ?? EqScope.maybeOf(context))
-                        ?.enabled ??
-                    widget.engine.isEqEnabled;
-                final logLines =
-                    await AppLogger.instance.readRecentLines(limit: 100);
-                final activeDevice = widget.engine.devices.firstWhere(
-                  (d) => d.id == settings.outputDeviceId,
-                  orElse: () => AudioDevice.auto,
-                );
-                final report = buildDiagnosticReport(
-                  appName: 'Aestheticy',
-                  osVersion: Platform.operatingSystemVersion,
-                  dartVersion: Platform.version,
-                  engineName: widget.engine.runtimeType.toString(),
-                  capabilities: widget.engine.capabilities,
-                  outputDeviceName: activeDevice.name,
-                  exclusiveMode: settings.exclusiveMode,
-                  eqEnabled: eqEnabled,
-                  replayGainMode: switch (settings.replayGainMode) {
-                    'track' => ReplayGainMode.track,
-                    'album' => ReplayGainMode.album,
-                    _ => ReplayGainMode.off,
-                  },
-                  glassQuality: settings.glassQuality,
-                  language: settings.language,
-                  textScale: settings.textScale,
-                  trackCount: _trackCount,
-                  albumCount: _albumCount,
-                  artistCount: _artistCount,
-                  folderCount: _folderCount,
-                  schemaVersion: kLibrarySchemaVersion,
-                  resumeSession: settings.resumeSession,
-                  playEventsCount: _playEventCount,
-                  mediaSessionStatus: settings.mediaControls ? 'active' : 'disabled',
-                  trayEnabled: settings.closeBehavior == 'tray',
-                  sleepPreventionEnabled: settings.preventSleepWhilePlaying,
-                  closeBehavior: settings.closeBehavior,
-                  lyricsSource: settings.lyricsSource,
-                  miniPlayerShape: settings.miniPlayerShape,
-                  miniPlayerPosition: settings.miniPlayerPosition,
-                  logLines: logLines,
-                  userNameToScrub: settings.userName,
-                );
-
-                try {
-                  await Clipboard.setData(ClipboardData(text: report));
-                } catch (_) {}
-                if (mounted) {
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text(copiedText),
-                    ),
-                  );
-                }
-              } catch (e, st) {
-                AppLogger.instance.error(
-                  'Settings',
-                  'Copy diagnostics failed: $e',
-                  e,
-                  st,
-                );
-              }
-            },
-          ),
-        ),
-        const Divider(color: AppColors.borderSubtle, height: 24),
-        _SettingsRow(
-          title: context.t('settings.copyLogPath'),
-          control: GlassPillButton(
-            key: const Key('settings_copy_log_path_button'),
-            label: context.t('settings.copyLogPath'),
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              final copiedText = context.t('settings.logPathCopied');
-              final logDir = AppLogger.instance.logDirectory?.path ?? '';
-              try {
-                await Clipboard.setData(ClipboardData(text: logDir));
-              } catch (_) {}
-              if (mounted) {
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text(copiedText),
-                  ),
-                );
-              }
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── 11. About ──────────────────────────────────────────────────────────
-  Widget _buildAboutSection(BuildContext context) {
-    return _SettingsCard(
-      title: context.t('settings.sectionAbout'),
-      children: const [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Aestheticy', style: AppTypography.title),
-            Text('by mido', style: AppTypography.caption),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-// ── Shared Settings Card & Row Components ────────────────────────────────────
-
-class _SettingsCard extends StatelessWidget {
-  final String title;
-  final String? description;
-  final List<Widget> children;
-
-  const _SettingsCard({
-    required this.title,
-    this.description,
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.fillGlass,
-        borderRadius: BorderRadius.circular(AppSpacing.r16),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(title, style: AppTypography.title),
-          if (description != null) ...[
-            const SizedBox(height: 4),
-            Text(description!, style: AppTypography.caption),
-          ],
-          const SizedBox(height: 16),
-          ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsRow extends StatelessWidget {
-  final String title;
-  final String? description;
-  final Widget control;
-
-  const _SettingsRow({
-    required this.title,
-    this.description,
-    required this.control,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: AppTypography.bodyStrong),
-              if (description != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  description!,
-                  style: AppTypography.caption
-                      .copyWith(color: AppColors.textMuted),
-                ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(width: 16),
-        control,
-      ],
-    );
-  }
-}
-
-class _SegmentedOption<T> {
-  final T value;
-  final String label;
-
-  const _SegmentedOption({required this.value, required this.label});
-}
-
-class _SegmentedControl<T> extends StatelessWidget {
-  final T value;
-  final List<_SegmentedOption<T>> options;
-  final ValueChanged<T> onChanged;
-
-  const _SegmentedControl({
-    super.key,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppColors.fillControl,
-        borderRadius: BorderRadius.circular(AppSpacing.r10),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: options.map((opt) {
-          final isSelected = opt.value == value;
-          return InkWell(
-            mouseCursor: SystemMouseCursors.click,
-            hoverColor: const Color(0x14FFFFFF),
-            borderRadius: BorderRadius.circular(AppSpacing.r10 - 2),
-            onTap: () => onChanged(opt.value),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: isSelected ? AppColors.accentFill : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppSpacing.r10 - 2),
-                border: Border.all(
-                  color: isSelected ? AppColors.accent : Colors.transparent,
-                ),
-              ),
-              child: Text(
-                opt.label,
-                style: AppTypography.caption.copyWith(
-                  color: isSelected ? AppColors.text : AppColors.textSecondary,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ),
-          );
-        }).toList(),
       ),
     );
   }

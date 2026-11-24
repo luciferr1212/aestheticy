@@ -33,6 +33,7 @@ A native Windows desktop music player called Aestheticy, built with Flutter (no 
 - Run flutter analyze and flutter test before saying a task is done, and report the results honestly.
 - Ask before any large change, deleting files, or changing the architecture.
 - Never commit secrets or personal files.
+- The app never writes to user audio files. Tag writing is allowed only in a future tag editor with backup, atomic write and verification.
 
 ## Design preferences (for later phases)
 - Calm, muted colors. No neon or loud colors.
