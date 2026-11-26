@@ -320,7 +320,11 @@ abstract final class TrackActionsMenu {
                 if (onPlay != null) {
                   onPlay();
                 } else if (controller != null) {
-                  controller.playQueue([track.toAudioSource()], startIndex: 0);
+                  controller.playQueue(
+                    [track.toAudioSource()],
+                    startIndex: 0,
+                    source: 'queue',
+                  );
                 }
               },
         child: Text(context.t('menu.play')),

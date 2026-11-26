@@ -289,7 +289,11 @@ class _QuickSearchOverlayState extends State<QuickSearchOverlay> {
       case AlbumResultItem(:final album):
         widget.navigator.openAlbumDetail(album.album, album: album);
       case TrackResultItem(:final track):
-        widget.controller.playQueue([track.toAudioSource()], startIndex: 0);
+        widget.controller.playQueue(
+          [track.toAudioSource()],
+          startIndex: 0,
+          source: 'search',
+        );
     }
   }
 

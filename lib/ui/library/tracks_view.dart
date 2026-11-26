@@ -227,7 +227,11 @@ class _TracksViewState extends State<TracksView> {
     if (tracks.isEmpty || index < 0 || index >= tracks.length) return;
 
     final sources = tracks.map((t) => t.toAudioSource()).toList();
-    await widget.controller.playQueue(sources, startIndex: index);
+    await widget.controller.playQueue(
+      sources,
+      startIndex: index,
+      source: 'queue',
+    );
   }
 
   @override

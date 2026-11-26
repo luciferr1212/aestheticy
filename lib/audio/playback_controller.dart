@@ -58,10 +58,23 @@ class PlaybackController {
   final _seekCtrl = StreamController<Duration>.broadcast();
   final _queueChangeCtrl = StreamController<void>.broadcast();
 
+  /// Allowed play-event origin sources stored in `play_events.source`.
+  static const Set<String> allowedPlaySources = {
+    'album',
+    'artist',
+    'playlist',
+    'favorites',
+    'search',
+    'queue',
+    'mini',
+    'unknown',
+  };
+
   PlaybackState _currentState = PlaybackState.idle;
   Duration _currentPosition = Duration.zero;
   String? _openedUri;
   String? _lastEmittedUri;
+  String _currentPlaySource = 'unknown';
   Duration? _armedResumePosition;
   String? _armedResumeUri;
   int _consecutiveFatalErrors = 0;
@@ -94,6 +107,17 @@ class PlaybackController {
 
   /// The active transition fade profile.
   FadeProfile get fadeProfile => _fadeProfile;
+
+  /// Origin source label (`album`, `artist`, `playlist`, `favorites`,
+  /// `search`, `queue`, `mini`, or `unknown`) for the current playback context.
+  String get currentPlaySource => _currentPlaySource;
+
+  static String _normalizePlaySource(String? source) {
+    if (source != null && allowedPlaySources.contains(source)) {
+      return source;
+    }
+    return 'unknown';
+  }
 
   /// Updates the active transition fade profile.
   ///
@@ -376,12 +400,18 @@ class PlaybackController {
   ///
   /// When [kKeepUserQueueOnNewContext] is true, any upcoming user-queued tracks
   /// survive the context switch and are placed directly after the newly started track.
-  Future<void> playQueue(List<AudioSource> sources, {int startIndex = 0}) {
+  Future<void> playQueue(
+    List<AudioSource> sources, {
+    int startIndex = 0,
+    String? source,
+  }) {
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
     _armedResumeUri = null;
+    _currentPlaySource = _normalizePlaySource(source);
     if (sources.isEmpty) {
       queue.clear();
+      _currentPlaySource = 'unknown';
       final gen = _beginTransition();
       final profile = _fadeProfile;
       return _enqueueTransition(
@@ -392,28 +422,33 @@ class PlaybackController {
     _replaceQueuePreservingUserQueue(sources, startIndex: startIndex);
 
     notifyQueueChanged();
-    final source = queue.current;
+    final currentSource = queue.current;
     final gen = _beginTransition();
     final profile = _fadeProfile;
-    if (source == null) {
+    if (currentSource == null) {
       return _enqueueTransition(
         () => _stopInternal(gen, clearResume: false, profile: profile),
       );
     }
 
     return _enqueueTransition(
-      () => _switchTrackInternal(source, gen, profile),
+      () => _switchTrackInternal(currentSource, gen, profile),
     );
   }
 
   /// Replaces the queue with [sources], enables shuffle mode, starts playback on
   /// a randomly selected item, notifies queue listeners, and preloads the next track.
-  Future<void> playShuffled(List<AudioSource> sources, {math.Random? random}) {
+  Future<void> playShuffled(
+    List<AudioSource> sources, {
+    math.Random? random,
+    String? source,
+  }) {
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
     _armedResumeUri = null;
+    _currentPlaySource = _normalizePlaySource(source);
     if (sources.isEmpty) {
-      return playQueue(const []);
+      return playQueue(const [], source: source);
     }
 
     final startIndex = sources.length > 1
@@ -423,23 +458,24 @@ class PlaybackController {
     queue.setShuffle(true);
     notifyQueueChanged();
 
-    final source = queue.current;
+    final currentSource = queue.current;
     final gen = _beginTransition();
     final profile = _fadeProfile;
-    if (source == null) {
+    if (currentSource == null) {
       return _enqueueTransition(
         () => _stopInternal(gen, clearResume: false, profile: profile),
       );
     }
 
     return _enqueueTransition(
-      () => _switchTrackInternal(source, gen, profile),
+      () => _switchTrackInternal(currentSource, gen, profile),
     );
   }
 
   /// Stops playback, clears the entire queue, notifies listeners, and clears preload.
   Future<void> clearQueue() async {
     queue.clear();
+    _currentPlaySource = 'unknown';
     _consecutiveFatalErrors = 0;
     _armedResumePosition = null;
     _armedResumeUri = null;
@@ -477,7 +513,7 @@ class PlaybackController {
   Future<void> playNext(List<AudioSource> sources) async {
     if (sources.isEmpty) return;
     if (queue.isEmpty || queue.current == null) {
-      await playQueue(sources, startIndex: 0);
+      await playQueue(sources, startIndex: 0, source: 'queue');
       return;
     }
 
@@ -493,7 +529,7 @@ class PlaybackController {
   Future<void> addToQueue(List<AudioSource> sources) async {
     if (sources.isEmpty) return;
     if (queue.isEmpty || queue.current == null) {
-      await playQueue(sources, startIndex: 0);
+      await playQueue(sources, startIndex: 0, source: 'queue');
       return;
     }
 

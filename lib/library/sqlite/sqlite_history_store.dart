@@ -1,6 +1,7 @@
 import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/diagnostics/app_logger.dart';
+import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/sqlite_row_mappers.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
@@ -31,18 +32,48 @@ class SqliteHistoryStore {
     );
   }
 
+  bool _hasV2Columns(String schema) {
+    final cols = _db
+        .select('PRAGMA $schema.table_info(play_events);')
+        .map((r) => r['name'] as String)
+        .toSet();
+    return cols.contains('track_uid') &&
+        cols.contains('source') &&
+        cols.contains('session_id') &&
+        cols.contains('ended_reason');
+  }
+
+  String? _resolveUidForUri(String schema, String uri) {
+    final hasIdentity = _db
+        .select(
+          "SELECT 1 FROM $schema.sqlite_master WHERE type = 'table' AND name = 'track_identity' LIMIT 1;",
+        )
+        .isNotEmpty;
+    if (!hasIdentity) return null;
+    final canonical = FilePathUtils.canonicalKey(uri);
+    if (canonical.isEmpty) return null;
+    final rows = _db.select(
+      'SELECT uid FROM $schema.track_identity WHERE normalize_file_path(path) = ? LIMIT 1;',
+      [canonical],
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['uid'] as String;
+  }
+
   Future<int> insertPlayEvent(PlayEvent e) async {
     if (_accessMode() == UserDataAccessMode.safeReadOnly) {
       _logReadOnlyPlaySkippedOnce();
       return -1;
     }
     final u = _userSchema();
+    final resolvedUid = e.trackUid ?? _resolveUidForUri(u, e.uri);
     _db.execute(
       '''
       INSERT INTO $u.play_events (
         uri, title, artist, album, album_artist,
-        duration_ms, started_at_ms, listened_ms, counted, completed
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        duration_ms, started_at_ms, listened_ms, counted, completed,
+        track_uid, source, session_id, ended_reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       ''',
       [
         e.uri,
@@ -55,6 +86,10 @@ class SqliteHistoryStore {
         e.listenedMs,
         e.counted ? 1 : 0,
         e.completed ? 1 : 0,
+        resolvedUid,
+        e.source,
+        e.sessionId,
+        e.endedReason,
       ],
     );
     return _db.lastInsertRowId;
@@ -65,6 +100,7 @@ class SqliteHistoryStore {
     required int listenedMs,
     required bool counted,
     required bool completed,
+    String? endedReason,
   }) async {
     if (_accessMode() == UserDataAccessMode.safeReadOnly) {
       _logReadOnlyPlaySkippedOnce();
@@ -75,24 +111,108 @@ class SqliteHistoryStore {
     _db.execute(
       '''
       UPDATE $u.play_events
-      SET listened_ms = ?, counted = ?, completed = ?
+      SET listened_ms = ?,
+          counted = ?,
+          completed = ?,
+          ended_reason = COALESCE(?, ended_reason)
       WHERE id = ?;
       ''',
       [
         listenedMs,
         counted ? 1 : 0,
         completed ? 1 : 0,
+        endedReason,
         id,
       ],
     );
   }
 
+  /// Cheap single-statement heartbeat update for the active play session.
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs) async {
+    if (_accessMode() == UserDataAccessMode.safeReadOnly) {
+      _logReadOnlyPlaySkippedOnce();
+      return;
+    }
+    if (id <= 0) return;
+    final u = _userSchema();
+    _db.execute(
+      'UPDATE $u.play_events SET listened_ms = ? WHERE id = ?;',
+      [listenedMs, id],
+    );
+  }
+
+  /// Marks any open play events (`ended_reason IS NULL`) from an unexpected
+  /// termination as `'interrupted'`, keeping their last heartbeat `listened_ms`.
+  Future<int> closeInterruptedPlayEvents() async {
+    if (_accessMode() == UserDataAccessMode.safeReadOnly) {
+      return 0;
+    }
+    final u = _userSchema();
+    if (!_hasV2Columns(u)) return 0;
+    _db.execute(
+      "UPDATE $u.play_events SET ended_reason = 'interrupted' WHERE ended_reason IS NULL;",
+    );
+    return _db.updatedRows;
+  }
+
+  /// Backfills `track_uid` for existing play events using `track_identity`.
+  Future<int> backfillPlayEventTrackUids() async {
+    if (_accessMode() == UserDataAccessMode.safeReadOnly) {
+      return 0;
+    }
+    final u = _userSchema();
+    if (!_hasV2Columns(u)) return 0;
+    final hasIdentity = _db
+        .select(
+          "SELECT 1 FROM $u.sqlite_master WHERE type = 'table' AND name = 'track_identity' LIMIT 1;",
+        )
+        .isNotEmpty;
+    if (!hasIdentity) return 0;
+
+    final identityMap = <String, String>{};
+    for (final row in _db.select('SELECT uid, path FROM $u.track_identity;')) {
+      final canonical = FilePathUtils.canonicalKey(row['path'] as String);
+      if (canonical.isNotEmpty) {
+        identityMap.putIfAbsent(canonical, () => row['uid'] as String);
+      }
+    }
+    if (identityMap.isEmpty) return 0;
+
+    final missing = _db.select(
+      'SELECT id, uri FROM $u.play_events WHERE track_uid IS NULL;',
+    );
+    var updated = 0;
+    final stmt = _db.prepare(
+      'UPDATE $u.play_events SET track_uid = ? WHERE id = ?;',
+    );
+    try {
+      for (final row in missing) {
+        final canonical = FilePathUtils.canonicalKey(row['uri'] as String);
+        final uid = identityMap[canonical];
+        if (uid != null) {
+          stmt.execute([uid, row['id'] as int]);
+          updated++;
+        }
+      }
+    } finally {
+      stmt.close();
+    }
+    return updated;
+  }
+
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async {
     final u = _userSchema();
+    final cols = _hasV2Columns(u)
+        ? 'id, uri, title, artist, album, album_artist, duration_ms, '
+            'started_at_ms, listened_ms, counted, completed, '
+            'track_uid, source, session_id, ended_reason'
+        : 'id, uri, title, artist, album, album_artist, duration_ms, '
+            'started_at_ms, listened_ms, counted, completed, '
+            "NULL AS track_uid, 'unknown' AS source, NULL AS session_id, "
+            'NULL AS ended_reason';
     final rows = _db.select(
       '''
-      SELECT id, uri, title, artist, album, album_artist,
-             duration_ms, started_at_ms, listened_ms, counted, completed
+      SELECT $cols
       FROM $u.play_events
       ORDER BY started_at_ms DESC, id DESC
       LIMIT ?;

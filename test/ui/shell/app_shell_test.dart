@@ -22,6 +22,8 @@ import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
 import 'package:aestheticy/ui/shell/bottom_now_playing_bar.dart';
+import 'package:aestheticy/library/history_models.dart';
+import 'package:aestheticy/library/track_identity_models.dart';
 import 'package:aestheticy/ui/shell/sidebar.dart';
 import 'package:aestheticy/ui/theme/app_theme.dart';
 
@@ -179,6 +181,9 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
   Future<void> upsertTracks(List<Track> tracks) async {}
 
   @override
+  Future<void> upsertTracksFromScan(List<Track> tracks) async {}
+
+  @override
   Future<void> removeTracksByPath(List<String> paths) async {}
 
   @override
@@ -190,7 +195,71 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
     required int listenedMs,
     required bool counted,
     required bool completed,
+    String? endedReason,
   }) async {}
+
+  @override
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs) async {}
+
+  @override
+  Future<int> closeInterruptedPlayEvents() async => 0;
+
+  @override
+  Future<int> backfillPlayEventTrackUids() async => 0;
+
+  @override
+  Future<List<PlayEvent>> playEventsBetween(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<RankedTrackStat>> topTracksInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<RankedArtistStat>> topArtistsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<RankedAlbumStat>> topAlbumsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<DailyListeningStat>> listeningMinutesPerDay(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<int> distinctTracksFirstPlayedInRange(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) async =>
+      0;
 
   @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async => [];
@@ -249,6 +318,19 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
 
   @override
   Future<List<Track>> recentlyPlayedTracks({int limit = 200}) async => [];
+
+  @override
+  Future<RelinkReport> reconcileTrackIdentities({
+    DateTime? now,
+    bool markUnmatchedMissing = true,
+  }) async =>
+      RelinkReport.empty;
+
+  @override
+  Future<String?> resolveTrackUid(String path) async => null;
+
+  @override
+  Future<List<TrackIdentity>> listTrackIdentities() async => const [];
 
   @override
   Future<void> close() async {}

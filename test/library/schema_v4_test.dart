@@ -154,7 +154,7 @@ void main() {
       final versionRow = dbToMigrate.select('PRAGMA main.user_version;');
       expect(versionRow.first.values.first, equals(4));
       final userVersionRow = dbToMigrate.select('PRAGMA userdata.user_version;');
-      expect(userVersionRow.first.values.first, equals(1));
+      expect(userVersionRow.first.values.first, equals(kUserDataSchemaVersion));
 
       // Check rows preserved
       final folderRows = dbToMigrate.select('SELECT path FROM folders;');

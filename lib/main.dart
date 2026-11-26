@@ -198,6 +198,8 @@ void main() {
       settingsStore: settingsStore,
     );
 
+    await repository.closeInterruptedPlayEvents();
+
     final playRecorder = PlayRecorder(
       controller: controller,
       repository: repository,

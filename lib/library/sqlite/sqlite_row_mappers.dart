@@ -65,6 +65,15 @@ class SqliteRowMappers {
       listenedMs: row['listened_ms'] as int,
       counted: (row['counted'] as int) == 1,
       completed: (row['completed'] as int) == 1,
+      trackUid: row.containsKey('track_uid') ? row['track_uid'] as String? : null,
+      source: row.containsKey('source')
+          ? ((row['source'] as String?) ?? 'unknown')
+          : 'unknown',
+      sessionId:
+          row.containsKey('session_id') ? row['session_id'] as String? : null,
+      endedReason: row.containsKey('ended_reason')
+          ? row['ended_reason'] as String?
+          : null,
     );
   }
 

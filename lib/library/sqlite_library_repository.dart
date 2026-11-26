@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/diagnostics/app_logger.dart';
+import 'package:aestheticy/library/history_models.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/database_protection.dart';
@@ -17,10 +18,13 @@ import 'package:aestheticy/library/sqlite/sqlite_albums_store.dart';
 import 'package:aestheticy/library/sqlite/sqlite_artists_store.dart';
 import 'package:aestheticy/library/sqlite/sqlite_collections_store.dart';
 import 'package:aestheticy/library/sqlite/sqlite_db_initializer.dart';
+import 'package:aestheticy/library/sqlite/sqlite_history_analytics.dart';
 import 'package:aestheticy/library/sqlite/sqlite_history_store.dart';
+import 'package:aestheticy/library/sqlite/sqlite_identity_store.dart';
 import 'package:aestheticy/library/sqlite/sqlite_tracks_store.dart';
 import 'package:aestheticy/library/sqlite/userdata_backup_service.dart';
 import 'package:aestheticy/library/sqlite/userdata_migrator.dart';
+import 'package:aestheticy/library/track_identity_models.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
 
 /// SQLite storage implementation for the music library and user data.
@@ -47,6 +51,8 @@ class SqliteLibraryRepository implements LibraryRepository {
   late final SqliteArtistsStore _artists;
   late final SqliteCollectionsStore _collections;
   late final SqliteHistoryStore _history;
+  late final SqliteHistoryAnalytics _historyAnalytics;
+  late final SqliteIdentityStore _identity;
 
   SqliteLibraryRepository._(
     this._db, {
@@ -80,6 +86,15 @@ class SqliteLibraryRepository implements LibraryRepository {
       accessMode: modeProvider,
     );
     _history = SqliteHistoryStore(
+      _db,
+      userSchema: schemaProvider,
+      accessMode: modeProvider,
+    );
+    _historyAnalytics = SqliteHistoryAnalytics(
+      _db,
+      userSchema: schemaProvider,
+    );
+    _identity = SqliteIdentityStore(
       _db,
       userSchema: schemaProvider,
       accessMode: modeProvider,
@@ -238,6 +253,7 @@ class SqliteLibraryRepository implements LibraryRepository {
         backupsDir: resolvedBackupsDir,
         clock: clock,
         hooks: migrationHooks,
+        onBeforeUserDataUpgrade: effectiveUpgradeHook,
       );
 
       final mode = migrationResult.accessMode;
@@ -252,7 +268,7 @@ class SqliteLibraryRepository implements LibraryRepository {
         logsDirectory: AppLogger.instance.logDirectory,
       );
 
-      return SqliteLibraryRepository._(
+      final repo = SqliteLibraryRepository._(
         db,
         libraryFilePath: filePath,
         userDataFilePath: resolvedUserDataPath,
@@ -261,6 +277,13 @@ class SqliteLibraryRepository implements LibraryRepository {
         userDataSchema: schema,
         startupReport: report,
       );
+      if (mode == UserDataAccessMode.normal && schema == 'userdata') {
+        repo._identity.reconcileIdentitiesSync(
+          now: clock?.call(),
+          markUnmatchedMissing: false,
+        );
+      }
+      return repo;
     } on SimulatedCrashException {
       db.close();
       rethrow;
@@ -352,11 +375,17 @@ class SqliteLibraryRepository implements LibraryRepository {
       applyUserDataSchema: false,
     );
     final migrationResult = LegacyUserDataMigrator.run(db);
-    return SqliteLibraryRepository._(
+    final mode = migrationResult.accessMode;
+    final schema = migrationResult.readLegacyFromMain ? 'main' : 'userdata';
+    final repo = SqliteLibraryRepository._(
       db,
-      userDataAccessMode: migrationResult.accessMode,
-      userDataSchema: migrationResult.readLegacyFromMain ? 'main' : 'userdata',
+      userDataAccessMode: mode,
+      userDataSchema: schema,
     );
+    if (mode == UserDataAccessMode.normal && schema == 'userdata') {
+      repo._identity.reconcileIdentitiesSync(markUnmatchedMissing: false);
+    }
+    return repo;
   }
 
   /// Opens the default database files in the injected [supportDir] (or the
@@ -399,7 +428,14 @@ class SqliteLibraryRepository implements LibraryRepository {
       _tracks.markFolderScanned(folderId, timestamp);
 
   @override
-  Future<void> upsertTracks(List<Track> tracks) => _tracks.upsertTracks(tracks);
+  Future<void> upsertTracks(List<Track> tracks) async {
+    await _tracks.upsertTracks(tracks);
+    await _identity.ensureIdentitiesForTracks(tracks);
+  }
+
+  @override
+  Future<void> upsertTracksFromScan(List<Track> tracks) =>
+      _tracks.upsertTracks(tracks);
 
   @override
   Future<Map<String, ({int mtimeMs, int sizeBytes})>> existingFiles(
@@ -503,12 +539,110 @@ class SqliteLibraryRepository implements LibraryRepository {
     required int listenedMs,
     required bool counted,
     required bool completed,
+    String? endedReason,
   }) =>
       _history.updatePlayEvent(
         id,
         listenedMs: listenedMs,
         counted: counted,
         completed: completed,
+        endedReason: endedReason,
+      );
+
+  @override
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs) =>
+      _history.updatePlayEventHeartbeat(id, listenedMs);
+
+  @override
+  Future<int> closeInterruptedPlayEvents() =>
+      _history.closeInterruptedPlayEvents();
+
+  @override
+  Future<int> backfillPlayEventTrackUids() =>
+      _history.backfillPlayEventTrackUids();
+
+  @override
+  Future<List<PlayEvent>> playEventsBetween(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) =>
+      _historyAnalytics.playEventsBetween(
+        start,
+        end,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<RankedTrackStat>> topTracksInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) =>
+      _historyAnalytics.topTracksInRange(
+        start,
+        end,
+        metric: metric,
+        limit: limit,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<RankedArtistStat>> topArtistsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) =>
+      _historyAnalytics.topArtistsInRange(
+        start,
+        end,
+        metric: metric,
+        limit: limit,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<RankedAlbumStat>> topAlbumsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) =>
+      _historyAnalytics.topAlbumsInRange(
+        start,
+        end,
+        metric: metric,
+        limit: limit,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<DailyListeningStat>> listeningMinutesPerDay(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) =>
+      _historyAnalytics.listeningMinutesPerDay(
+        start,
+        end,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<int> distinctTracksFirstPlayedInRange(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) =>
+      _historyAnalytics.distinctTracksFirstPlayedInRange(
+        start,
+        end,
+        countedOnly: countedOnly,
       );
 
   @override
@@ -573,6 +707,24 @@ class SqliteLibraryRepository implements LibraryRepository {
   @override
   Future<List<Track>> recentlyPlayedTracks({int limit = 200}) =>
       _history.recentlyPlayedTracks(limit: limit);
+
+  @override
+  Future<RelinkReport> reconcileTrackIdentities({
+    DateTime? now,
+    bool markUnmatchedMissing = true,
+  }) =>
+      _identity.reconcileIdentities(
+        now: now,
+        markUnmatchedMissing: markUnmatchedMissing,
+      );
+
+  @override
+  Future<String?> resolveTrackUid(String path) =>
+      _identity.resolveTrackUid(path);
+
+  @override
+  Future<List<TrackIdentity>> listTrackIdentities() =>
+      _identity.listIdentities();
 
   @override
   Future<void> close() async {

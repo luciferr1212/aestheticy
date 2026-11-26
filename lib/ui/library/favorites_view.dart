@@ -101,12 +101,16 @@ class _FavoritesViewState extends State<FavoritesView> {
     if (tracks.isEmpty) return;
     final sources = tracks.map((t) => t.toAudioSource()).toList();
     if (shuffle) {
-      await widget.controller.playShuffled(sources);
+      await widget.controller.playShuffled(sources, source: 'favorites');
     } else {
       final safeIndex = (startIndex >= 0 && startIndex < sources.length)
           ? startIndex
           : 0;
-      await widget.controller.playQueue(sources, startIndex: safeIndex);
+      await widget.controller.playQueue(
+        sources,
+        startIndex: safeIndex,
+        source: 'favorites',
+      );
     }
   }
 

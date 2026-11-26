@@ -136,14 +136,15 @@ class LegacyUserDataMigrator {
     Directory? backupsDir,
     DateTime Function()? clock,
     AppLogger? logger,
+    void Function(int fromVersion, int toVersion)? onBeforeUserDataUpgrade,
     LegacyMigrationTestHooks? hooks,
   }) {
     final log = logger ?? AppLogger.instance;
     final nowFn = clock ?? DateTime.now;
 
     try {
-      // Ensure userdata schema v1 exists (creates meta table too) before reading state.
-      UserDataMigrator.apply(db);
+      // Ensure userdata schema is up-to-date before reading state.
+      UserDataMigrator.apply(db, onBeforeUpgrade: onBeforeUserDataUpgrade);
 
       final state = _readState(db);
       final legacyTablesInMain = _existingLegacyTables(db);
@@ -404,6 +405,7 @@ class LegacyUserDataMigrator {
     db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       UserDataMigrator.createV1SchemaStatements(db);
+      UserDataMigrator.createV2SchemaStatements(db);
 
       // Clear any partial rows from prior aborted attempts (reverse FK order).
       for (final table in _reverseFkTableOrder) {
@@ -412,9 +414,21 @@ class LegacyUserDataMigrator {
 
       // Copy each existing legacy table in FK-safe order preserving IDs & timestamps.
       for (final table in legacyTables) {
-        db.execute(
-          'INSERT INTO userdata.$table SELECT * FROM main.$table;',
-        );
+        if (table == 'play_events') {
+          db.execute('''
+            INSERT INTO userdata.play_events (
+              id, uri, title, artist, album, album_artist,
+              duration_ms, started_at_ms, listened_ms, counted, completed
+            )
+            SELECT id, uri, title, artist, album, album_artist,
+                   duration_ms, started_at_ms, listened_ms, counted, completed
+            FROM main.play_events;
+          ''');
+        } else {
+          db.execute(
+            'INSERT INTO userdata.$table SELECT * FROM main.$table;',
+          );
+        }
       }
 
       // Verify per-table row count and primary-key checksum INSIDE the transaction.

@@ -97,6 +97,24 @@ class SqliteAlbumsStore {
 
     final rows = _db.select(
       '''
+      WITH matching_album_keys AS (
+        SELECT DISTINCT album_identity_key(t2.album, t2.album_artist, t2.artist, t2.path) AS album_key
+        FROM main.tracks t2
+        JOIN main.track_artists ta ON ta.track_id = t2.id
+        WHERE (
+          ta.artist_key IN ($placeholders)
+          OR ta.artist_key IN ($normalizedPlaceholders)
+          OR ta.artist_name IN ($placeholders)
+          OR ta.artist_key IN (
+            SELECT canonical_key FROM $u.artist_aliases
+            WHERE alias_key IN ($placeholders) OR alias_key IN ($normalizedPlaceholders)
+          )
+          OR ta.artist_key IN (
+            SELECT alias_key FROM $u.artist_aliases
+            WHERE canonical_key IN ($placeholders) OR canonical_key IN ($normalizedPlaceholders)
+          )
+        )
+      )
       SELECT
         album_identity_key(t.album, t.album_artist, t.artist, t.path) AS album_key,
         MIN(COALESCE(NULLIF(TRIM(t.album), ''), 'Unknown Album')) AS album_name,
@@ -109,25 +127,8 @@ class SqliteAlbumsStore {
         MAX(t.added_at) AS latest_added_at
       FROM main.tracks t
       WHERE t.album IS NOT NULL AND TRIM(t.album) != ''
-        AND EXISTS (
-          SELECT 1
-          FROM main.tracks t2
-          JOIN main.track_artists ta ON ta.track_id = t2.id
-          WHERE album_identity_key(t2.album, t2.album_artist, t2.artist, t2.path) =
-              album_identity_key(t.album, t.album_artist, t.artist, t.path)
-            AND (
-              ta.artist_key IN ($placeholders)
-              OR ta.artist_key IN ($normalizedPlaceholders)
-              OR ta.artist_name IN ($placeholders)
-              OR ta.artist_key IN (
-                SELECT canonical_key FROM $u.artist_aliases
-                WHERE alias_key IN ($placeholders) OR alias_key IN ($normalizedPlaceholders)
-              )
-              OR ta.artist_key IN (
-                SELECT alias_key FROM $u.artist_aliases
-                WHERE canonical_key IN ($placeholders) OR canonical_key IN ($normalizedPlaceholders)
-              )
-            )
+        AND album_identity_key(t.album, t.album_artist, t.artist, t.path) IN (
+          SELECT album_key FROM matching_album_keys
         )
       GROUP BY album_key
       ORDER BY album_name COLLATE NOCASE ASC;

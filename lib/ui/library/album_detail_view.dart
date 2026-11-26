@@ -157,9 +157,13 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     if (_tracks.isEmpty) return;
     final sources = _tracks.map((t) => t.toAudioSource()).toList();
     if (shuffle) {
-      await widget.controller.playShuffled(sources);
+      await widget.controller.playShuffled(sources, source: 'album');
     } else {
-      await widget.controller.playQueue(sources, startIndex: startIndex);
+      await widget.controller.playQueue(
+        sources,
+        startIndex: startIndex,
+        source: 'album',
+      );
     }
   }
 

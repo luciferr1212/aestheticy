@@ -29,6 +29,7 @@ class _FakeHistoryRepository extends Fake implements LibraryRepository {
     required int listenedMs,
     required bool counted,
     required bool completed,
+    String? endedReason,
   }) async {
     if (shouldThrow) throw Exception('Simulated DB failure');
     final index = events.indexWhere((e) => e.id == id);
@@ -37,9 +38,22 @@ class _FakeHistoryRepository extends Fake implements LibraryRepository {
         listenedMs: listenedMs,
         counted: counted,
         completed: completed,
+        endedReason: endedReason ?? events[index].endedReason,
       );
     }
   }
+
+  @override
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs) async {
+    if (shouldThrow) throw Exception('Simulated DB failure');
+    final index = events.indexWhere((e) => e.id == id);
+    if (index != -1) {
+      events[index] = events[index].copyWith(listenedMs: listenedMs);
+    }
+  }
+
+  @override
+  Future<String?> resolveTrackUid(String path) async => null;
 
   @override
   Future<int> playEventCount({bool countedOnly = false}) async {

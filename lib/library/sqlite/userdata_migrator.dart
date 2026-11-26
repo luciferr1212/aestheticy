@@ -4,7 +4,7 @@ library;
 import 'package:sqlite3/sqlite3.dart';
 
 /// Current schema version for `userdata.db`.
-const int kUserDataSchemaVersion = 1;
+const int kUserDataSchemaVersion = 2;
 
 /// Ordered list of user-data tables stored in `userdata.db`.
 ///
@@ -42,6 +42,9 @@ class UserDataMigrator {
 
     if (currentVersion < 1) {
       _migrateToV1(db);
+    }
+    if (currentVersion < 2) {
+      _migrateToV2(db);
     }
   }
 
@@ -159,6 +162,68 @@ class UserDataMigrator {
     try {
       createV1SchemaStatements(db);
       db.execute('PRAGMA userdata.user_version = 1;');
+      db.execute('COMMIT;');
+    } catch (e) {
+      db.execute('ROLLBACK;');
+      rethrow;
+    }
+  }
+
+  /// Creates all `userdata` v2 tables, additive `play_events` columns, and
+  /// indexes idempotently inside an active transaction or standalone.
+  static void createV2SchemaStatements(Database db) {
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS userdata.track_identity (
+        uid TEXT PRIMARY KEY,
+        path TEXT NOT NULL,
+        size_bytes INTEGER,
+        duration_ms INTEGER,
+        title_key TEXT,
+        artist_key TEXT,
+        album_key TEXT,
+        first_seen_ms INTEGER,
+        last_seen_ms INTEGER,
+        missing_since_ms INTEGER
+      );
+    ''');
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_track_identity_path '
+      'ON track_identity(path);',
+    );
+
+    final existingCols = db
+        .select('PRAGMA userdata.table_info(play_events);')
+        .map((r) => r['name'] as String)
+        .toSet();
+    if (!existingCols.contains('track_uid')) {
+      db.execute('ALTER TABLE userdata.play_events ADD COLUMN track_uid TEXT;');
+    }
+    if (!existingCols.contains('source')) {
+      db.execute('ALTER TABLE userdata.play_events ADD COLUMN source TEXT;');
+    }
+    if (!existingCols.contains('session_id')) {
+      db.execute('ALTER TABLE userdata.play_events ADD COLUMN session_id TEXT;');
+    }
+    if (!existingCols.contains('ended_reason')) {
+      db.execute(
+        'ALTER TABLE userdata.play_events ADD COLUMN ended_reason TEXT;',
+      );
+    }
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_play_events_started_at_ms '
+      'ON play_events(started_at_ms);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_play_events_track_uid '
+      'ON play_events(track_uid);',
+    );
+  }
+
+  static void _migrateToV2(Database db) {
+    db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      createV2SchemaStatements(db);
+      db.execute('PRAGMA userdata.user_version = 2;');
       db.execute('COMMIT;');
     } catch (e) {
       db.execute('ROLLBACK;');

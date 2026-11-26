@@ -17,6 +17,8 @@ import 'package:aestheticy/ui/settings/app_settings.dart';
 import 'package:aestheticy/ui/settings/settings_scope.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
+import 'package:aestheticy/library/history_models.dart';
+import 'package:aestheticy/library/track_identity_models.dart';
 import 'package:aestheticy/ui/shell/app_shell.dart';
 
 class FailingMergeRepository implements LibraryRepository {
@@ -57,6 +59,10 @@ class FailingMergeRepository implements LibraryRepository {
 
   @override
   Future<void> upsertTracks(List<Track> tracks) => _inner.upsertTracks(tracks);
+
+  @override
+  Future<void> upsertTracksFromScan(List<Track> tracks) =>
+      _inner.upsertTracksFromScan(tracks);
 
   @override
   Future<Map<String, ({int mtimeMs, int sizeBytes})>> existingFiles(int folderId) =>
@@ -144,12 +150,102 @@ class FailingMergeRepository implements LibraryRepository {
     required int listenedMs,
     required bool counted,
     required bool completed,
+    String? endedReason,
   }) =>
       _inner.updatePlayEvent(
         id,
         listenedMs: listenedMs,
         counted: counted,
         completed: completed,
+        endedReason: endedReason,
+      );
+
+  @override
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs) =>
+      _inner.updatePlayEventHeartbeat(id, listenedMs);
+
+  @override
+  Future<int> closeInterruptedPlayEvents() =>
+      _inner.closeInterruptedPlayEvents();
+
+  @override
+  Future<int> backfillPlayEventTrackUids() =>
+      _inner.backfillPlayEventTrackUids();
+
+  @override
+  Future<List<PlayEvent>> playEventsBetween(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) =>
+      _inner.playEventsBetween(start, end, countedOnly: countedOnly);
+
+  @override
+  Future<List<RankedTrackStat>> topTracksInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) =>
+      _inner.topTracksInRange(
+        start,
+        end,
+        metric: metric,
+        limit: limit,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<RankedArtistStat>> topArtistsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) =>
+      _inner.topArtistsInRange(
+        start,
+        end,
+        metric: metric,
+        limit: limit,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<RankedAlbumStat>> topAlbumsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) =>
+      _inner.topAlbumsInRange(
+        start,
+        end,
+        metric: metric,
+        limit: limit,
+        countedOnly: countedOnly,
+      );
+
+  @override
+  Future<List<DailyListeningStat>> listeningMinutesPerDay(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) =>
+      _inner.listeningMinutesPerDay(start, end, countedOnly: countedOnly);
+
+  @override
+  Future<int> distinctTracksFirstPlayedInRange(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) =>
+      _inner.distinctTracksFirstPlayedInRange(
+        start,
+        end,
+        countedOnly: countedOnly,
       );
 
   @override
@@ -213,6 +309,23 @@ class FailingMergeRepository implements LibraryRepository {
   @override
   Future<List<Track>> recentlyPlayedTracks({int limit = 200}) =>
       _inner.recentlyPlayedTracks(limit: limit);
+
+  @override
+  Future<RelinkReport> reconcileTrackIdentities({
+    DateTime? now,
+    bool markUnmatchedMissing = true,
+  }) =>
+      _inner.reconcileTrackIdentities(
+        now: now,
+        markUnmatchedMissing: markUnmatchedMissing,
+      );
+
+  @override
+  Future<String?> resolveTrackUid(String path) => _inner.resolveTrackUid(path);
+
+  @override
+  Future<List<TrackIdentity>> listTrackIdentities() =>
+      _inner.listTrackIdentities();
 
   @override
   Future<void> close() => _inner.close();

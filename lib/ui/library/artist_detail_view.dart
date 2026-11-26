@@ -250,13 +250,21 @@ class _ArtistDetailViewState extends State<ArtistDetailView> {
     if (tracks.isEmpty) return;
     final sources = tracks.map((t) => t.toAudioSource()).toList();
     final safeIndex = startIndex.clamp(0, sources.length - 1);
-    await widget.controller.playQueue(sources, startIndex: safeIndex);
+    await widget.controller.playQueue(
+      sources,
+      startIndex: safeIndex,
+      source: 'artist',
+    );
   }
 
   Future<void> _shuffleTracks(List<Track> tracks) async {
     if (tracks.isEmpty) return;
     final sources = tracks.map((t) => t.toAudioSource()).toList();
-    await widget.controller.playShuffled(sources, random: _random);
+    await widget.controller.playShuffled(
+      sources,
+      random: _random,
+      source: 'artist',
+    );
   }
 
   Widget? _buildTrackActionWidget(Track track) {

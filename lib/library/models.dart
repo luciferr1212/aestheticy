@@ -444,6 +444,20 @@ class PlayEvent {
   /// Whether the track played completely to its natural end.
   final bool completed;
 
+  /// Stable `track_identity.uid` resolved for this track, or `null` if unknown.
+  final String? trackUid;
+
+  /// Playback origin source (`album`, `artist`, `playlist`, `favorites`,
+  /// `search`, `queue`, `mini`, or `unknown`).
+  final String source;
+
+  /// Random per-app-run session identifier grouping events from the same launch.
+  final String? sessionId;
+
+  /// Terminal outcome reason (`completed`, `skipped`, `stopped`, `error`,
+  /// `interrupted`), or `null` while in progress.
+  final String? endedReason;
+
   /// Creates an immutable [PlayEvent] instance.
   const PlayEvent({
     this.id,
@@ -457,6 +471,10 @@ class PlayEvent {
     required this.listenedMs,
     required this.counted,
     required this.completed,
+    this.trackUid,
+    this.source = 'unknown',
+    this.sessionId,
+    this.endedReason,
   });
 
   /// Creates a copy of this [PlayEvent] with the given fields replaced.
@@ -472,6 +490,10 @@ class PlayEvent {
     int? listenedMs,
     bool? counted,
     bool? completed,
+    String? trackUid,
+    String? source,
+    String? sessionId,
+    String? endedReason,
   }) {
     return PlayEvent(
       id: id ?? this.id,
@@ -485,6 +507,10 @@ class PlayEvent {
       listenedMs: listenedMs ?? this.listenedMs,
       counted: counted ?? this.counted,
       completed: completed ?? this.completed,
+      trackUid: trackUid ?? this.trackUid,
+      source: source ?? this.source,
+      sessionId: sessionId ?? this.sessionId,
+      endedReason: endedReason ?? this.endedReason,
     );
   }
 
@@ -503,7 +529,11 @@ class PlayEvent {
           startedAt == other.startedAt &&
           listenedMs == other.listenedMs &&
           counted == other.counted &&
-          completed == other.completed;
+          completed == other.completed &&
+          trackUid == other.trackUid &&
+          source == other.source &&
+          sessionId == other.sessionId &&
+          endedReason == other.endedReason;
 
   @override
   int get hashCode => Object.hash(
@@ -518,12 +548,18 @@ class PlayEvent {
         listenedMs,
         counted,
         completed,
+        trackUid,
+        source,
+        sessionId,
+        endedReason,
       );
 
   @override
   String toString() =>
       'PlayEvent(id: $id, uri: $uri, title: $title, artist: $artist, '
-      'startedAt: $startedAt, listenedMs: $listenedMs, counted: $counted, completed: $completed)';
+      'startedAt: $startedAt, listenedMs: $listenedMs, counted: $counted, '
+      'completed: $completed, trackUid: $trackUid, source: $source, '
+      'sessionId: $sessionId, endedReason: $endedReason)';
 }
 
 /// Read model representing a user playlist and its aggregate metadata.

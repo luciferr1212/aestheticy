@@ -1,7 +1,9 @@
 /// Repository interface defining the music library data access contract.
 library;
 
+import 'package:aestheticy/library/history_models.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/track_identity_models.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
 
 /// Abstract storage repository for music library tracks and folders.
@@ -133,6 +135,65 @@ abstract class LibraryRepository {
     required int listenedMs,
     required bool counted,
     required bool completed,
+    String? endedReason,
+  });
+
+  /// Updates only `listened_ms` for an active play event (crash-safety heartbeat).
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs);
+
+  /// Marks any open play events (`ended_reason IS NULL`) from an interrupted
+  /// session as `'interrupted'`, keeping their last heartbeat `listened_ms`.
+  Future<int> closeInterruptedPlayEvents();
+
+  /// Backfills `track_uid` on `play_events` via `track_identity`.
+  Future<int> backfillPlayEventTrackUids();
+
+  /// Retrieves play events whose `startedAt` falls within `[start, end]`.
+  Future<List<PlayEvent>> playEventsBetween(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  });
+
+  /// Retrieves top tracks in `[start, end]` ranked by [metric].
+  Future<List<RankedTrackStat>> topTracksInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  });
+
+  /// Retrieves top artists in `[start, end]` ranked by [metric].
+  Future<List<RankedArtistStat>> topArtistsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  });
+
+  /// Retrieves top albums in `[start, end]` ranked by [metric].
+  Future<List<RankedAlbumStat>> topAlbumsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  });
+
+  /// Retrieves aggregated UTC listening totals per day within `[start, end]`.
+  Future<List<DailyListeningStat>> listeningMinutesPerDay(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  });
+
+  /// Returns how many distinct tracks had their first play event inside `[start, end]`.
+  Future<int> distinctTracksFirstPlayedInRange(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
   });
 
   /// Retrieves the most recent playback events ordered from newest to oldest.
@@ -202,6 +263,25 @@ abstract class LibraryRepository {
   /// Retrieves tracks played (counted = 1) from history, distinct by track path,
   /// newest first, skipping any files not found in the library.
   Future<List<Track>> recentlyPlayedTracks({int limit = 200});
+
+  /// Upserts [tracks] during an active library scan without eagerly creating
+  /// new `track_identity` rows before scan-end relink reconciliation runs.
+  Future<void> upsertTracksFromScan(List<Track> tracks);
+
+  // ── Track Identity & Relinking ───────────────────────────────────────
+
+  /// Reconciles `track_identity` against the library and user-data tables,
+  /// relinking moved/renamed tracks and backfilling unlinked paths.
+  Future<RelinkReport> reconcileTrackIdentities({
+    DateTime? now,
+    bool markUnmatchedMissing = true,
+  });
+
+  /// Returns the stable UID for [path] (canonicalized), or `null` if unknown.
+  Future<String?> resolveTrackUid(String path);
+
+  /// Lists all known `track_identity` records.
+  Future<List<TrackIdentity>> listTrackIdentities();
 
   /// Closes the underlying database connection and releases resources.
   Future<void> close();

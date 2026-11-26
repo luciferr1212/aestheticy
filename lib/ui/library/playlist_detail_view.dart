@@ -182,9 +182,13 @@ class _PlaylistDetailViewState extends State<PlaylistDetailView> {
     if (sources.isEmpty) return;
 
     if (shuffle) {
-      await widget.controller.playShuffled(sources);
+      await widget.controller.playShuffled(sources, source: 'playlist');
     } else {
-      await widget.controller.playQueue(sources, startIndex: mappedStartIndex);
+      await widget.controller.playQueue(
+        sources,
+        startIndex: mappedStartIndex,
+        source: 'playlist',
+      );
     }
   }
 

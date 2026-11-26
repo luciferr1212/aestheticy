@@ -2,8 +2,10 @@ import 'dart:math';
 
 import 'package:aestheticy/library/album_identity.dart';
 import 'package:aestheticy/library/file_path_utils.dart';
+import 'package:aestheticy/library/history_models.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/track_identity_models.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
 
 /// Pure-Dart in-memory implementation of [LibraryRepository] for fast, deterministic unit testing.
@@ -68,6 +70,10 @@ class FakeLibraryRepository implements LibraryRepository {
       _tracks[t.path] = trackToSave;
     }
   }
+
+  @override
+  Future<void> upsertTracksFromScan(List<Track> tracks) =>
+      upsertTracks(tracks);
 
   @override
   Future<Map<String, ({int mtimeMs, int sizeBytes})>> existingFiles(int folderId) async {
@@ -216,16 +222,108 @@ class FakeLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> updatePlayEvent(int id, {required int listenedMs, required bool counted, required bool completed}) async {
+  Future<void> updatePlayEvent(
+    int id, {
+    required int listenedMs,
+    required bool counted,
+    required bool completed,
+    String? endedReason,
+  }) async {
     final idx = _playEvents.indexWhere((e) => e.id == id);
     if (idx != -1) {
       _playEvents[idx] = _playEvents[idx].copyWith(
         listenedMs: listenedMs,
         counted: counted,
         completed: completed,
+        endedReason: endedReason ?? _playEvents[idx].endedReason,
       );
     }
   }
+
+  @override
+  Future<void> updatePlayEventHeartbeat(int id, int listenedMs) async {
+    final idx = _playEvents.indexWhere((e) => e.id == id);
+    if (idx != -1) {
+      _playEvents[idx] = _playEvents[idx].copyWith(listenedMs: listenedMs);
+    }
+  }
+
+  @override
+  Future<int> closeInterruptedPlayEvents() async {
+    var count = 0;
+    for (var i = 0; i < _playEvents.length; i++) {
+      if (_playEvents[i].endedReason == null) {
+        _playEvents[i] = _playEvents[i].copyWith(endedReason: 'interrupted');
+        count++;
+      }
+    }
+    return count;
+  }
+
+  @override
+  Future<int> backfillPlayEventTrackUids() async => 0;
+
+  @override
+  Future<List<PlayEvent>> playEventsBetween(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) async {
+    final startMs = start.toUtc().millisecondsSinceEpoch;
+    final endMs = end.toUtc().millisecondsSinceEpoch;
+    return _playEvents.where((e) {
+      final ms = e.startedAt.toUtc().millisecondsSinceEpoch;
+      if (ms < startMs || ms > endMs) return false;
+      if (countedOnly && !e.counted) return false;
+      return true;
+    }).toList();
+  }
+
+  @override
+  Future<List<RankedTrackStat>> topTracksInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<RankedArtistStat>> topArtistsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<RankedAlbumStat>> topAlbumsInRange(
+    DateTime start,
+    DateTime end, {
+    HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
+    int limit = 20,
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<DailyListeningStat>> listeningMinutesPerDay(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) async =>
+      const [];
+
+  @override
+  Future<int> distinctTracksFirstPlayedInRange(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = false,
+  }) async =>
+      0;
 
   @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async {
@@ -546,6 +644,19 @@ class FakeLibraryRepository implements LibraryRepository {
     }
     return result;
   }
+
+  @override
+  Future<RelinkReport> reconcileTrackIdentities({
+    DateTime? now,
+    bool markUnmatchedMissing = true,
+  }) async =>
+      RelinkReport.empty;
+
+  @override
+  Future<String?> resolveTrackUid(String path) async => null;
+
+  @override
+  Future<List<TrackIdentity>> listTrackIdentities() async => const [];
 
   @override
   Future<void> close() async {}

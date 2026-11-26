@@ -121,7 +121,11 @@ class _RecentlyPlayedViewState extends State<RecentlyPlayedView> {
     final safeIndex = (startIndex >= 0 && startIndex < sources.length)
         ? startIndex
         : 0;
-    await widget.controller.playQueue(sources, startIndex: safeIndex);
+    await widget.controller.playQueue(
+      sources,
+      startIndex: safeIndex,
+      source: 'queue',
+    );
   }
 
   List<Track> _sortRecent(List<Track> list, String sortKey, bool reversed) {

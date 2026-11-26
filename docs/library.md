@@ -7,7 +7,7 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
 - **Pure Dart value types:** Domain models (`Track`, `LibraryFolder`) and read summaries (`AlbumSummary`, `ArtistSummary`) are immutable with `const` constructors.
 - **Derived hierarchies & multi-artist mapping:** Albums are derived on the fly from track metadata. Artists are derived from `track_artists`, enabling duets and collaborations to appear under all involved artists without redundant duplicate files or combined artist entries.
 - **Decoupled audio bridge:** A dedicated mapper extension (`Track.toAudioSource()`) maps library entities to pure Dart audio models without polluting the storage layer.
-- **Modular SQLite repository layout:** `SqliteLibraryRepository` (`lib/library/sqlite_library_repository.dart`) preserves the `LibraryRepository` contract while delegating domain queries and mutations to focused stores under `lib/library/sqlite/` (`sqlite_db_initializer.dart`, `sqlite_row_mappers.dart`, `sqlite_tracks_store.dart`, `sqlite_albums_store.dart`, `sqlite_artists_store.dart`, `sqlite_collections_store.dart`, and `sqlite_history_store.dart`).
+- **Modular SQLite repository layout:** `SqliteLibraryRepository` (`lib/library/sqlite_library_repository.dart`) preserves the `LibraryRepository` contract while delegating domain queries and mutations to focused stores under `lib/library/sqlite/` (`sqlite_db_initializer.dart`, `sqlite_row_mappers.dart`, `sqlite_tracks_store.dart`, `sqlite_albums_store.dart`, `sqlite_artists_store.dart`, `sqlite_collections_store.dart`, `sqlite_history_store.dart`, `sqlite_history_analytics.dart`, and `sqlite_identity_store.dart`).
 
 ---
 
@@ -18,8 +18,8 @@ Starting with Foundation F1 (`ADR 0001`), storage is split into two SQLite files
 1. **`library.db` (`main`, `kLibrarySchemaVersion = 4`) — Rebuildable Library Index**
    - `folders`, `tracks`, `track_artists`.
    - Can be reset (`resetLibrary()`) or recreated after corruption without losing any user data.
-2. **`userdata.db` (`userdata`, `kUserDataSchemaVersion = 1`) — Precious User Data**
-   - `meta`, `favorites`, `ratings`, `playlists`, `playlist_items`, `play_events`, `artist_aliases`, `artist_no_split`.
+2. **`userdata.db` (`userdata`, `kUserDataSchemaVersion = 2`) — Precious User Data**
+   - `meta`, `track_identity`, `favorites`, `ratings`, `playlists`, `playlist_items`, `play_events`, `artist_aliases`, `artist_no_split`.
    - Foreign keys remain strictly single-file (`playlist_items.playlist_id -> playlists.id` inside `userdata.db`; `tracks.folder_id -> folders.id` and `track_artists.track_id -> tracks.id` inside `library.db`). No cross-file foreign keys exist, and every write transaction touches exactly one database file.
 
 ### Legacy Migration State Machine (`LegacyUserDataMigrator`)
@@ -41,7 +41,7 @@ On every startup before any repository use, `copied_verified` recovers automatic
 
 ---
 
-## SQLite Database Schema (Library v4 / UserData v1)
+## SQLite Database Schema (Library v4 / UserData v2)
 
 ```text
 ┌───────────────────────────────┐
@@ -160,17 +160,28 @@ On every startup before any repository use, `copied_verified` recovers automatic
    - `artist_key`: Normalized artist string that must never be split (`PRIMARY KEY`).
    - `artist_name`: Original casing/display name.
 
-6. **`play_events`** (Introduced in Schema v3)
+6. **`play_events`** (Introduced in Schema v3; hardened in UserData v2)
    - `id`: Auto-incrementing primary key.
    - `uri`: Audio source identifier / path (`NOT NULL`).
    - `title`, `artist`, `album`, `album_artist`: Snapshot of track metadata at the time of playback. Preserved independently so history remains accurate even if tracks are moved, edited, or rescanned.
    - `duration_ms`: Track duration in milliseconds (nullable for unknown stream lengths).
    - `started_at_ms`: UTC epoch milliseconds timestamp when playback session started.
-   - `listened_ms`: Cumulative playback time in milliseconds (excluding pauses, seeks, and skips).
+   - `listened_ms`: Cumulative playback time in milliseconds (excluding pauses, seeks, and skips), updated every 30s by heartbeat while playing.
    - `counted`: Integer boolean flag (`1` if scrobble/play threshold reached, `0` otherwise).
    - `completed`: Integer boolean flag (`1` if playback reached natural track completion, `0` otherwise).
+   - `track_uid`: Stable `track_identity.uid` reference (nullable, backfilled from `track_identity` and indexed via `idx_play_events_track_uid`).
+   - `source`: Queue playback origin (`album`, `artist`, `playlist`, `favorites`, `search`, `queue`, `mini`, `unknown`).
+   - `session_id`: Per-app-run random 128-bit session identifier.
+   - `ended_reason`: Session end outcome (`completed`, `skipped`, `stopped`, `error`, `interrupted`, or `NULL` while open).
 
-7. **`favorites`** (Introduced in Schema v4)
+7. **`track_identity`** (Introduced in UserData v2)
+   - `uid`: Random 128-bit lowercase hex UID (`PRIMARY KEY`).
+   - `path`: Current canonical track filesystem path (`NOT NULL`, indexed via `idx_track_identity_path`).
+   - `size_bytes`, `duration_ms`: File size and duration used for exact move/rename relinking.
+   - `title_key`, `artist_key`, `album_key`: `TextNormalizer`-normalized metadata keys used for tag + `<= 1500` ms duration relink fallback.
+   - `first_seen_ms`, `last_seen_ms`, `missing_since_ms`: Lifecycle timestamps; disconnected/missing files keep user data intact and clear `missing_since_ms` upon return.
+
+8. **`favorites`** (Introduced in Schema v4)
    - `path`: Normalized audio file path (`PRIMARY KEY`). Keyed by file path so user favorites persist across folder removals, library rescans, and file re-upserts.
    - `added_at_ms`: UTC epoch milliseconds when the track was favorited (enables sorting newest favorite first).
 

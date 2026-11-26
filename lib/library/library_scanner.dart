@@ -262,7 +262,7 @@ class LibraryScanner {
             );
           }).toList();
 
-          await repository.upsertTracks(tracks);
+          await repository.upsertTracksFromScan(tracks);
 
           totalAdded += message.addedInBatch;
           totalUpdated += message.updatedInBatch;
@@ -296,6 +296,9 @@ class LibraryScanner {
 
           if (!_isCancelled) {
             await repository.markFolderScanned(folderId, DateTime.now().toUtc());
+            await repository.reconcileTrackIdentities(
+              markUnmatchedMissing: message.unreadableDirs == 0,
+            );
           }
 
           await ensureLinksRebuilt();
