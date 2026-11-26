@@ -6,6 +6,7 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 
 class _PlaybackSession {
   final AudioSource source;
@@ -60,6 +61,7 @@ class PlayRecorder {
   PlaybackState _currentState = PlaybackState.idle;
   Timer? _thresholdTimer;
   bool _disposed = false;
+  bool _loggedReadOnlyWarning = false;
 
   /// Creates a [PlayRecorder] connected to controller or streams.
   PlayRecorder({
@@ -253,11 +255,25 @@ class PlayRecorder {
     }
   }
 
+  void _logReadOnlySkipOnce() {
+    if (_loggedReadOnlyWarning) return;
+    _loggedReadOnlyWarning = true;
+    logger?.warning(
+      'PlayRecorder',
+      'Play event recording skipped silently: user data is in safe read-only mode',
+    );
+  }
+
   void _markCounted(int listenedMs) {
     final sess = _session;
     if (sess == null || sess.isCounted) return;
     sess.isCounted = true;
     _thresholdTimer?.cancel();
+
+    if (repository.userDataAccessMode == UserDataAccessMode.safeReadOnly) {
+      _logReadOnlySkipOnce();
+      return;
+    }
 
     final source = sess.source;
     final extras = source.extras;
@@ -294,6 +310,10 @@ class PlayRecorder {
     final listened = sess.accumulatedMs;
 
     if (sess.isCounted) {
+      if (repository.userDataAccessMode == UserDataAccessMode.safeReadOnly) {
+        _logReadOnlySkipOnce();
+        return;
+      }
       // Already counted row: wait for insert to finish if needed, then update
       Future<void> updateOp() async {
         try {
@@ -313,6 +333,10 @@ class PlayRecorder {
 
       unawaited(updateOp());
     } else if (listened >= 5000) {
+      if (repository.userDataAccessMode == UserDataAccessMode.safeReadOnly) {
+        _logReadOnlySkipOnce();
+        return;
+      }
       // Did not cross threshold, but listened for at least 5 seconds
       final source = sess.source;
       final extras = source.extras;

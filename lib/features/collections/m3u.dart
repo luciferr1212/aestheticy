@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../library/file_path_utils.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../../library/user_data_access_mode.dart';
 import '../../ui/l10n/app_strings.dart';
 import '../../ui/l10n/number_format.dart';
 import 'user_collections.dart';
@@ -507,6 +508,17 @@ abstract final class M3u {
     M3uPickFilesPicker? pickFilesPicker,
     M3uFileContentReader? fileContentReader,
   }) async {
+    if (repository.userDataAccessMode == UserDataAccessMode.safeReadOnly) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t('userdata.safeReadOnlyBlocked')),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return null;
+    }
     try {
       List<String>? pickedPaths;
       if (pickFilesPicker != null) {
@@ -606,6 +618,16 @@ abstract final class M3u {
         missingPaths: missingPaths,
         skippedWebLinks: parseResult.skippedWebLinks,
       );
+    } on UserDataReadOnlyException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t(e.messageKey)),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return null;
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

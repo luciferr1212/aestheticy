@@ -9,12 +9,15 @@ import 'package:aestheticy/audio/playback_controller.dart';
 import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_store.dart';
 import 'package:aestheticy/ui/quick_search/quick_search_overlay.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 
 class _FakeSearchRepo implements LibraryRepository {
+  @override
+  UserDataAccessMode get userDataAccessMode => UserDataAccessMode.normal;
   List<Track> tracksToReturn = [];
   List<AlbumSummary> albumsToReturn = [];
   List<ArtistSummary> artistsToReturn = [];

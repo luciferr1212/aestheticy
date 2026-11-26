@@ -14,6 +14,7 @@ import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/library/text_normalizer.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/main.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/ui/artist_names/artist_name_scope.dart';
@@ -32,6 +33,8 @@ import 'package:aestheticy/ui/settings/shortcuts_cheat_sheet_dialog.dart';
 import 'package:aestheticy/ui/shell/app_navigator.dart';
 
 class _FakeLibraryRepository extends Fake implements LibraryRepository {
+  @override
+  UserDataAccessMode get userDataAccessMode => UserDataAccessMode.normal;
   final List<LibraryFolder> folders;
   final int count;
   int playCount = 42;

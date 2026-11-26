@@ -7,8 +7,11 @@ import 'package:aestheticy/audio/playback_queue.dart';
 import 'package:aestheticy/features/history/play_recorder.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 
 class _FakeHistoryRepository extends Fake implements LibraryRepository {
+  @override
+  UserDataAccessMode get userDataAccessMode => UserDataAccessMode.normal;
   final List<PlayEvent> events = [];
   bool shouldThrow = false;
 

@@ -11,7 +11,37 @@ Aestheticy's Phase 2 introduces the local music library subsystem. Phase 2.5 est
 
 ---
 
-## SQLite Database Schema (Version 4)
+## SQLite Database Storage Layout (`library.db` + `userdata.db`)
+
+Starting with Foundation F1 (`ADR 0001`), storage is split into two SQLite files in the application support directory (`<support dir>/Aestheticy/`), both opened on a single SQLite connection via `ATTACH DATABASE '<userdata.db>' AS userdata` (or `ATTACH ':memory:' AS userdata` for in-memory tests):
+
+1. **`library.db` (`main`, `kLibrarySchemaVersion = 4`) — Rebuildable Library Index**
+   - `folders`, `tracks`, `track_artists`.
+   - Can be reset (`resetLibrary()`) or recreated after corruption without losing any user data.
+2. **`userdata.db` (`userdata`, `kUserDataSchemaVersion = 1`) — Precious User Data**
+   - `meta`, `favorites`, `ratings`, `playlists`, `playlist_items`, `play_events`, `artist_aliases`, `artist_no_split`.
+   - Foreign keys remain strictly single-file (`playlist_items.playlist_id -> playlists.id` inside `userdata.db`; `tracks.folder_id -> folders.id` and `track_artists.track_id -> tracks.id` inside `library.db`). No cross-file foreign keys exist, and every write transaction touches exactly one database file.
+
+### Legacy Migration State Machine (`LegacyUserDataMigrator`)
+Existing single-file `library.db` installations are migrated once using a crash-recoverable state machine tracked in `userdata.meta` (`legacy_migration_state` = `none` | `copied_verified` | `complete`):
+1. **Backup first:** Checkpoints WAL and copies `library.db` into `<support dir>/Aestheticy/backups/pre-split-<yyyyMMdd-HHmmss>/library.db` verified by `PRAGMA quick_check`. Failure aborts migration and enters `UserDataAccessMode.safeReadOnly` reading legacy tables from `main`.
+2. **Copy & verify (`userdata`-only transaction):** Creates `userdata` v1 tables, clears any partial rows, copies all legacy user tables preserving IDs and timestamps, verifies per-table row counts and SHA-256 primary-key checksums inside the transaction, and sets `legacy_migration_state = 'copied_verified'`.
+3. **Rename (`main`-only transaction):** Renames legacy tables in `library.db` to `legacy_<name>` (`ALTER TABLE ... RENAME TO`, never dropped in this release).
+4. **Complete (`userdata`-only transaction):** Sets `legacy_migration_state = 'complete'` and `legacy_migrated = '1'`.
+
+On every startup before any repository use, `copied_verified` recovers automatically (re-verifying checksums or finishing rename/complete) with zero duplicated or lost rows.
+
+### WAL, Corruption Recovery & Safe Read-Only Mode
+- File-backed connections enable `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL` on both `main` and `userdata`.
+- Startup runs `PRAGMA quick_check` on each file before use:
+  - **Corrupt `library.db`:** Quarantined to `library.db.corrupt-<timestamp>`, recreated empty, a full rescan is triggered, and a localized notice is shown.
+  - **Corrupt `userdata.db`:** Quarantined to `userdata.db.corrupt-<timestamp>`, restored from the newest `PRAGMA quick_check`-verified backup in `backups/userdata/userdata-<yyyyMMdd>.db` (or started empty with a localized warning if no valid backup exists).
+  - **Locked/unreadable `userdata.db` or failed migration/backup:** Enters `UserDataAccessMode.safeReadOnly` (`SafeReadOnlyBanner` with Open Logs / Open Backups actions). Playback, browsing, search, scanning/rescanning, settings, diagnostics, and reading user data remain allowed; user-data mutations are blocked with localized messages (play event recording skips silently with one warning log per run).
+- **Automatic Daily Backups (`UserDataBackupService`):** After the first frame (non-blocking) and right before any future `userdata.db` schema upgrade, `SqliteUserDataBackupService` writes at most one verified backup per calendar day (`VACUUM userdata INTO` with `wal_checkpoint` + copy fallback + `PRAGMA quick_check`) to `backups/userdata/userdata-<yyyyMMdd>.db` and retains the newest 5 files matching that exact pattern.
+
+---
+
+## SQLite Database Schema (Library v4 / UserData v1)
 
 ```text
 ┌───────────────────────────────┐

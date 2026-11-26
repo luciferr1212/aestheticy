@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../../diagnostics/app_logger.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../../library/user_data_access_mode.dart';
 
 /// State coordinator for user favorites, ratings, and playlists.
 ///
@@ -13,6 +14,10 @@ class UserCollections extends ChangeNotifier {
   /// The underlying library database repository.
   final LibraryRepository repository;
 
+  /// Optional callback invoked with a localization key when a write is blocked
+  /// by [UserDataAccessMode.safeReadOnly].
+  void Function(String messageKey)? onReadOnlyBlocked;
+
   final Set<String> _favorites = {};
   final List<Track> _favoriteTracks = [];
   final Map<String, int> _ratings = {};
@@ -20,7 +25,14 @@ class UserCollections extends ChangeNotifier {
   bool _loaded = false;
 
   /// Creates a [UserCollections] instance wired to [repository].
-  UserCollections({required this.repository});
+  UserCollections({
+    required this.repository,
+    this.onReadOnlyBlocked,
+  });
+
+  /// Whether user data is currently in [UserDataAccessMode.safeReadOnly].
+  bool get isReadOnly =>
+      repository.userDataAccessMode == UserDataAccessMode.safeReadOnly;
 
   /// Whether collections data has finished loading from [repository].
   bool get isLoaded => _loaded;
@@ -149,6 +161,10 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+        if (onReadOnlyBlocked != null) return;
+      }
       rethrow;
     }
   }
@@ -183,6 +199,10 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+        if (onReadOnlyBlocked != null) return;
+      }
       rethrow;
     }
   }
@@ -201,6 +221,9 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+      }
       rethrow;
     }
   }
@@ -227,6 +250,9 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+      }
       rethrow;
     }
   }
@@ -250,6 +276,9 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+      }
       rethrow;
     }
   }
@@ -268,6 +297,10 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+        if (onReadOnlyBlocked != null) return 0;
+      }
       rethrow;
     }
   }
@@ -285,6 +318,10 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+        if (onReadOnlyBlocked != null) return;
+      }
       rethrow;
     }
   }
@@ -302,6 +339,10 @@ class UserCollections extends ChangeNotifier {
         e,
         st,
       );
+      if (e is UserDataReadOnlyException) {
+        onReadOnlyBlocked?.call(e.messageKey);
+        if (onReadOnlyBlocked != null) return;
+      }
       rethrow;
     }
   }

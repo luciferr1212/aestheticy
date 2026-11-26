@@ -11,6 +11,7 @@ import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/library/albums_view.dart';
@@ -26,6 +27,8 @@ import 'package:aestheticy/ui/theme/app_theme.dart';
 
 /// Fake repository capable of returning large synthetic datasets for virtualization tests.
 class FakeVirtualLibraryRepository implements LibraryRepository {
+  @override
+  UserDataAccessMode get userDataAccessMode => UserDataAccessMode.normal;
   final int fakeAlbumCount;
   final int fakeTrackCount;
   final List<LibraryFolder> _folders = [

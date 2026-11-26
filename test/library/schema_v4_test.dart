@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/library/migrations.dart';
+import 'package:aestheticy/library/sqlite/sqlite_db_initializer.dart';
+import 'package:aestheticy/library/sqlite/userdata_migrator.dart';
 
 void main() {
   group('Schema V4 Migration Tests', () {
@@ -21,15 +23,17 @@ void main() {
       } catch (_) {}
     });
 
-    test('Fresh database initializes at schema version 4 with all v4 tables', () {
+    test('Fresh database initializes at schema version 4 with all v4 tables in userdata', () {
       final db = sqlite3.openInMemory();
-      SchemaMigrator.apply(db);
+      SqliteDbInitializer.init(db, attachMemoryUserData: true);
 
-      final versionRow = db.select('PRAGMA user_version;');
+      final versionRow = db.select('PRAGMA main.user_version;');
       expect(versionRow.first.values.first, equals(4));
+      final userVersionRow = db.select('PRAGMA userdata.user_version;');
+      expect(userVersionRow.first.values.first, equals(kUserDataSchemaVersion));
 
       final tables = db
-          .select("SELECT name FROM sqlite_master WHERE type='table';")
+          .select("SELECT name FROM userdata.sqlite_master WHERE type='table';")
           .map((r) => r['name'] as String)
           .toSet();
 
@@ -39,7 +43,7 @@ void main() {
       expect(tables.contains('playlist_items'), isTrue);
 
       final indexes = db
-          .select("SELECT name FROM sqlite_master WHERE type='index';")
+          .select("SELECT name FROM userdata.sqlite_master WHERE type='index';")
           .map((r) => r['name'] as String)
           .toSet();
 
@@ -140,12 +144,17 @@ void main() {
       ''');
       rawDb.close();
 
-      // Migrate to v4
+      // Migrate main to v4 and attach userdata v1
       final dbToMigrate = sqlite3.open(dbPath);
+      final userDbPath = '${tempDir.path}/v4_userdata.db'.replaceAll("'", "''");
+      dbToMigrate.execute("ATTACH DATABASE '$userDbPath' AS userdata;");
       SchemaMigrator.apply(dbToMigrate);
+      UserDataMigrator.apply(dbToMigrate);
 
-      final versionRow = dbToMigrate.select('PRAGMA user_version;');
+      final versionRow = dbToMigrate.select('PRAGMA main.user_version;');
       expect(versionRow.first.values.first, equals(4));
+      final userVersionRow = dbToMigrate.select('PRAGMA userdata.user_version;');
+      expect(userVersionRow.first.values.first, equals(1));
 
       // Check rows preserved
       final folderRows = dbToMigrate.select('SELECT path FROM folders;');
@@ -157,43 +166,43 @@ void main() {
       expect(trackRows.first['title'], equals('Track 1'));
       expect(trackRows.first['path'], equals('D:/Music/track1.flac'));
 
-      final aliasRows = dbToMigrate.select('SELECT alias_key FROM artist_aliases;');
+      final aliasRows = dbToMigrate.select('SELECT alias_key FROM main.artist_aliases;');
       expect(aliasRows.length, equals(1));
       expect(aliasRows.first['alias_key'], equals('fayrouz'));
 
-      final playRows = dbToMigrate.select('SELECT uri, counted FROM play_events;');
+      final playRows = dbToMigrate.select('SELECT uri, counted FROM main.play_events;');
       expect(playRows.length, equals(1));
       expect(playRows.first['uri'], equals('D:/Music/track1.flac'));
       expect(playRows.first['counted'], equals(1));
 
-      // Test inserting into new v4 tables
+      // Test inserting into new userdata v1 tables
       dbToMigrate.execute('''
-        INSERT INTO favorites (path, added_at_ms)
+        INSERT INTO userdata.favorites (path, added_at_ms)
         VALUES ('D:/Music/track1.flac', 123456);
       ''');
       dbToMigrate.execute('''
-        INSERT INTO ratings (path, stars, rated_at_ms)
+        INSERT INTO userdata.ratings (path, stars, rated_at_ms)
         VALUES ('D:/Music/track1.flac', 5, 123456);
       ''');
       dbToMigrate.execute('''
-        INSERT INTO playlists (name, created_at_ms, updated_at_ms)
+        INSERT INTO userdata.playlists (name, created_at_ms, updated_at_ms)
         VALUES ('Chill', 1000, 1000);
       ''');
       dbToMigrate.execute('''
-        INSERT INTO playlist_items (playlist_id, position, path, added_at_ms)
+        INSERT INTO userdata.playlist_items (playlist_id, position, path, added_at_ms)
         VALUES (1, 0, 'D:/Music/track1.flac', 1000);
       ''');
 
-      final favs = dbToMigrate.select('SELECT path FROM favorites;');
+      final favs = dbToMigrate.select('SELECT path FROM userdata.favorites;');
       expect(favs.length, equals(1));
 
-      final ratings = dbToMigrate.select('SELECT stars FROM ratings;');
+      final ratings = dbToMigrate.select('SELECT stars FROM userdata.ratings;');
       expect(ratings.first['stars'], equals(5));
 
-      final playlists = dbToMigrate.select('SELECT name FROM playlists;');
+      final playlists = dbToMigrate.select('SELECT name FROM userdata.playlists;');
       expect(playlists.first['name'], equals('Chill'));
 
-      final items = dbToMigrate.select('SELECT path FROM playlist_items;');
+      final items = dbToMigrate.select('SELECT path FROM userdata.playlist_items;');
       expect(items.first['path'], equals('D:/Music/track1.flac'));
 
       dbToMigrate.close();

@@ -27,6 +27,14 @@ const Map<String, String> kWriteApiAllowlist = {
       'Extracts bundled tray icon bytes into a temporary app-cache .ico file.',
   'lib/features/collections/m3u.dart':
       'Exports playlists atomically only to user-selected validated .m3u/.m3u8 paths.',
+  'lib/library/sqlite/legacy_userdata_migrator.dart':
+      'Creates pre-split backups of library.db inside the app-support backups directory.',
+  'lib/library/sqlite/database_protection.dart':
+      'Quarantines corrupt database files and restores userdata backups inside app-support.',
+  'lib/platform/windows/folder_opener.dart':
+      'Launches Windows Explorer on the app-support logs or backups directory.',
+  'lib/library/sqlite/userdata_backup_service.dart':
+      'Writes and rotates verified userdata.db backups inside app-support/backups/userdata.',
 };
 
 final List<_WriteApiPattern> _writeApiPatterns = [

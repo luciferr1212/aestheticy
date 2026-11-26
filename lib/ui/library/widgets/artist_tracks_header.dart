@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../library/library_repository.dart';
 import '../../../library/models.dart';
+import '../../../library/user_data_access_mode.dart';
 import '../../glass/glass_button.dart';
 import '../../glass/glass_surface.dart';
 import '../../l10n/app_strings.dart';
@@ -229,12 +230,20 @@ class ArtistTrackActionMenu extends StatelessWidget {
             'artist.treatingAsOne',
             args: {'artist': track.artist!},
           );
-          await repository.addNoSplit(track.artist!);
-          if (context.mounted) {
-            messenger.showSnackBar(
-              SnackBar(content: Text(treatedMsg)),
-            );
-            await onReload();
+          try {
+            await repository.addNoSplit(track.artist!);
+            if (context.mounted) {
+              messenger.showSnackBar(
+                SnackBar(content: Text(treatedMsg)),
+              );
+              await onReload();
+            }
+          } on UserDataReadOnlyException catch (e) {
+            if (context.mounted) {
+              messenger.showSnackBar(
+                SnackBar(content: Text(context.t(e.messageKey))),
+              );
+            }
           }
         }
       },

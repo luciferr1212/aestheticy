@@ -8,13 +8,17 @@ import 'package:aestheticy/library/text_normalizer.dart';
 /// Internal SQLite store for folder, track, and track-search operations.
 class SqliteTracksStore {
   final Database _db;
+  final String Function() _userSchema;
 
   /// Creates a [SqliteTracksStore] backed by [_db].
-  SqliteTracksStore(this._db);
+  SqliteTracksStore(
+    this._db, {
+    String Function()? userSchema,
+  }) : _userSchema = userSchema ?? (() => 'userdata');
 
   Future<LibraryFolder> addFolder(String path) async {
     final existing = _db.select(
-      'SELECT id, path, last_scan_at FROM folders WHERE path = ? LIMIT 1;',
+      'SELECT id, path, last_scan_at FROM main.folders WHERE path = ? LIMIT 1;',
       [path],
     );
 
@@ -30,7 +34,7 @@ class SqliteTracksStore {
       );
     }
 
-    _db.execute('INSERT INTO folders (path) VALUES (?);', [path]);
+    _db.execute('INSERT INTO main.folders (path) VALUES (?);', [path]);
     final id = _db.lastInsertRowId;
     return LibraryFolder(id: id, path: path);
   }
@@ -38,19 +42,35 @@ class SqliteTracksStore {
   Future<void> removeFolder(int folderId) async {
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
-      _db.execute('DELETE FROM tracks WHERE folder_id = ?;', [folderId]);
-      _db.execute('DELETE FROM folders WHERE id = ?;', [folderId]);
+      _db.execute('DELETE FROM main.tracks WHERE folder_id = ?;', [folderId]);
+      _db.execute('DELETE FROM main.folders WHERE id = ?;', [folderId]);
       _db.execute('COMMIT;');
     } catch (e) {
       _db.execute('ROLLBACK;');
       rethrow;
     }
-    SchemaMigrator.rebuildArtistLinksSync(_db);
+    SchemaMigrator.rebuildArtistLinksSync(_db, userDataSchema: _userSchema());
+  }
+
+  /// Clears all rebuildable library tables (`main.track_artists`, `main.tracks`,
+  /// `main.folders`) inside a single `main`-only transaction without touching
+  /// `userdata`.
+  Future<void> resetLibrary() async {
+    _db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      _db.execute('DELETE FROM main.track_artists;');
+      _db.execute('DELETE FROM main.tracks;');
+      _db.execute('DELETE FROM main.folders;');
+      _db.execute('COMMIT;');
+    } catch (e) {
+      _db.execute('ROLLBACK;');
+      rethrow;
+    }
   }
 
   Future<List<LibraryFolder>> listFolders() async {
     final rows = _db.select(
-      'SELECT id, path, last_scan_at FROM folders ORDER BY path COLLATE NOCASE ASC;',
+      'SELECT id, path, last_scan_at FROM main.folders ORDER BY path COLLATE NOCASE ASC;',
     );
 
     return rows.map((row) {
@@ -67,7 +87,7 @@ class SqliteTracksStore {
 
   Future<void> markFolderScanned(int folderId, DateTime timestamp) async {
     _db.execute(
-      'UPDATE folders SET last_scan_at = ? WHERE id = ?;',
+      'UPDATE main.folders SET last_scan_at = ? WHERE id = ?;',
       [timestamp.toUtc().millisecondsSinceEpoch, folderId],
     );
   }
@@ -78,7 +98,7 @@ class SqliteTracksStore {
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       final stmt = _db.prepare('''
-        INSERT INTO tracks (
+        INSERT INTO main.tracks (
           path, folder_id, title, artist, album_artist, album,
           track_no, disc_no, year, duration_ms, mtime_ms, size_bytes,
           cover_key, added_at, search_text
@@ -135,7 +155,7 @@ class SqliteTracksStore {
     int folderId,
   ) async {
     final rows = _db.select(
-      'SELECT path, mtime_ms, size_bytes FROM tracks WHERE folder_id = ?;',
+      'SELECT path, mtime_ms, size_bytes FROM main.tracks WHERE folder_id = ?;',
       [folderId],
     );
 
@@ -154,7 +174,7 @@ class SqliteTracksStore {
 
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
-      final stmt = _db.prepare('DELETE FROM tracks WHERE path = ?;');
+      final stmt = _db.prepare('DELETE FROM main.tracks WHERE path = ?;');
       for (final path in paths) {
         stmt.execute([path]);
       }
@@ -186,7 +206,7 @@ class SqliteTracksStore {
       TrackSort.addedAtDesc => 'added_at DESC, id DESC',
     };
 
-    final sql = StringBuffer('SELECT * FROM tracks ORDER BY $orderBy');
+    final sql = StringBuffer('SELECT * FROM main.tracks ORDER BY $orderBy');
     final params = <Object?>[];
 
     if (limit != null) {
@@ -215,7 +235,7 @@ class SqliteTracksStore {
     final whereClauses =
         List.filled(terms.length, "search_text LIKE ? ESCAPE '\\'");
     final sql = '''
-      SELECT * FROM tracks
+      SELECT * FROM main.tracks
       WHERE ${whereClauses.join(' AND ')}
       ORDER BY COALESCE(title, path) COLLATE NOCASE ASC
       LIMIT 100;
@@ -228,7 +248,7 @@ class SqliteTracksStore {
   }
 
   Future<int> trackCount() async {
-    final row = _db.select('SELECT COUNT(*) AS total FROM tracks;').first;
+    final row = _db.select('SELECT COUNT(*) AS total FROM main.tracks;').first;
     return row['total'] as int;
   }
 }

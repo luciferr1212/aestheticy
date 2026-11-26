@@ -10,6 +10,7 @@ import '../../../diagnostics/diagnostic_report.dart';
 import '../../../features/integration/tray_window_controller.dart';
 import '../../../library/library_repository.dart';
 import '../../../library/migrations.dart';
+import '../../../library/user_data_access_mode.dart';
 import '../../audio_panels/eq_controller.dart';
 import '../../audio_panels/eq_scope.dart';
 import '../../glass/glass_button.dart';
@@ -350,6 +351,15 @@ class SettingsHistorySection extends StatelessWidget {
                             messenger.showSnackBar(
                               SnackBar(
                                 content: Text(clearedText),
+                              ),
+                            );
+                          }
+                        } on UserDataReadOnlyException catch (e) {
+                          if (context.mounted) {
+                            onConfirmingClearChanged(false);
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(context.t(e.messageKey)),
                               ),
                             );
                           }

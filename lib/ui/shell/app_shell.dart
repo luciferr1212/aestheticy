@@ -14,9 +14,11 @@ import '../../features/lyrics/lyrics_repository.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/scan_service.dart';
+import '../../library/user_data_access_mode.dart';
 import '../../platform/window_service.dart';
 import '../artist_names/artist_name_store.dart';
 import '../audio_panels/eq_controller.dart';
+import '../l10n/app_strings.dart';
 import '../library/library_data_cache.dart';
 import '../lyrics/lyrics_view.dart';
 import '../mini_player/mini_player_controller.dart';
@@ -31,6 +33,7 @@ import 'ambient_background.dart';
 import 'app_navigator.dart';
 import 'bottom_now_playing_bar.dart';
 import 'global_playback_keys.dart';
+import 'safe_read_only_banner.dart';
 import 'scanning_panel.dart';
 import 'side_panel.dart';
 import 'side_panel_controller.dart';
@@ -93,6 +96,15 @@ class AppShell extends StatefulWidget {
   /// Optional docked right side panel controller.
   final SidePanelController? sidePanelController;
 
+  /// Optional startup database integrity/recovery report.
+  final DatabaseStartupReport? startupReport;
+
+  /// Optional callback to open the logs folder from the safe read-only banner.
+  final VoidCallback? onOpenLogsFolder;
+
+  /// Optional callback to open the backups folder from the safe read-only banner.
+  final VoidCallback? onOpenBackupsFolder;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -113,6 +125,9 @@ class AppShell extends StatefulWidget {
     this.trayWindowController,
     this.dataCache,
     this.sidePanelController,
+    this.startupReport,
+    this.onOpenLogsFolder,
+    this.onOpenBackupsFolder,
   });
 
   @override
@@ -175,6 +190,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     _userCollections = widget.userCollections ??
         UserCollections(repository: widget.repository);
+    _userCollections.onReadOnlyBlocked ??= _showReadOnlyBlockedNotice;
     if (!_userCollections.isLoaded) {
       _userCollections.init();
     }
@@ -183,6 +199,35 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.navigator.addListener(_onNavigatorChange);
     widget.scanService.addListener(_onScanChange);
     widget.settingsStore.addListener(_onSettingsChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handleStartupReport());
+  }
+
+  void _showReadOnlyBlockedNotice(String messageKey) {
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(context.t(messageKey))),
+    );
+  }
+
+  void _handleStartupReport() {
+    if (!mounted) return;
+    final report = widget.startupReport;
+    if (report == null) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (report.libraryRecreatedAfterCorruption) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text(context.t('userdata.libraryCorruptNotice'))),
+      );
+      unawaited(widget.scanService.rescanAll());
+    } else if (report.userDataRestoredFromBackup) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text(context.t('userdata.restoredFromBackupNotice'))),
+      );
+    } else if (report.userDataResetEmptyAfterCorruption) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text(context.t('userdata.resetEmptyNotice'))),
+      );
+    }
   }
 
   GlobalPlaybackKeysHandler _createPlaybackKeysHandler() {
@@ -509,6 +554,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
+                                        // Persistent Safe Read-Only mode banner
+                                        if (widget.repository.userDataAccessMode ==
+                                            UserDataAccessMode.safeReadOnly)
+                                          SafeReadOnlyBanner(
+                                            onOpenLogsFolder:
+                                                widget.onOpenLogsFolder,
+                                            onOpenBackupsFolder:
+                                                widget.onOpenBackupsFolder,
+                                          ),
+
                                         // Top scanning panel
                                         ScanningPanel(
                                           scanService: widget.scanService,

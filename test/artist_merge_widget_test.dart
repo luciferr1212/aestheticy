@@ -10,6 +10,7 @@ import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/features/library/artist_rules_sheet.dart';
 import 'package:aestheticy/ui/library/artist_detail_view.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
@@ -21,6 +22,9 @@ import 'package:aestheticy/ui/shell/app_shell.dart';
 class FailingMergeRepository implements LibraryRepository {
   final SqliteLibraryRepository _inner;
   FailingMergeRepository(this._inner);
+
+  @override
+  UserDataAccessMode get userDataAccessMode => _inner.userDataAccessMode;
 
   bool shouldThrow = false;
   String? lastSourceKey;

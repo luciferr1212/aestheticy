@@ -27,12 +27,15 @@ import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/scan_service.dart';
+import 'package:aestheticy/library/sqlite/userdata_backup_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/platform/media_session_service.dart';
 import 'package:aestheticy/platform/sleep_inhibitor.dart';
 import 'package:aestheticy/platform/tray_service.dart';
 import 'package:aestheticy/platform/window_service.dart';
+import 'package:aestheticy/platform/windows/folder_opener.dart';
 import 'package:aestheticy/platform/windows/smtc_media_session.dart';
 import 'package:aestheticy/platform/windows/win32_sleep_inhibitor.dart';
 import 'package:aestheticy/platform/windows/windows_tray_service.dart';
@@ -276,6 +279,20 @@ void main() {
       mediaSessionController: mediaSessionController,
       sleepController: sleepController,
       trayWindowController: trayWindowController,
+      startupReport: repository.startupReport,
+      userDataBackupService: repository.createBackupService(),
+      onOpenLogsFolder: () {
+        final logsPath = AppLogger.instance.logDirectory?.path;
+        if (logsPath != null) {
+          unawaited(openFolderInExplorer(logsPath));
+        }
+      },
+      onOpenBackupsFolder: () {
+        final backupsPath = repository.backupsDirectory?.path;
+        if (backupsPath != null) {
+          unawaited(openFolderInExplorer(backupsPath));
+        }
+      },
     ));
   }, (error, stack) {
     AppLogger.instance.error(
@@ -576,6 +593,18 @@ class AestheticyApp extends StatefulWidget {
   /// Optional mini player window mode controller.
   final MiniPlayerController? miniPlayerController;
 
+  /// Optional database startup integrity/recovery report.
+  final DatabaseStartupReport? startupReport;
+
+  /// Optional automatic daily backup service for `userdata.db`.
+  final UserDataBackupService? userDataBackupService;
+
+  /// Optional callback to open the logs directory.
+  final VoidCallback? onOpenLogsFolder;
+
+  /// Optional callback to open the backups directory.
+  final VoidCallback? onOpenBackupsFolder;
+
   /// Creates an [AestheticyApp].
   const AestheticyApp({
     super.key,
@@ -604,6 +633,10 @@ class AestheticyApp extends StatefulWidget {
     this.trayWindowController,
     this.lyricsController,
     this.miniPlayerController,
+    this.startupReport,
+    this.userDataBackupService,
+    this.onOpenLogsFolder,
+    this.onOpenBackupsFolder,
   });
 
   @override
@@ -831,6 +864,24 @@ class _AestheticyAppState extends State<AestheticyApp> {
         _sessionSaver?.saveSnapshotSync();
       },
     );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final backupService = widget.userDataBackupService;
+      if (backupService == null || !mounted) return;
+      unawaited(
+        backupService
+            .runDailyBackup(accessMode: _repository.userDataAccessMode)
+            .catchError((Object e, StackTrace st) {
+          AppLogger.instance.warning(
+            'Backup',
+            'Daily userdata backup failed: $e',
+            e,
+            st,
+          );
+          return null;
+        }),
+      );
+    });
   }
 
   void _syncPlaybackTransitionSetting() {
@@ -1054,6 +1105,9 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         windowService: widget.windowService,
                         miniPlayerController: _miniPlayerController,
                         trayWindowController: _trayWindowController,
+                        startupReport: widget.startupReport,
+                        onOpenLogsFolder: widget.onOpenLogsFolder,
+                        onOpenBackupsFolder: widget.onOpenBackupsFolder,
                       ),
               ),
             ),

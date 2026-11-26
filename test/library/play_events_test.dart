@@ -5,6 +5,8 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/sqlite/sqlite_db_initializer.dart';
+import 'package:aestheticy/library/sqlite/userdata_migrator.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 
 void main() {
@@ -25,14 +27,16 @@ void main() {
 
     test('Fresh database initializes at current schema version', () {
       final db = sqlite3.openInMemory();
-      SchemaMigrator.apply(db);
+      SqliteDbInitializer.init(db, attachMemoryUserData: true);
 
-      final versionRow = db.select('PRAGMA user_version;');
-      expect(versionRow.first.values.first, equals(4));
+      final versionRow = db.select('PRAGMA main.user_version;');
+      expect(versionRow.first.values.first, equals(kLibrarySchemaVersion));
+      final userVersionRow = db.select('PRAGMA userdata.user_version;');
+      expect(userVersionRow.first.values.first, equals(kUserDataSchemaVersion));
 
-      // play_events table must exist
+      // play_events table must exist in userdata
       final tables = db.select(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='play_events';",
+        "SELECT name FROM userdata.sqlite_master WHERE type='table' AND name='play_events';",
       );
       expect(tables, isNotEmpty);
       db.close();

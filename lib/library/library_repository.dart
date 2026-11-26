@@ -2,9 +2,13 @@
 library;
 
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 
 /// Abstract storage repository for music library tracks and folders.
 abstract class LibraryRepository {
+  /// Effective access mode for user-data mutations (favorites, ratings,
+  /// playlists, play history, and artist rules).
+  UserDataAccessMode get userDataAccessMode => UserDataAccessMode.normal;
   /// Adds a filesystem directory to the library.
   ///
   /// If the folder already exists in the database, returns the existing record.

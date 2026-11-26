@@ -3,6 +3,8 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/sqlite/sqlite_db_initializer.dart';
+import 'package:aestheticy/library/sqlite/userdata_migrator.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/library/track_audio_source_mapper.dart';
 
@@ -18,36 +20,52 @@ void main() {
       await repo.close();
     });
 
-    test('migration from empty DB sets user_version to current version and creates schema',
+    test('migration from empty DB sets user_version to current version and creates split schema',
         () {
       final rawDb = sqlite3.openInMemory();
-      SchemaMigrator.apply(rawDb);
+      SqliteDbInitializer.init(rawDb, attachMemoryUserData: true);
 
-      final versionResult = rawDb.select('PRAGMA user_version;');
-      expect(versionResult.first.values.first, 4);
+      final libVersionResult = rawDb.select('PRAGMA main.user_version;');
+      expect(libVersionResult.first.values.first, kLibrarySchemaVersion);
+      final userVersionResult = rawDb.select('PRAGMA userdata.user_version;');
+      expect(userVersionResult.first.values.first, kUserDataSchemaVersion);
 
-      // Verify tables exist
-      final tables = rawDb
-          .select("SELECT name FROM sqlite_master WHERE type = 'table';")
+      // Verify library tables exist in main (and user tables do not)
+      final mainTables = rawDb
+          .select("SELECT name FROM main.sqlite_master WHERE type = 'table';")
           .map((r) => r['name'] as String)
           .toSet();
-      expect(tables.contains('folders'), isTrue);
-      expect(tables.contains('tracks'), isTrue);
-      expect(tables.contains('track_artists'), isTrue);
-      expect(tables.contains('play_events'), isTrue);
-      expect(tables.contains('artist_aliases'), isTrue);
-      expect(tables.contains('artist_no_split'), isTrue);
+      expect(mainTables.contains('folders'), isTrue);
+      expect(mainTables.contains('tracks'), isTrue);
+      expect(mainTables.contains('track_artists'), isTrue);
+      expect(mainTables.contains('play_events'), isFalse);
+      expect(mainTables.contains('artist_aliases'), isFalse);
+      expect(mainTables.contains('artist_no_split'), isFalse);
+
+      // Verify user-data tables exist in userdata
+      final userTables = rawDb
+          .select("SELECT name FROM userdata.sqlite_master WHERE type = 'table';")
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(userTables.contains('meta'), isTrue);
+      expect(userTables.contains('play_events'), isTrue);
+      expect(userTables.contains('artist_aliases'), isTrue);
+      expect(userTables.contains('artist_no_split'), isTrue);
+      expect(userTables.contains('favorites'), isTrue);
+      expect(userTables.contains('ratings'), isTrue);
+      expect(userTables.contains('playlists'), isTrue);
+      expect(userTables.contains('playlist_items'), isTrue);
 
       // Verify indexes exist
-      final indexes = rawDb
-          .select("SELECT name FROM sqlite_master WHERE type = 'index';")
+      final mainIndexes = rawDb
+          .select("SELECT name FROM main.sqlite_master WHERE type = 'index';")
           .map((r) => r['name'] as String)
           .toSet();
-      expect(indexes.contains('idx_tracks_folder_id'), isTrue);
-      expect(indexes.contains('idx_tracks_album'), isTrue);
-      expect(indexes.contains('idx_tracks_artist'), isTrue);
-      expect(indexes.contains('idx_tracks_search_text'), isTrue);
-      expect(indexes.contains('idx_track_artists_artist_key'), isTrue);
+      expect(mainIndexes.contains('idx_tracks_folder_id'), isTrue);
+      expect(mainIndexes.contains('idx_tracks_album'), isTrue);
+      expect(mainIndexes.contains('idx_tracks_artist'), isTrue);
+      expect(mainIndexes.contains('idx_tracks_search_text'), isTrue);
+      expect(mainIndexes.contains('idx_track_artists_artist_key'), isTrue);
 
       rawDb.close();
     });

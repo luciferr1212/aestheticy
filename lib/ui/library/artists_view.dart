@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../features/library/artist_rules_sheet.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
+import '../../library/user_data_access_mode.dart';
 import '../artist_names/artist_name_scope.dart';
 import '../l10n/app_strings.dart';
 import '../settings/settings_store.dart';
@@ -310,6 +311,16 @@ class _ArtistsViewState extends State<ArtistsView> {
                                                   'source': sourceArtist.name,
                                                   'target': target.name,
                                                 }),
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      } on UserDataReadOnlyException catch (e) {
+                                        if (mounted) {
+                                          messenger.showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                context.t(e.messageKey),
                                               ),
                                             ),
                                           );

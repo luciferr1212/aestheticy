@@ -2,40 +2,58 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/sqlite_row_mappers.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 
 /// Internal SQLite store for favorites, star ratings, and playlists.
 class SqliteCollectionsStore {
   final Database _db;
+  final String Function() _userSchema;
+  final UserDataAccessMode Function() _accessMode;
 
   /// Creates a [SqliteCollectionsStore] backed by [_db].
-  SqliteCollectionsStore(this._db);
+  SqliteCollectionsStore(
+    this._db, {
+    String Function()? userSchema,
+    UserDataAccessMode Function()? accessMode,
+  })  : _userSchema = userSchema ?? (() => 'userdata'),
+        _accessMode = accessMode ?? (() => UserDataAccessMode.normal);
+
+  void _requireWritable(String operation) {
+    if (_accessMode() == UserDataAccessMode.safeReadOnly) {
+      throw UserDataReadOnlyException(operation);
+    }
+  }
 
   // ── Favorites ────────────────────────────────────────────────────────
 
   Future<Set<String>> favoritePaths() async {
-    final rows = _db.select('SELECT path FROM favorites;');
+    final u = _userSchema();
+    final rows = _db.select('SELECT path FROM $u.favorites;');
     return rows.map((r) => r['path'] as String).toSet();
   }
 
   Future<void> setFavorite(String path, bool value) async {
+    _requireWritable('setFavorite');
+    final u = _userSchema();
     if (value) {
       final now = DateTime.now().millisecondsSinceEpoch;
       _db.execute(
-        'INSERT OR REPLACE INTO favorites (path, added_at_ms) VALUES (?, ?);',
+        'INSERT OR REPLACE INTO $u.favorites (path, added_at_ms) VALUES (?, ?);',
         [path, now],
       );
     } else {
       _db.execute(
-        'DELETE FROM favorites WHERE path = ?;',
+        'DELETE FROM $u.favorites WHERE path = ?;',
         [path],
       );
     }
   }
 
   Future<List<Track>> favoriteTracks() async {
+    final u = _userSchema();
     final rows = _db.select('''
-      SELECT t.* FROM tracks t
-      INNER JOIN favorites f ON t.path = f.path
+      SELECT t.* FROM main.tracks t
+      INNER JOIN $u.favorites f ON t.path = f.path
       ORDER BY f.added_at_ms DESC;
     ''');
     return rows.map(SqliteRowMappers.mapTrack).toList();
@@ -44,13 +62,15 @@ class SqliteCollectionsStore {
   // ── Ratings ──────────────────────────────────────────────────────────
 
   Future<Map<String, int>> allRatings() async {
-    final rows = _db.select('SELECT path, stars FROM ratings;');
+    final u = _userSchema();
+    final rows = _db.select('SELECT path, stars FROM $u.ratings;');
     return {
       for (final r in rows) r['path'] as String: r['stars'] as int,
     };
   }
 
   Future<void> setRating(String path, int stars) async {
+    _requireWritable('setRating');
     if (stars < 0 || stars > 5) {
       throw ArgumentError.value(
         stars,
@@ -58,12 +78,13 @@ class SqliteCollectionsStore {
         'Rating stars must be between 0 and 5',
       );
     }
+    final u = _userSchema();
     if (stars == 0) {
-      _db.execute('DELETE FROM ratings WHERE path = ?;', [path]);
+      _db.execute('DELETE FROM $u.ratings WHERE path = ?;', [path]);
     } else {
       final now = DateTime.now().millisecondsSinceEpoch;
       _db.execute(
-        'INSERT OR REPLACE INTO ratings (path, stars, rated_at_ms) VALUES (?, ?, ?);',
+        'INSERT OR REPLACE INTO $u.ratings (path, stars, rated_at_ms) VALUES (?, ?, ?);',
         [path, stars, now],
       );
     }
@@ -83,17 +104,20 @@ class SqliteCollectionsStore {
   }
 
   Future<PlaylistSummary> createPlaylist(String name) async {
+    _requireWritable('createPlaylist');
+    final u = _userSchema();
     final trimmed = _validatePlaylistName(name);
 
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
-      final countRow = _db.select('SELECT COUNT(*) AS c FROM playlists;').first;
+      final countRow =
+          _db.select('SELECT COUNT(*) AS c FROM $u.playlists;').first;
       if ((countRow['c'] as int) >= 500) {
         throw const PlaylistLimitException('Maximum 500 playlists limit reached');
       }
 
       final clash = _db.select(
-        'SELECT id FROM playlists WHERE LOWER(name) = LOWER(?);',
+        'SELECT id FROM $u.playlists WHERE LOWER(name) = LOWER(?);',
         [trimmed],
       );
       if (clash.isNotEmpty) {
@@ -102,7 +126,7 @@ class SqliteCollectionsStore {
 
       final now = DateTime.now().millisecondsSinceEpoch;
       _db.execute(
-        'INSERT INTO playlists (name, created_at_ms, updated_at_ms) VALUES (?, ?, ?);',
+        'INSERT INTO $u.playlists (name, created_at_ms, updated_at_ms) VALUES (?, ?, ?);',
         [trimmed, now, now],
       );
       final id = _db.lastInsertRowId;
@@ -125,12 +149,14 @@ class SqliteCollectionsStore {
   }
 
   Future<void> renamePlaylist(int id, String name) async {
+    _requireWritable('renamePlaylist');
+    final u = _userSchema();
     final trimmed = _validatePlaylistName(name);
 
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       final clash = _db.select(
-        'SELECT id FROM playlists WHERE LOWER(name) = LOWER(?) AND id != ?;',
+        'SELECT id FROM $u.playlists WHERE LOWER(name) = LOWER(?) AND id != ?;',
         [trimmed, id],
       );
       if (clash.isNotEmpty) {
@@ -139,7 +165,7 @@ class SqliteCollectionsStore {
 
       final now = DateTime.now().millisecondsSinceEpoch;
       _db.execute(
-        'UPDATE playlists SET name = ?, updated_at_ms = ? WHERE id = ?;',
+        'UPDATE $u.playlists SET name = ?, updated_at_ms = ? WHERE id = ?;',
         [trimmed, now, id],
       );
       _db.execute('COMMIT;');
@@ -150,10 +176,15 @@ class SqliteCollectionsStore {
   }
 
   Future<void> deletePlaylist(int id) async {
+    _requireWritable('deletePlaylist');
+    final u = _userSchema();
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
-      _db.execute('DELETE FROM playlist_items WHERE playlist_id = ?;', [id]);
-      _db.execute('DELETE FROM playlists WHERE id = ?;', [id]);
+      _db.execute(
+        'DELETE FROM $u.playlist_items WHERE playlist_id = ?;',
+        [id],
+      );
+      _db.execute('DELETE FROM $u.playlists WHERE id = ?;', [id]);
       _db.execute('COMMIT;');
     } catch (e) {
       _db.execute('ROLLBACK;');
@@ -162,20 +193,21 @@ class SqliteCollectionsStore {
   }
 
   Future<List<PlaylistSummary>> listPlaylists() async {
-    const sql = '''
+    final u = _userSchema();
+    final sql = '''
       SELECT p.id, p.name, p.created_at_ms, p.updated_at_ms,
              COUNT(pi.id) AS track_count,
              COALESCE(SUM(t.duration_ms), 0) AS total_duration_ms,
              (
-               SELECT t2.cover_key FROM playlist_items pi2
-               INNER JOIN tracks t2 ON pi2.path = t2.path
+               SELECT t2.cover_key FROM $u.playlist_items pi2
+               INNER JOIN main.tracks t2 ON pi2.path = t2.path
                WHERE pi2.playlist_id = p.id AND t2.cover_key IS NOT NULL AND t2.cover_key != ''
                ORDER BY pi2.position ASC
                LIMIT 1
              ) AS cover_key
-      FROM playlists p
-      LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
-      LEFT JOIN tracks t ON pi.path = t.path
+      FROM $u.playlists p
+      LEFT JOIN $u.playlist_items pi ON p.id = pi.playlist_id
+      LEFT JOIN main.tracks t ON pi.path = t.path
       GROUP BY p.id
       ORDER BY p.name COLLATE NOCASE ASC;
     ''';
@@ -202,13 +234,14 @@ class SqliteCollectionsStore {
   }
 
   Future<List<PlaylistEntry>> playlistEntries(int id) async {
-    const sql = '''
+    final u = _userSchema();
+    final sql = '''
       SELECT pi.id AS entry_id, pi.position, pi.path,
              t.id AS t_id, t.path AS t_path, t.folder_id, t.title, t.artist, t.album_artist,
              t.album, t.track_no, t.disc_no, t.year, t.duration_ms, t.mtime_ms, t.size_bytes,
              t.cover_key, t.added_at
-      FROM playlist_items pi
-      LEFT JOIN tracks t ON normalize_file_path(pi.path) = normalize_file_path(t.path)
+      FROM $u.playlist_items pi
+      LEFT JOIN main.tracks t ON normalize_file_path(pi.path) = normalize_file_path(t.path)
       WHERE pi.playlist_id = ?
       ORDER BY pi.position ASC;
     ''';
@@ -250,12 +283,14 @@ class SqliteCollectionsStore {
   }
 
   Future<int> addToPlaylist(int id, List<String> paths) async {
+    _requireWritable('addToPlaylist');
     if (paths.isEmpty) return 0;
+    final u = _userSchema();
 
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       final countRow = _db.select(
-        'SELECT COUNT(*) AS c FROM playlist_items WHERE playlist_id = ?;',
+        'SELECT COUNT(*) AS c FROM $u.playlist_items WHERE playlist_id = ?;',
         [id],
       ).first;
       final currentCount = countRow['c'] as int;
@@ -266,14 +301,14 @@ class SqliteCollectionsStore {
       }
 
       final maxPosRow = _db.select(
-        'SELECT COALESCE(MAX(position), -1) AS max_pos FROM playlist_items WHERE playlist_id = ?;',
+        'SELECT COALESCE(MAX(position), -1) AS max_pos FROM $u.playlist_items WHERE playlist_id = ?;',
         [id],
       ).first;
       var nextPos = (maxPosRow['max_pos'] as int) + 1;
 
       final now = DateTime.now().millisecondsSinceEpoch;
       final stmt = _db.prepare(
-        'INSERT INTO playlist_items (playlist_id, position, path, added_at_ms) VALUES (?, ?, ?, ?);',
+        'INSERT INTO $u.playlist_items (playlist_id, position, path, added_at_ms) VALUES (?, ?, ?, ?);',
       );
       try {
         for (final p in paths) {
@@ -284,7 +319,7 @@ class SqliteCollectionsStore {
       }
 
       _db.execute(
-        'UPDATE playlists SET updated_at_ms = ? WHERE id = ?;',
+        'UPDATE $u.playlists SET updated_at_ms = ? WHERE id = ?;',
         [now, id],
       );
       _db.execute('COMMIT;');
@@ -296,23 +331,25 @@ class SqliteCollectionsStore {
   }
 
   Future<void> removePlaylistEntries(int id, List<int> entryIds) async {
+    _requireWritable('removePlaylistEntries');
     if (entryIds.isEmpty) return;
+    final u = _userSchema();
 
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       final placeholders = List.filled(entryIds.length, '?').join(',');
       _db.execute(
-        'DELETE FROM playlist_items WHERE playlist_id = ? AND id IN ($placeholders);',
+        'DELETE FROM $u.playlist_items WHERE playlist_id = ? AND id IN ($placeholders);',
         [id, ...entryIds],
       );
 
       // Renumber positions without gaps
       final remaining = _db.select(
-        'SELECT id FROM playlist_items WHERE playlist_id = ? ORDER BY position ASC, id ASC;',
+        'SELECT id FROM $u.playlist_items WHERE playlist_id = ? ORDER BY position ASC, id ASC;',
         [id],
       );
       final updateStmt = _db.prepare(
-        'UPDATE playlist_items SET position = ? WHERE id = ?;',
+        'UPDATE $u.playlist_items SET position = ? WHERE id = ?;',
       );
       try {
         for (var i = 0; i < remaining.length; i++) {
@@ -324,7 +361,7 @@ class SqliteCollectionsStore {
 
       final now = DateTime.now().millisecondsSinceEpoch;
       _db.execute(
-        'UPDATE playlists SET updated_at_ms = ? WHERE id = ?;',
+        'UPDATE $u.playlists SET updated_at_ms = ? WHERE id = ?;',
         [now, id],
       );
       _db.execute('COMMIT;');
@@ -335,10 +372,12 @@ class SqliteCollectionsStore {
   }
 
   Future<void> movePlaylistEntry(int id, int entryId, int newPosition) async {
+    _requireWritable('movePlaylistEntry');
+    final u = _userSchema();
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       final rows = _db.select(
-        'SELECT id FROM playlist_items WHERE playlist_id = ? ORDER BY position ASC, id ASC;',
+        'SELECT id FROM $u.playlist_items WHERE playlist_id = ? ORDER BY position ASC, id ASC;',
         [id],
       );
       final entryIds = rows.map((r) => r['id'] as int).toList();
@@ -357,7 +396,7 @@ class SqliteCollectionsStore {
       entryIds.insert(targetIndex, entryId);
 
       final updateStmt = _db.prepare(
-        'UPDATE playlist_items SET position = ? WHERE id = ?;',
+        'UPDATE $u.playlist_items SET position = ? WHERE id = ?;',
       );
       try {
         for (var i = 0; i < entryIds.length; i++) {
@@ -369,7 +408,7 @@ class SqliteCollectionsStore {
 
       final now = DateTime.now().millisecondsSinceEpoch;
       _db.execute(
-        'UPDATE playlists SET updated_at_ms = ? WHERE id = ?;',
+        'UPDATE $u.playlists SET updated_at_ms = ? WHERE id = ?;',
         [now, id],
       );
       _db.execute('COMMIT;');

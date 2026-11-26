@@ -632,6 +632,19 @@ abstract final class AppStrings {
     'folders.removeFolderTooltip': 'Remove folder',
     'folders.errorAdding': 'Error adding folder: {error}',
     'miniPlayer.enterTooltip': 'Mini player',
+    'userdata.safeReadOnlyBannerTitle': 'Safe read-only mode',
+    'userdata.safeReadOnlyBannerBody':
+        'User data could not be migrated or opened for writing. Playback, browsing, and scanning work normally, but changes to favorites, ratings, playlists, history, and artist rules are disabled.',
+    'userdata.openLogsFolder': 'Open logs folder',
+    'userdata.openBackupsFolder': 'Open backups folder',
+    'userdata.safeReadOnlyBlocked':
+        'Cannot save changes while user data is in safe read-only mode.',
+    'userdata.libraryCorruptNotice':
+        'The library index was damaged and rebuilt automatically. Rescanning folders now.',
+    'userdata.restoredFromBackupNotice':
+        'User data was damaged and automatically restored from the newest valid backup.',
+    'userdata.resetEmptyNotice':
+        'User data was damaged and no valid backup was found; started with empty user data.',
   };
 
   /// Modern Standard Arabic (العربية الفصحى) dictionary.
@@ -1197,6 +1210,19 @@ abstract final class AppStrings {
     'folders.removeFolderTooltip': 'إزالة المجلد',
     'folders.errorAdding': 'خطأ في إضافة المجلد: {error}',
     'miniPlayer.enterTooltip': 'المشغل المصغر',
+    'userdata.safeReadOnlyBannerTitle': 'وضع القراءة فقط الآمن',
+    'userdata.safeReadOnlyBannerBody':
+        'تعذّر ترحيل بيانات المستخدم أو فتحها للكتابة. يعمل التشغيل والتصفح وإعادة الفحص بشكل طبيعي، لكن تعديلات المفضلة والتقييمات وقوائم التشغيل والسجل وقواعد الفنانين معطّلة.',
+    'userdata.openLogsFolder': 'فتح مجلد السجلات',
+    'userdata.openBackupsFolder': 'فتح مجلد النسخ الاحتياطية',
+    'userdata.safeReadOnlyBlocked':
+        'تعذّر حفظ التغييرات لأن بيانات المستخدم في وضع القراءة فقط الآمن.',
+    'userdata.libraryCorruptNotice':
+        'تعرض فهرس المكتبة للتلف وأُعيد بناؤه تلقائياً. جارٍ إعادة فحص المجلدات الآن.',
+    'userdata.restoredFromBackupNotice':
+        'تعرضت بيانات المستخدم للتلف وتمت استعادتها تلقائياً من أحدث نسخة احتياطية صالحة.',
+    'userdata.resetEmptyNotice':
+        'تعرضت بيانات المستخدم للتلف ولم يُعثر على نسخة احتياطية صالحة؛ تم البدء ببيانات مستخدم فارغة.',
   };
 
   /// Resolves [key] for [language].

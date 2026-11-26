@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/ui/l10n/app_strings.dart';
 
 /// Modal bottom sheet displaying active artist rules (merges and never-split entries).
@@ -59,13 +60,29 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
   }
 
   Future<void> _removeAlias(String aliasKey) async {
-    await widget.repository.unmergeArtist(aliasKey);
-    await _loadRules();
+    try {
+      await widget.repository.unmergeArtist(aliasKey);
+      await _loadRules();
+    } on UserDataReadOnlyException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.t(e.messageKey))),
+        );
+      }
+    }
   }
 
   Future<void> _removeNoSplit(String artistKey) async {
-    await widget.repository.removeNoSplit(artistKey);
-    await _loadRules();
+    try {
+      await widget.repository.removeNoSplit(artistKey);
+      await _loadRules();
+    } on UserDataReadOnlyException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.t(e.messageKey))),
+        );
+      }
+    }
   }
 
   @override

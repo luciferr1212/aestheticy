@@ -4,6 +4,7 @@ import '../../audio/playback_controller.dart';
 import '../../features/collections/user_collections.dart';
 import '../../library/models.dart';
 import '../../library/track_audio_source_mapper.dart';
+import '../../library/user_data_access_mode.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/number_format.dart';
 import '../theme/app_colors.dart';
@@ -51,6 +52,10 @@ Future<PlaylistSummary?> showCreatePlaylistDialog(
               }
               if (innerCtx.mounted) {
                 Navigator.of(innerCtx).pop(pl);
+              }
+            } on UserDataReadOnlyException catch (e) {
+              if (innerCtx.mounted) {
+                setState(() => errorMessage = innerCtx.t(e.messageKey));
               }
             } catch (e) {
               setState(() => errorMessage = e.toString());
@@ -154,6 +159,10 @@ Future<bool> showRenamePlaylistDialog(
               if (innerCtx.mounted) {
                 Navigator.of(innerCtx).pop(true);
               }
+            } on UserDataReadOnlyException catch (e) {
+              if (innerCtx.mounted) {
+                setState(() => errorMessage = innerCtx.t(e.messageKey));
+              }
             } catch (e) {
               setState(() => errorMessage = e.toString());
             }
@@ -252,9 +261,18 @@ Future<bool> showDeletePlaylistDialog(
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              await collections.deletePlaylist(playlist.id);
-              if (dialogCtx.mounted) {
-                Navigator.of(dialogCtx).pop(true);
+              try {
+                await collections.deletePlaylist(playlist.id);
+                if (dialogCtx.mounted) {
+                  Navigator.of(dialogCtx).pop(true);
+                }
+              } on UserDataReadOnlyException catch (e) {
+                if (dialogCtx.mounted) {
+                  Navigator.of(dialogCtx).pop(false);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(context.t(e.messageKey))),
+                  );
+                }
               }
             },
             child: Text(dialogCtx.t('common.delete')),

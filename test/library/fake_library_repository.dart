@@ -4,9 +4,12 @@ import 'package:aestheticy/library/album_identity.dart';
 import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/user_data_access_mode.dart';
 
 /// Pure-Dart in-memory implementation of [LibraryRepository] for fast, deterministic unit testing.
 class FakeLibraryRepository implements LibraryRepository {
+  @override
+  UserDataAccessMode get userDataAccessMode => UserDataAccessMode.normal;
   final List<LibraryFolder> _folders = [];
   final Map<String, Track> _tracks = {};
   final List<ArtistAlias> _aliases = [];

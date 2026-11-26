@@ -8,9 +8,13 @@ import 'package:aestheticy/library/text_normalizer.dart';
 /// Internal SQLite store for album listing, grouping, search, and track queries.
 class SqliteAlbumsStore {
   final Database _db;
+  final String Function() _userSchema;
 
   /// Creates a [SqliteAlbumsStore] backed by [_db].
-  SqliteAlbumsStore(this._db);
+  SqliteAlbumsStore(
+    this._db, {
+    String Function()? userSchema,
+  }) : _userSchema = userSchema ?? (() => 'userdata');
 
   Future<List<AlbumSummary>> listAlbums({int? limit, int? offset}) async {
     final sql = StringBuffer('''
@@ -24,7 +28,7 @@ class SqliteAlbumsStore {
         COUNT(DISTINCT NULLIF(artist, '')) AS distinct_artist_count,
         MIN(NULLIF(artist, '')) AS single_artist,
         MAX(added_at) AS latest_added_at
-      FROM tracks
+      FROM main.tracks
       GROUP BY album_key
       ORDER BY album_name COLLATE NOCASE ASC
     ''');
@@ -86,6 +90,7 @@ class SqliteAlbumsStore {
   Future<List<AlbumSummary>> _queryAlbumsByArtistKeyChunk(
     List<String> artistKeys,
   ) async {
+    final u = _userSchema();
     final placeholders = List.filled(artistKeys.length, '?').join(', ');
     final normalizedPlaceholders =
         List.filled(artistKeys.length, 'normalize_text(?)').join(', ');
@@ -102,12 +107,12 @@ class SqliteAlbumsStore {
         COUNT(DISTINCT NULLIF(t.artist, '')) AS distinct_artist_count,
         MIN(NULLIF(t.artist, '')) AS single_artist,
         MAX(t.added_at) AS latest_added_at
-      FROM tracks t
+      FROM main.tracks t
       WHERE t.album IS NOT NULL AND TRIM(t.album) != ''
         AND EXISTS (
           SELECT 1
-          FROM tracks t2
-          JOIN track_artists ta ON ta.track_id = t2.id
+          FROM main.tracks t2
+          JOIN main.track_artists ta ON ta.track_id = t2.id
           WHERE album_identity_key(t2.album, t2.album_artist, t2.artist, t2.path) =
               album_identity_key(t.album, t.album_artist, t.artist, t.path)
             AND (
@@ -115,11 +120,11 @@ class SqliteAlbumsStore {
               OR ta.artist_key IN ($normalizedPlaceholders)
               OR ta.artist_name IN ($placeholders)
               OR ta.artist_key IN (
-                SELECT canonical_key FROM artist_aliases
+                SELECT canonical_key FROM $u.artist_aliases
                 WHERE alias_key IN ($placeholders) OR alias_key IN ($normalizedPlaceholders)
               )
               OR ta.artist_key IN (
-                SELECT alias_key FROM artist_aliases
+                SELECT alias_key FROM $u.artist_aliases
                 WHERE canonical_key IN ($placeholders) OR canonical_key IN ($normalizedPlaceholders)
               )
             )
@@ -161,7 +166,7 @@ class SqliteAlbumsStore {
 
     final rows = _db.select(
       '''
-      SELECT * FROM tracks
+      SELECT * FROM main.tracks
       WHERE album_identity_key(album, album_artist, artist, path) = ?
       ORDER BY COALESCE(disc_no, 1) ASC, COALESCE(track_no, 0) ASC, title COLLATE NOCASE ASC;
       ''',
@@ -184,6 +189,7 @@ class SqliteAlbumsStore {
     final whereClauses =
         terms.map((_) => "searchable LIKE ? ESCAPE '\\'").join(' AND ');
 
+    final u = _userSchema();
     final effectiveLimit = limit ?? 50;
     final sql = '''
       WITH album_rows AS (
@@ -199,7 +205,7 @@ class SqliteAlbumsStore {
           MAX(t.added_at) AS latest_added_at,
           COALESCE(GROUP_CONCAT(DISTINCT NULLIF(t.album_artist, '')), '') || ' ' ||
           COALESCE(GROUP_CONCAT(DISTINCT NULLIF(t.artist, '')), '') AS raw_artists_text
-        FROM tracks t
+        FROM main.tracks t
         GROUP BY album_key
       ),
       album_artists AS (
@@ -207,9 +213,9 @@ class SqliteAlbumsStore {
           album_identity_key(t.album, t.album_artist, t.artist, t.path) AS album_key,
           COALESCE(GROUP_CONCAT(DISTINCT ta.artist_name), '') || ' ' ||
           COALESCE(GROUP_CONCAT(DISTINCT aa.canonical_name), '') AS linked_artists_text
-        FROM track_artists ta
-        JOIN tracks t ON t.id = ta.track_id
-        LEFT JOIN artist_aliases aa ON aa.canonical_key = ta.artist_key
+        FROM main.track_artists ta
+        JOIN main.tracks t ON t.id = ta.track_id
+        LEFT JOIN $u.artist_aliases aa ON aa.canonical_key = ta.artist_key
         GROUP BY album_key
       ),
       searchable_albums AS (
@@ -252,7 +258,7 @@ class SqliteAlbumsStore {
   Future<int> albumCount() async {
     final row = _db.select('''
       SELECT COUNT(*) AS total FROM (
-        SELECT 1 FROM tracks
+        SELECT 1 FROM main.tracks
         GROUP BY album_identity_key(album, album_artist, artist, path)
       );
     ''').first;
