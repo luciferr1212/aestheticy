@@ -52,10 +52,19 @@ class SqliteHistoryStore {
     if (!hasIdentity) return null;
     final canonical = FilePathUtils.canonicalKey(uri);
     if (canonical.isEmpty) return null;
-    final rows = _db.select(
-      'SELECT uid FROM $schema.track_identity WHERE normalize_file_path(path) = ? LIMIT 1;',
-      [canonical],
-    );
+    final cols = _db
+        .select('PRAGMA $schema.table_info(track_identity);')
+        .map((r) => r['name'] as String)
+        .toSet();
+    final rows = cols.contains('path_key')
+        ? _db.select(
+            'SELECT uid FROM $schema.track_identity WHERE path_key = ? LIMIT 1;',
+            [canonical],
+          )
+        : _db.select(
+            'SELECT uid FROM $schema.track_identity WHERE normalize_file_path(path) = ? LIMIT 1;',
+            [canonical],
+          );
     if (rows.isEmpty) return null;
     return rows.first['uid'] as String;
   }
@@ -66,14 +75,15 @@ class SqliteHistoryStore {
       return -1;
     }
     final u = _userSchema();
+    final uriKey = FilePathUtils.canonicalKey(e.uri);
     final resolvedUid = e.trackUid ?? _resolveUidForUri(u, e.uri);
     _db.execute(
       '''
       INSERT INTO $u.play_events (
         uri, title, artist, album, album_artist,
         duration_ms, started_at_ms, listened_ms, counted, completed,
-        track_uid, source, session_id, ended_reason
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        track_uid, source, session_id, ended_reason, uri_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       ''',
       [
         e.uri,
@@ -90,6 +100,7 @@ class SqliteHistoryStore {
         e.source,
         e.sessionId,
         e.endedReason,
+        uriKey,
       ],
     );
     return _db.lastInsertRowId;

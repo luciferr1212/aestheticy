@@ -5,11 +5,13 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/diagnostics/app_logger.dart';
+import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/library_scanner.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/userdata_migrator.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/startup_identity_reconciler.dart';
 import 'package:aestheticy/library/tag_reader.dart';
 
 class _MapTagReader implements TagReader {
@@ -120,13 +122,13 @@ void main() {
       );
       addTearDown(repo.close);
 
-      expect(kUserDataSchemaVersion, equals(2));
+      expect(kUserDataSchemaVersion, equals(3));
       final userVersion = repo.rawDatabase
           .select('PRAGMA userdata.user_version;')
           .first
           .values
           .first as int;
-      expect(userVersion, equals(2));
+      expect(userVersion, equals(kUserDataSchemaVersion));
 
       // Verify pre-migration backup was written under tempDir/backups/userdata/
       final userBackupsDir = Directory(p.join(backupsDir.path, 'userdata'));
@@ -134,7 +136,9 @@ void main() {
       final backupFiles = userBackupsDir
           .listSync()
           .whereType<File>()
-          .where((f) => p.basename(f.path).contains('pre-v1-to-v2'))
+          .where(
+            (f) => p.basename(f.path).contains('pre-v1-to-v$kUserDataSchemaVersion'),
+          )
           .toList();
       expect(backupFiles, hasLength(1));
 
@@ -143,6 +147,10 @@ void main() {
         "SELECT name FROM userdata.sqlite_master WHERE type = 'index' AND name = 'idx_track_identity_path';",
       );
       expect(idxRows, hasLength(1));
+
+      // Startup openFile no longer reconciles synchronously; trigger startup reconciler once loaded.
+      expect(await repo.listTrackIdentities(), isEmpty);
+      await StartupIdentityReconciler(repository: repo).runOnce();
 
       // Verify all library + favorite + rating + playlist + history paths received 128-bit hex UIDs.
       final identities = await repo.listTrackIdentities();
@@ -184,6 +192,7 @@ void main() {
           sizeBytes: 8192000,
         ),
       ]);
+      await repo.reconcileTrackIdentities();
       final originalUid = await repo.resolveTrackUid(oldPath);
       expect(originalUid, isNotNull);
 
@@ -274,6 +283,7 @@ void main() {
           sizeBytes: 3500000,
         ),
       ]);
+      await repo.reconcileTrackIdentities();
       final closeUid = await repo.resolveTrackUid(oldPath);
       final farUid = await repo.resolveTrackUid(farOld);
 
@@ -330,6 +340,7 @@ void main() {
           sizeBytes: 5120000,
         ),
       ]);
+      await repo.reconcileTrackIdentities();
       final oldUid = await repo.resolveTrackUid(oldPath);
       await repo.setFavorite(oldPath, true);
 
@@ -376,23 +387,24 @@ void main() {
           sizeBytes: 4200000,
         ),
       ]);
+      await repo.reconcileTrackIdentities();
 
       // Seed both old and target entries in favorites & ratings with known timestamps.
       repo.rawDatabase.execute(
-        'INSERT INTO userdata.favorites (path, added_at_ms) VALUES (?, ?);',
-        [oldPath, 1000],
+        'INSERT INTO userdata.favorites (path, added_at_ms, path_key) VALUES (?, ?, ?);',
+        [oldPath, 1000, FilePathUtils.canonicalKey(oldPath)],
       );
       repo.rawDatabase.execute(
-        'INSERT INTO userdata.favorites (path, added_at_ms) VALUES (?, ?);',
-        [newPath, 5000], // Newer favorite timestamp on target
+        'INSERT INTO userdata.favorites (path, added_at_ms, path_key) VALUES (?, ?, ?);',
+        [newPath, 5000, FilePathUtils.canonicalKey(newPath)],
       );
       repo.rawDatabase.execute(
-        'INSERT INTO userdata.ratings (path, stars, rated_at_ms) VALUES (?, ?, ?);',
-        [oldPath, 5, 9000], // Newer rating timestamp on source
+        'INSERT INTO userdata.ratings (path, stars, rated_at_ms, path_key) VALUES (?, ?, ?, ?);',
+        [oldPath, 5, 9000, FilePathUtils.canonicalKey(oldPath)],
       );
       repo.rawDatabase.execute(
-        'INSERT INTO userdata.ratings (path, stars, rated_at_ms) VALUES (?, ?, ?);',
-        [newPath, 2, 3000],
+        'INSERT INTO userdata.ratings (path, stars, rated_at_ms, path_key) VALUES (?, ?, ?, ?);',
+        [newPath, 2, 3000, FilePathUtils.canonicalKey(newPath)],
       );
 
       await repo.removeTracksByPath([oldPath]);
@@ -432,6 +444,7 @@ void main() {
       await repo.upsertTracks([
         makeTrack(path: trackPath, folderId: folder.id!),
       ]);
+      await repo.reconcileTrackIdentities();
       final originalUid = await repo.resolveTrackUid(trackPath);
       await repo.setFavorite(trackPath, true);
       await repo.setRating(trackPath, 5);
@@ -529,6 +542,53 @@ void main() {
       expect(await repo.resolveTrackUid(fileB.path), equals(uid1));
       final favs = await repo.favoriteTracks();
       expect(favs.map((t) => t.path), equals([fileB.path]));
+    });
+
+    test(
+        'S4: upsertTracks does not pre-empt relink when new path is inserted before removal',
+        () async {
+      final repo = SqliteLibraryRepository.inMemory();
+      addTearDown(repo.close);
+      final folder = await repo.addFolder('C:\\Music');
+      const oldPath = 'C:\\Music\\Old\\song.flac';
+      const newPath = 'C:\\Music\\New\\song.flac';
+
+      await repo.upsertTracks([
+        makeTrack(
+          path: oldPath,
+          folderId: folder.id!,
+          sizeBytes: 98765,
+          durationMs: 215000,
+          title: 'Preserved Song',
+          artist: 'Artist A',
+          album: 'Album A',
+        ),
+      ]);
+      await repo.reconcileTrackIdentities();
+      final originalUid = await repo.resolveTrackUid(oldPath);
+      expect(originalUid, isNotNull);
+      await repo.setFavorite(oldPath, true);
+
+      // Simulate out-of-order track write: new path upserted before reconcile.
+      await repo.upsertTracks([
+        makeTrack(
+          path: newPath,
+          folderId: folder.id!,
+          sizeBytes: 98765,
+          durationMs: 215000,
+          title: 'Preserved Song',
+          artist: 'Artist A',
+          album: 'Album A',
+        ),
+      ]);
+      // No eager identity created for newPath yet.
+      expect(await repo.resolveTrackUid(newPath), isNull);
+
+      await repo.removeTracksByPath([oldPath]);
+      final report = await repo.reconcileTrackIdentities();
+      expect(report.relinked, equals(1));
+      expect(await repo.resolveTrackUid(newPath), equals(originalUid));
+      expect(await repo.favoritePaths(), equals({newPath}));
     });
   });
 }

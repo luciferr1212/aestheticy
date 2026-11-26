@@ -29,6 +29,7 @@ import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/scan_service.dart';
 import 'package:aestheticy/library/sqlite/userdata_backup_service.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/startup_identity_reconciler.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/platform/fake_platform_services.dart';
 import 'package:aestheticy/platform/media_session_service.dart';
@@ -48,6 +49,7 @@ import 'package:aestheticy/ui/audio_panels/eq_store.dart';
 import 'package:aestheticy/ui/gallery/design_gallery_screen.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
 import 'package:aestheticy/ui/l10n/locale_controller.dart';
+import 'package:aestheticy/ui/library/library_data_cache.dart';
 import 'package:aestheticy/ui/mini_player/mini_player_controller.dart';
 import 'package:aestheticy/ui/mini_player/mini_player_view.dart';
 import 'package:aestheticy/ui/quick_search/quick_search_overlay.dart';
@@ -674,6 +676,9 @@ class _AestheticyAppState extends State<AestheticyApp> {
   PlayRecorder? _playRecorder;
   SessionSaver? _sessionSaver;
   AppLifecycleListener? _lifecycleListener;
+  late final LibraryDataCache _dataCache;
+  late final StartupIdentityReconciler _startupIdentityReconciler;
+  bool _disposed = false;
   late final VolumeHudController _volumeHudController;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
@@ -694,6 +699,17 @@ class _AestheticyAppState extends State<AestheticyApp> {
     }
     _repository = widget.repository ?? SqliteLibraryRepository.inMemory();
     _scanService = widget.scanService ?? ScanService(repository: _repository);
+    _dataCache = LibraryDataCache(
+      repository: _repository,
+      scanService: _scanService,
+    );
+    unawaited(_dataCache.refresh());
+    _startupIdentityReconciler = StartupIdentityReconciler(
+      repository: _repository,
+      waitForLibraryReady: _waitForLibraryCacheLoaded,
+      isScanning: () => _scanService.isScanning,
+      shouldAbort: () => _disposed || !mounted,
+    );
     _settingsStore = widget.settingsStore ?? SettingsStore();
     _glassController = widget.glassController ?? GlassController();
     _settingsStore.bindGlassController(_glassController);
@@ -868,8 +884,10 @@ class _AestheticyAppState extends State<AestheticyApp> {
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _disposed) return;
+      unawaited(_startupIdentityReconciler.runOnce());
       final backupService = widget.userDataBackupService;
-      if (backupService == null || !mounted) return;
+      if (backupService == null) return;
       unawaited(
         backupService
             .runDailyBackup(accessMode: _repository.userDataAccessMode)
@@ -886,12 +904,31 @@ class _AestheticyAppState extends State<AestheticyApp> {
     });
   }
 
+  Future<void> _waitForLibraryCacheLoaded() async {
+    if (_disposed || _dataCache.isLoaded) return;
+    final completer = Completer<void>();
+    void onCacheChanged() {
+      if ((_disposed || _dataCache.isLoaded) && !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+
+    _dataCache.addListener(onCacheChanged);
+    try {
+      await completer.future;
+    } finally {
+      _dataCache.removeListener(onCacheChanged);
+    }
+  }
+
   void _syncPlaybackTransitionSetting() {
     _playbackController.fadeProfile = _settingsStore.settings.fadeProfile;
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _dataCache.dispose();
     _settingsStore.removeListener(_syncPlaybackTransitionSetting);
     if (_createdLyricsControllerLocally) {
       _lyricsController.dispose();
@@ -1096,6 +1133,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         controller: effectiveController,
                         repository: effectiveRepo,
                         scanService: effectiveScanService,
+                        dataCache: _dataCache,
                         settingsStore: _settingsStore,
                         navigator: _navigator,
                         directoryPicker: widget.directoryPicker,

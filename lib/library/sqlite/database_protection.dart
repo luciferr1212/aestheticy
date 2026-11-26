@@ -9,6 +9,25 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'package:aestheticy/diagnostics/app_logger.dart';
 
+/// Optional test hooks to inject failures during corrupt `userdata.db` restore.
+class UserDataRestoreTestHooks {
+  /// Override copying [backup] to [restoringPath].
+  final void Function(File backup, String restoringPath)? copyBackup;
+
+  /// Override `PRAGMA quick_check` verification on [restoringPath].
+  final QuickCheckResult Function(String restoringPath)? verifyRestoringFile;
+
+  /// Override renaming [restoringFile] to [userDataPath].
+  final void Function(File restoringFile, String userDataPath)? renameIntoPlace;
+
+  /// Creates [UserDataRestoreTestHooks].
+  const UserDataRestoreTestHooks({
+    this.copyBackup,
+    this.verifyRestoringFile,
+    this.renameIntoPlace,
+  });
+}
+
 /// Result of running `PRAGMA quick_check` on a SQLite file.
 enum QuickCheckStatus {
   /// File passed `PRAGMA quick_check` (`ok`).
@@ -144,12 +163,12 @@ class DatabaseProtection {
           error: qc.error,
         );
       case QuickCheckStatus.corrupt:
-        final quarantined = _quarantineDatabaseFiles(
+        final targetBase = _quarantineDatabaseFiles(
           libraryPath,
           now: nowFn(),
           log: log,
         );
-        if (!quarantined) {
+        if (targetBase == null) {
           return (
             recreated: false,
             lockedOrUnreadable: true,
@@ -166,11 +185,17 @@ class DatabaseProtection {
 
   /// Checks `userdata.db` at [userDataPath].
   ///
+  /// - Cleans up any leftover `.restoring-<timestamp>` temp files from an
+  ///   interrupted prior restore matching the exact temp filename pattern.
   /// - If locked/unreadable: returns `safeReadOnly: true` without touching files.
-  /// - If corrupt: attempts to restore the newest valid backup from
-  ///   [backupsUserDataDir] after quarantining the corrupt file. If no valid
-  ///   backup exists, quarantines the corrupt file so an empty `userdata.db`
-  ///   can start cleanly.
+  /// - If corrupt and a verified backup exists in [backupsUserDataDir]: copies
+  ///   the backup to `userdata.db.restoring-<timestamp>`, runs `quick_check` on
+  ///   the copy, and only after verification succeeds quarantines the corrupt
+  ///   file and renames the verified copy into place. On any failure, leaves
+  ///   the original file untouched, removes only `.restoring-*`, and enters
+  ///   `safeReadOnly`.
+  /// - If corrupt and no valid backup exists: quarantines the corrupt file so
+  ///   an empty `userdata.db` can start cleanly.
   static ({
     bool restoredFromBackup,
     bool resetEmpty,
@@ -181,9 +206,12 @@ class DatabaseProtection {
     required Directory backupsUserDataDir,
     DateTime Function()? clock,
     AppLogger? logger,
+    UserDataRestoreTestHooks? restoreHooks,
   }) {
     final log = logger ?? AppLogger.instance;
     final nowFn = clock ?? DateTime.now;
+    _cleanupLeftoverRestoringFiles(userDataPath, log: log);
+
     final qc = checkFile(userDataPath, verifyWritable: true);
 
     switch (qc.status) {
@@ -215,12 +243,104 @@ class DatabaseProtection {
           backupsUserDataDir,
           logger: log,
         );
-        final quarantined = _quarantineDatabaseFiles(
+        if (validBackup == null) {
+          final targetBase = _quarantineDatabaseFiles(
+            userDataPath,
+            now: nowFn(),
+            log: log,
+          );
+          if (targetBase == null) {
+            return (
+              restoredFromBackup: false,
+              resetEmpty: false,
+              safeReadOnly: true,
+              error: 'Failed to quarantine corrupt userdata.db',
+            );
+          }
+          log.warning(
+            'Database',
+            'No valid userdata backup found; starting with an empty userdata.db',
+          );
+          return (
+            restoredFromBackup: false,
+            resetEmpty: true,
+            safeReadOnly: false,
+            error: qc.error,
+          );
+        }
+
+        final now = nowFn();
+        final stamp = _formatStamp(now);
+        var restoringPath = '$userDataPath.restoring-$stamp';
+        if (File(restoringPath).existsSync()) {
+          restoringPath = '$restoringPath-${now.millisecond}';
+        }
+
+        // Step 1: Copy backup to staging temp file.
+        try {
+          if (restoreHooks?.copyBackup != null) {
+            restoreHooks!.copyBackup!(validBackup, restoringPath);
+          } else {
+            validBackup.copySync(restoringPath);
+          }
+        } catch (e, st) {
+          _deleteTempFileIfExists(restoringPath);
+          log.error(
+            'Database',
+            'Failed copying backup to restoring temp file: $e',
+            e,
+            st,
+          );
+          return (
+            restoredFromBackup: false,
+            resetEmpty: false,
+            safeReadOnly: true,
+            error: 'Backup copy failed: $e',
+          );
+        }
+
+        // Step 2: Verify the staged copy passes PRAGMA quick_check BEFORE touching corrupt file.
+        final QuickCheckResult stagedCheck;
+        try {
+          stagedCheck =
+              restoreHooks?.verifyRestoringFile?.call(restoringPath) ??
+                  checkFile(restoringPath);
+        } catch (e, st) {
+          _deleteTempFileIfExists(restoringPath);
+          log.error(
+            'Database',
+            'Failed verifying restoring temp file: $e',
+            e,
+            st,
+          );
+          return (
+            restoredFromBackup: false,
+            resetEmpty: false,
+            safeReadOnly: true,
+            error: 'Backup verification failed: $e',
+          );
+        }
+        if (stagedCheck.status != QuickCheckStatus.ok) {
+          _deleteTempFileIfExists(restoringPath);
+          final reason = stagedCheck.error ??
+              'Restoring temp file failed quick_check (${stagedCheck.status.name})';
+          log.error('Database', reason);
+          return (
+            restoredFromBackup: false,
+            resetEmpty: false,
+            safeReadOnly: true,
+            error: reason,
+          );
+        }
+
+        // Step 3: Quarantine corrupt userdata.db (only now that verified replacement exists).
+        final quarantinedBase = _quarantineDatabaseFiles(
           userDataPath,
-          now: nowFn(),
+          now: now,
           log: log,
         );
-        if (!quarantined) {
+        if (quarantinedBase == null) {
+          _deleteTempFileIfExists(restoringPath);
           return (
             restoredFromBackup: false,
             resetEmpty: false,
@@ -229,58 +349,40 @@ class DatabaseProtection {
           );
         }
 
-        if (validBackup != null) {
-          try {
-            validBackup.copySync(userDataPath);
-            final restoredCheck = checkFile(userDataPath);
-            if (restoredCheck.status == QuickCheckStatus.ok) {
-              log.warning(
-                'Database',
-                'Restored userdata.db from backup ${p.basename(validBackup.path)}',
-              );
-              return (
-                restoredFromBackup: true,
-                resetEmpty: false,
-                safeReadOnly: false,
-                error: null,
-              );
-            }
-            log.error(
-              'Database',
-              'Restored backup failed verification (${restoredCheck.error})',
-            );
-            return (
-              restoredFromBackup: false,
-              resetEmpty: false,
-              safeReadOnly: true,
-              error: restoredCheck.error,
-            );
-          } catch (e, st) {
-            log.error(
-              'Database',
-              'Failed restoring userdata.db from backup: $e',
-              e,
-              st,
-            );
-            return (
-              restoredFromBackup: false,
-              resetEmpty: false,
-              safeReadOnly: true,
-              error: e.toString(),
-            );
+        // Step 4: Rename verified copy into place; roll back quarantine if rename fails.
+        try {
+          final stagedFile = File(restoringPath);
+          if (restoreHooks?.renameIntoPlace != null) {
+            restoreHooks!.renameIntoPlace!(stagedFile, userDataPath);
+          } else {
+            stagedFile.renameSync(userDataPath);
           }
+          log.warning(
+            'Database',
+            'Restored userdata.db from backup ${p.basename(validBackup.path)}',
+          );
+          return (
+            restoredFromBackup: true,
+            resetEmpty: false,
+            safeReadOnly: false,
+            error: null,
+          );
+        } catch (e, st) {
+          _rollbackQuarantine(quarantinedBase, userDataPath, log: log);
+          _deleteTempFileIfExists(restoringPath);
+          log.error(
+            'Database',
+            'Failed renaming verified backup into place: $e',
+            e,
+            st,
+          );
+          return (
+            restoredFromBackup: false,
+            resetEmpty: false,
+            safeReadOnly: true,
+            error: 'Backup rename failed: $e',
+          );
         }
-
-        log.warning(
-          'Database',
-          'No valid userdata backup found; starting with an empty userdata.db',
-        );
-        return (
-          restoredFromBackup: false,
-          resetEmpty: true,
-          safeReadOnly: false,
-          error: qc.error,
-        );
     }
   }
 
@@ -345,7 +447,77 @@ class DatabaseProtection {
     }
   }
 
-  static bool _quarantineDatabaseFiles(
+  static void _cleanupLeftoverRestoringFiles(
+    String userDataPath, {
+    required AppLogger log,
+  }) {
+    final parent = File(userDataPath).parent;
+    if (!parent.existsSync()) return;
+    final baseName = p.basename(userDataPath);
+    final pattern = RegExp(
+      '^${RegExp.escape(baseName)}\\.restoring-\\d{8}-\\d{6}(?:-\\d+)?\$',
+    );
+    try {
+      for (final entity in parent.listSync()) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (pattern.hasMatch(name)) {
+          try {
+            entity.deleteSync();
+            log.info('Database', 'Removed leftover restore temp file: $name');
+          } catch (e) {
+            log.warning(
+              'Database',
+              'Failed removing leftover restore temp file $name: $e',
+            );
+          }
+        }
+      }
+    } catch (e) {
+      log.warning('Database', 'Failed scanning for leftover restore files: $e');
+    }
+  }
+
+  static void _deleteTempFileIfExists(String path) {
+    try {
+      final f = File(path);
+      if (f.existsSync()) {
+        f.deleteSync();
+      }
+    } catch (_) {}
+  }
+
+  static void _rollbackQuarantine(
+    String quarantinedBase,
+    String userDataPath, {
+    required AppLogger log,
+  }) {
+    if (quarantinedBase.isEmpty) return;
+    try {
+      final quarantinedMain = File(quarantinedBase);
+      if (quarantinedMain.existsSync() && !File(userDataPath).existsSync()) {
+        quarantinedMain.renameSync(userDataPath);
+      }
+      for (final suffix in const ['-wal', '-shm']) {
+        final qSide = File('$quarantinedBase$suffix');
+        final origSide = File('$userDataPath$suffix');
+        if (qSide.existsSync() && !origSide.existsSync()) {
+          try {
+            qSide.renameSync(origSide.path);
+          } catch (_) {}
+        }
+      }
+    } catch (e, st) {
+      log.error(
+        'Database',
+        'Failed rolling back quarantine for $userDataPath: $e',
+        e,
+        st,
+      );
+    }
+  }
+
+  static String? _quarantineDatabaseFiles(
     String dbPath, {
     required DateTime now,
     required AppLogger log,
@@ -357,8 +529,10 @@ class DatabaseProtection {
         targetBase = '$dbPath.corrupt-$stamp-${now.millisecond}';
       }
       final mainFile = File(dbPath);
+      var movedMain = false;
       if (mainFile.existsSync()) {
         mainFile.renameSync(targetBase);
+        movedMain = true;
       }
       for (final suffix in const ['-wal', '-shm']) {
         final sidecar = File('$dbPath$suffix');
@@ -368,10 +542,10 @@ class DatabaseProtection {
           } catch (_) {}
         }
       }
-      return true;
+      return movedMain ? targetBase : '';
     } catch (e, st) {
       log.error('Database', 'Failed quarantining $dbPath: $e', e, st);
-      return false;
+      return null;
     }
   }
 

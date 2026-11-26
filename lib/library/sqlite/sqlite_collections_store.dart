@@ -1,5 +1,6 @@
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/sqlite_row_mappers.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
@@ -37,9 +38,10 @@ class SqliteCollectionsStore {
     final u = _userSchema();
     if (value) {
       final now = DateTime.now().millisecondsSinceEpoch;
+      final key = FilePathUtils.canonicalKey(path);
       _db.execute(
-        'INSERT OR REPLACE INTO $u.favorites (path, added_at_ms) VALUES (?, ?);',
-        [path, now],
+        'INSERT OR REPLACE INTO $u.favorites (path, added_at_ms, path_key) VALUES (?, ?, ?);',
+        [path, now, key],
       );
     } else {
       _db.execute(
@@ -83,9 +85,10 @@ class SqliteCollectionsStore {
       _db.execute('DELETE FROM $u.ratings WHERE path = ?;', [path]);
     } else {
       final now = DateTime.now().millisecondsSinceEpoch;
+      final key = FilePathUtils.canonicalKey(path);
       _db.execute(
-        'INSERT OR REPLACE INTO $u.ratings (path, stars, rated_at_ms) VALUES (?, ?, ?);',
-        [path, stars, now],
+        'INSERT OR REPLACE INTO $u.ratings (path, stars, rated_at_ms, path_key) VALUES (?, ?, ?, ?);',
+        [path, stars, now, key],
       );
     }
   }
@@ -308,11 +311,11 @@ class SqliteCollectionsStore {
 
       final now = DateTime.now().millisecondsSinceEpoch;
       final stmt = _db.prepare(
-        'INSERT INTO $u.playlist_items (playlist_id, position, path, added_at_ms) VALUES (?, ?, ?, ?);',
+        'INSERT INTO $u.playlist_items (playlist_id, position, path, added_at_ms, path_key) VALUES (?, ?, ?, ?, ?);',
       );
       try {
         for (final p in paths) {
-          stmt.execute([id, nextPos++, p, now]);
+          stmt.execute([id, nextPos++, p, now, FilePathUtils.canonicalKey(p)]);
         }
       } finally {
         stmt.close();

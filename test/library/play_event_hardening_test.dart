@@ -14,6 +14,7 @@ import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/userdata_migrator.dart';
 import 'package:aestheticy/library/sqlite_library_repository.dart';
+import 'package:aestheticy/library/startup_identity_reconciler.dart';
 
 void main() {
   group('Play-Event Log Hardening (S3)', () {
@@ -89,6 +90,7 @@ void main() {
           addedAt: DateTime.utc(2026, 11, 20),
         ),
       ]);
+      await repo.reconcileTrackIdentities();
 
       final engine = FakeAudioEngine();
       final queue = PlaybackQueue();
@@ -198,6 +200,7 @@ void main() {
           addedAt: DateTime.utc(2026, 11, 20),
         ),
       ]);
+      await repo1.reconcileTrackIdentities();
 
       final engine = FakeAudioEngine();
       final controller = PlaybackController(
@@ -294,7 +297,8 @@ void main() {
       expect(indexes, contains('idx_play_events_started_at_ms'));
       expect(indexes, contains('idx_play_events_track_uid'));
 
-      // Legacy event got backfilled track_uid automatically on startup
+      // Run post-startup identity backfill reconcile once tracks/library are ready
+      await StartupIdentityReconciler(repository: repo).runOnce();
       final uidA = await repo.resolveTrackUid('C:\\Music\\track_a.mp3');
       expect(uidA, isNotNull);
       final backfilled = (await repo.recentPlayEvents()).single;

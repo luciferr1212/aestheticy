@@ -3,8 +3,23 @@ library;
 
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/library/file_path_utils.dart';
+
 /// Current schema version for `userdata.db`.
-const int kUserDataSchemaVersion = 2;
+const int kUserDataSchemaVersion = 3;
+
+/// Thrown when the mandatory pre-migration backup before upgrading `userdata.db`
+/// fails, signaling callers to enter [UserDataAccessMode.safeReadOnly].
+class UserDataUpgradeBackupException implements Exception {
+  /// Diagnostic description of the backup failure.
+  final String message;
+
+  /// Creates a [UserDataUpgradeBackupException].
+  const UserDataUpgradeBackupException(this.message);
+
+  @override
+  String toString() => 'UserDataUpgradeBackupException($message)';
+}
 
 /// Ordered list of user-data tables stored in `userdata.db`.
 ///
@@ -45,6 +60,9 @@ class UserDataMigrator {
     }
     if (currentVersion < 2) {
       _migrateToV2(db);
+    }
+    if (currentVersion < 3) {
+      _migrateToV3(db);
     }
   }
 
@@ -228,6 +246,149 @@ class UserDataMigrator {
     } catch (e) {
       db.execute('ROLLBACK;');
       rethrow;
+    }
+  }
+
+  /// Adds canonical key columns (`path_key`, `uri_key`) and their indexes across
+  /// `favorites`, `ratings`, `playlist_items`, `play_events`, and
+  /// `track_identity` idempotently.
+  static void createV3SchemaStatements(Database db) {
+    _addColumnIfMissing(db, 'favorites', 'path_key', 'TEXT');
+    _addColumnIfMissing(db, 'ratings', 'path_key', 'TEXT');
+    _addColumnIfMissing(db, 'playlist_items', 'path_key', 'TEXT');
+    _addColumnIfMissing(db, 'play_events', 'uri_key', 'TEXT');
+    _addColumnIfMissing(db, 'track_identity', 'path_key', 'TEXT');
+
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_favorites_path_key '
+      'ON favorites(path_key);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_ratings_path_key '
+      'ON ratings(path_key);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_playlist_items_path_key '
+      'ON playlist_items(path_key);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_play_events_uri_key '
+      'ON play_events(uri_key);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS userdata.idx_track_identity_path_key '
+      'ON track_identity(path_key);',
+    );
+  }
+
+  static void _addColumnIfMissing(
+    Database db,
+    String table,
+    String column,
+    String typeDef,
+  ) {
+    final existingCols = db
+        .select('PRAGMA userdata.table_info($table);')
+        .map((r) => r['name'] as String)
+        .toSet();
+    if (!existingCols.contains(column)) {
+      db.execute('ALTER TABLE userdata.$table ADD COLUMN $column $typeDef;');
+    }
+  }
+
+  static void _migrateToV3(Database db, {int batchSize = 2000}) {
+    db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      createV3SchemaStatements(db);
+      db.execute('COMMIT;');
+    } catch (e) {
+      db.execute('ROLLBACK;');
+      rethrow;
+    }
+
+    _backfillKeyColumnInBatches(
+      db,
+      table: 'favorites',
+      pathCol: 'path',
+      keyCol: 'path_key',
+      batchSize: batchSize,
+    );
+    _backfillKeyColumnInBatches(
+      db,
+      table: 'ratings',
+      pathCol: 'path',
+      keyCol: 'path_key',
+      batchSize: batchSize,
+    );
+    _backfillKeyColumnInBatches(
+      db,
+      table: 'playlist_items',
+      pathCol: 'path',
+      keyCol: 'path_key',
+      batchSize: batchSize,
+    );
+    _backfillKeyColumnInBatches(
+      db,
+      table: 'play_events',
+      pathCol: 'uri',
+      keyCol: 'uri_key',
+      batchSize: batchSize,
+    );
+    _backfillKeyColumnInBatches(
+      db,
+      table: 'track_identity',
+      pathCol: 'path',
+      keyCol: 'path_key',
+      batchSize: batchSize,
+    );
+
+    db.execute('BEGIN IMMEDIATE TRANSACTION;');
+    try {
+      db.execute('PRAGMA userdata.user_version = 3;');
+      db.execute('COMMIT;');
+    } catch (e) {
+      db.execute('ROLLBACK;');
+      rethrow;
+    }
+  }
+
+  static void _backfillKeyColumnInBatches(
+    Database db, {
+    required String table,
+    required String pathCol,
+    required String keyCol,
+    required int batchSize,
+  }) {
+    while (true) {
+      final rows = db.select(
+        '''
+        SELECT rowid AS row_id, $pathCol AS raw_path
+        FROM userdata.$table
+        WHERE $keyCol IS NULL
+        LIMIT ?;
+        ''',
+        [batchSize],
+      );
+      if (rows.isEmpty) break;
+
+      db.execute('BEGIN IMMEDIATE TRANSACTION;');
+      try {
+        final stmt = db.prepare(
+          'UPDATE userdata.$table SET $keyCol = ? WHERE rowid = ?;',
+        );
+        try {
+          for (final row in rows) {
+            final key = FilePathUtils.canonicalKey(row['raw_path'] as String);
+            stmt.execute([key, row['row_id'] as int]);
+          }
+        } finally {
+          stmt.close();
+        }
+        db.execute('COMMIT;');
+      } catch (e) {
+        db.execute('ROLLBACK;');
+        rethrow;
+      }
     }
   }
 }

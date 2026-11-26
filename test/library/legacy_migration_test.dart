@@ -451,5 +451,127 @@ void main() {
       expect(tables, containsAll(kUserDataTables));
       verifyDb.close();
     });
+
+    test(
+        'S4: pre-split backup falls back from VACUUM INTO to checkpoint+copy cleanly',
+        () async {
+      final libPath = p.join(tempDir.path, 'library.db');
+      final backupsDir = Directory(p.join(tempDir.path, 'backups'));
+      _seedLegacyV4Db(libPath);
+
+      final repo = SqliteLibraryRepository.openFile(
+        libPath,
+        backupsDir: backupsDir,
+        clock: () => DateTime.utc(2026, 11, 26, 15, 0, 0),
+        migrationHooks: LegacyMigrationTestHooks(
+          forceVacuumFailure: () => true,
+        ),
+      );
+      addTearDown(repo.close);
+
+      expect(repo.userDataAccessMode, equals(UserDataAccessMode.normal));
+      expect(repo.userDataSchema, equals('userdata'));
+      expect(await repo.favoritePaths(), equals({'C:\\Music\\song1.flac'}));
+      expect(await repo.playEventCount(), equals(2));
+
+      final backupDirs = backupsDir
+          .listSync()
+          .whereType<Directory>()
+          .where((d) => p.basename(d.path).startsWith('pre-split-'))
+          .toList();
+      expect(backupDirs, hasLength(1));
+
+      final backupDb = sqlite3.open(p.join(backupDirs.single.path, 'library.db'));
+      expect(
+        backupDb.select('SELECT COUNT(*) AS c FROM favorites;').single['c'],
+        equals(1),
+      );
+      expect(
+        backupDb.select('SELECT COUNT(*) AS c FROM ratings;').single['c'],
+        equals(2),
+      );
+      expect(
+        backupDb.select('SELECT COUNT(*) AS c FROM play_events;').single['c'],
+        equals(2),
+      );
+      backupDb.close();
+    });
+
+    test(
+        'S4: pre-split backup row-count mismatch aborts migration into safeReadOnly',
+        () async {
+      final libPath = p.join(tempDir.path, 'library.db');
+      final userPath = p.join(tempDir.path, 'userdata.db');
+      final backupsDir = Directory(p.join(tempDir.path, 'backups'));
+      _seedLegacyV4Db(libPath);
+
+      final repo = SqliteLibraryRepository.openFile(
+        libPath,
+        userDataPath: userPath,
+        backupsDir: backupsDir,
+        migrationHooks: LegacyMigrationTestHooks(
+          forceBackupRowCountMismatch: () => true,
+        ),
+      );
+      addTearDown(repo.close);
+
+      expect(repo.userDataAccessMode, equals(UserDataAccessMode.safeReadOnly));
+      expect(repo.userDataSchema, equals('main'));
+      expect(await repo.favoritePaths(), equals({'C:\\Music\\song1.flac'}));
+
+      // Legacy tables remain intact on library.db.
+      final verifyDb = sqlite3.open(libPath);
+      final tables = verifyDb
+          .select("SELECT name FROM sqlite_master WHERE type = 'table';")
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(tables, containsAll(kUserDataTables));
+      verifyDb.close();
+    });
+
+    test(
+        'S4: full-row checksum catches non-PK column drift on copied_verified recovery',
+        () async {
+      final libPath = p.join(tempDir.path, 'library.db');
+      final userPath = p.join(tempDir.path, 'userdata.db');
+      final backupsDir = Directory(p.join(tempDir.path, 'backups'));
+      _seedLegacyV4Db(libPath);
+
+      // Interrupt right after copied_verified so userdata.db has copied rows.
+      expect(
+        () => SqliteLibraryRepository.openFile(
+          libPath,
+          userDataPath: userPath,
+          backupsDir: backupsDir,
+          migrationHooks: LegacyMigrationTestHooks(
+            onAfterCopyCommit: () =>
+                throw const SimulatedCrashException('after_copy_commit'),
+          ),
+        ),
+        throwsA(isA<SimulatedCrashException>()),
+      );
+
+      // Corrupt a non-PK column in userdata.ratings while preserving PK and count.
+      final userDb = sqlite3.open(userPath);
+      userDb.execute(
+        "UPDATE ratings SET stars = 2 WHERE path = 'C:\\Music\\song1.flac';",
+      );
+      userDb.close();
+
+      // Recovery must detect the full-row checksum mismatch, re-copy from main,
+      // and restore stars = 5 before completing the migration.
+      final recovered = SqliteLibraryRepository.openFile(
+        libPath,
+        userDataPath: userPath,
+        backupsDir: backupsDir,
+      );
+      addTearDown(recovered.close);
+
+      expect(recovered.userDataAccessMode, equals(UserDataAccessMode.normal));
+      expect(recovered.userDataSchema, equals('userdata'));
+      final ratings = await recovered.allRatings();
+      expect(ratings['C:\\Music\\song1.flac'], equals(5));
+      expect(ratings['C:\\Music\\low.flac'], equals(1));
+    });
   });
 }

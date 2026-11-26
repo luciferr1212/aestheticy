@@ -1,5 +1,5 @@
 /// SQLite store for stable `userdata.track_identity` records, reconciliation,
-/// backfill, and move/rename relinking.
+/// backfill, and indexed move/rename relinking.
 library;
 
 import 'dart:math';
@@ -33,7 +33,73 @@ class _TrackCandidate {
   });
 }
 
-/// Internal SQLite store managing `userdata.track_identity` and relinking.
+class _RelinkStatements {
+  final PreparedStatement updateIdentity;
+  final PreparedStatement selectFav;
+  final PreparedStatement deleteFav;
+  final PreparedStatement insertFav;
+  final PreparedStatement selectRating;
+  final PreparedStatement deleteRating;
+  final PreparedStatement insertRating;
+  final PreparedStatement updatePlaylist;
+  final PreparedStatement updatePlayEventsByKey;
+  final PreparedStatement updatePlayEventsByUid;
+
+  _RelinkStatements(Database db)
+      : updateIdentity = db.prepare('''
+          UPDATE userdata.track_identity
+          SET path = ?, path_key = ?, size_bytes = ?, duration_ms = ?,
+              title_key = ?, artist_key = ?, album_key = ?,
+              last_seen_ms = ?, missing_since_ms = NULL
+          WHERE uid = ?;
+        '''),
+        selectFav = db.prepare(
+          'SELECT path, added_at_ms FROM userdata.favorites WHERE path_key IN (?, ?);',
+        ),
+        deleteFav = db.prepare(
+          'DELETE FROM userdata.favorites WHERE path_key IN (?, ?);',
+        ),
+        insertFav = db.prepare(
+          'INSERT OR REPLACE INTO userdata.favorites (path, added_at_ms, path_key) VALUES (?, ?, ?);',
+        ),
+        selectRating = db.prepare(
+          'SELECT path, stars, rated_at_ms FROM userdata.ratings WHERE path_key IN (?, ?);',
+        ),
+        deleteRating = db.prepare(
+          'DELETE FROM userdata.ratings WHERE path_key IN (?, ?);',
+        ),
+        insertRating = db.prepare(
+          'INSERT OR REPLACE INTO userdata.ratings (path, stars, rated_at_ms, path_key) VALUES (?, ?, ?, ?);',
+        ),
+        updatePlaylist = db.prepare(
+          'UPDATE userdata.playlist_items SET path = ?, path_key = ? WHERE path_key = ?;',
+        ),
+        updatePlayEventsByKey = db.prepare('''
+          UPDATE userdata.play_events
+          SET uri = ?, uri_key = ?, track_uid = COALESCE(track_uid, ?)
+          WHERE uri_key = ?;
+        '''),
+        updatePlayEventsByUid = db.prepare('''
+          UPDATE userdata.play_events
+          SET uri = ?, uri_key = ?
+          WHERE track_uid = ? AND (uri_key IS NULL OR uri_key != ?);
+        ''');
+
+  void dispose() {
+    updateIdentity.close();
+    selectFav.close();
+    deleteFav.close();
+    insertFav.close();
+    selectRating.close();
+    deleteRating.close();
+    insertRating.close();
+    updatePlaylist.close();
+    updatePlayEventsByKey.close();
+    updatePlayEventsByUid.close();
+  }
+}
+
+/// Internal SQLite store managing `userdata.track_identity` and indexed relinking.
 class SqliteIdentityStore {
   static final Random _secureRandom = Random.secure();
 
@@ -77,10 +143,15 @@ class SqliteIdentityStore {
     if (!_hasTable(u, 'track_identity')) return null;
     final canonical = FilePathUtils.canonicalKey(path);
     if (canonical.isEmpty) return null;
-    final rows = _db.select(
-      'SELECT uid FROM $u.track_identity WHERE normalize_file_path(path) = ? LIMIT 1;',
-      [canonical],
-    );
+    final rows = _hasColumn(u, 'track_identity', 'path_key')
+        ? _db.select(
+            'SELECT uid FROM $u.track_identity WHERE path_key = ? LIMIT 1;',
+            [canonical],
+          )
+        : _db.select(
+            'SELECT uid FROM $u.track_identity WHERE normalize_file_path(path) = ? LIMIT 1;',
+            [canonical],
+          );
     if (rows.isEmpty) return null;
     return rows.first['uid'] as String;
   }
@@ -114,14 +185,14 @@ class SqliteIdentityStore {
       final existingByCanonical = _loadIdentityByCanonical();
       final insertStmt = _db.prepare('''
         INSERT INTO userdata.track_identity (
-          uid, path, size_bytes, duration_ms, title_key, artist_key,
+          uid, path, path_key, size_bytes, duration_ms, title_key, artist_key,
           album_key, first_seen_ms, last_seen_ms, missing_since_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
       ''');
       final updateStmt = _db.prepare('''
         UPDATE userdata.track_identity
-        SET path = ?, size_bytes = ?, duration_ms = ?, title_key = ?,
-            artist_key = ?, album_key = ?, last_seen_ms = ?,
+        SET path = ?, path_key = ?, size_bytes = ?, duration_ms = ?,
+            title_key = ?, artist_key = ?, album_key = ?, last_seen_ms = ?,
             missing_since_ms = NULL
         WHERE uid = ?;
       ''');
@@ -138,6 +209,7 @@ class SqliteIdentityStore {
           if (existing != null) {
             updateStmt.execute([
               track.path,
+              canonical,
               track.sizeBytes,
               track.durationMs,
               titleKey,
@@ -151,6 +223,7 @@ class SqliteIdentityStore {
             insertStmt.execute([
               uid,
               track.path,
+              canonical,
               track.sizeBytes,
               track.durationMs,
               titleKey,
@@ -185,14 +258,9 @@ class SqliteIdentityStore {
   }
 
   /// Reconciles `userdata.track_identity` against `main.tracks` and user-data
-  /// tables (`favorites`, `ratings`, `playlist_items`, `play_events`):
-  /// - Refreshes matched paths and clears `missing_since_ms`.
-  /// - Relinks moved/renamed tracks when a unique size+duration or tag+duration
-  ///   (<= 1500 ms) candidate exists, updating all user tables atomically in
-  ///   one `userdata` transaction.
-  /// - Marks remaining missing identities with `missing_since_ms` when
-  ///   [markUnmatchedMissing] is `true` without deleting any user data.
-  /// - Creates identities for new tracks and backfills paths + `play_events.track_uid`.
+  /// tables (`favorites`, `ratings`, `playlist_items`, `play_events`) using
+  /// indexed key columns in a single `userdata` transaction with prepared
+  /// statements.
   Future<RelinkReport> reconcileIdentities({
     DateTime? now,
     bool markUnmatchedMissing = true,
@@ -203,7 +271,7 @@ class SqliteIdentityStore {
     );
   }
 
-  /// Synchronous variant of [reconcileIdentities] for startup initialization.
+  /// Synchronous variant of [reconcileIdentities].
   RelinkReport reconcileIdentitiesSync({
     DateTime? now,
     bool markUnmatchedMissing = true,
@@ -236,17 +304,21 @@ class SqliteIdentityStore {
     }
 
     final identityRows = _db.select('''
-      SELECT uid, path, size_bytes, duration_ms, title_key, artist_key,
-             album_key, first_seen_ms, last_seen_ms, missing_since_ms
+      SELECT uid, path, path_key, size_bytes, duration_ms, title_key,
+             artist_key, album_key, first_seen_ms, last_seen_ms, missing_since_ms
       FROM userdata.track_identity;
-    ''').map(_mapIdentity).toList();
+    ''');
 
     final matchedTracks = <(TrackIdentity, _TrackCandidate)>[];
     final missingIdentities = <TrackIdentity>[];
     final matchedCanonicals = <String>{};
 
-    for (final identity in identityRows) {
-      final canonical = FilePathUtils.canonicalKey(identity.path);
+    for (final row in identityRows) {
+      final identity = _mapIdentity(row);
+      final storedKey = row['path_key'] as String?;
+      final canonical = (storedKey != null && storedKey.isNotEmpty)
+          ? storedKey
+          : FilePathUtils.canonicalKey(identity.path);
       final matched = tracksByCanonical[canonical];
       if (matched != null) {
         matchedTracks.add((identity, matched));
@@ -260,7 +332,29 @@ class SqliteIdentityStore {
         .where((t) => !matchedCanonicals.contains(t.canonicalPath))
         .toList();
 
-    // Compute unique relink proposals from missingIdentities -> unmatchedNewTracks.
+    // Index unmatched new candidates in memory for O(1) rule lookups.
+    final bySizeAndDuration = <(int, int), List<_TrackCandidate>>{};
+    final byTagTriple = <(String, String?, String?), List<_TrackCandidate>>{};
+    for (final candidate in unmatchedNewTracks) {
+      if (candidate.sizeBytes > 0 && candidate.durationMs > 0) {
+        bySizeAndDuration
+            .putIfAbsent(
+              (candidate.sizeBytes, candidate.durationMs),
+              () => [],
+            )
+            .add(candidate);
+      }
+      final title = candidate.titleKey;
+      if (title != null && title.isNotEmpty) {
+        byTagTriple
+            .putIfAbsent(
+              (title, candidate.artistKey, candidate.albumKey),
+              () => [],
+            )
+            .add(candidate);
+      }
+    }
+
     final proposedTargetByUid = <String, _TrackCandidate>{};
     final proposersByTargetCanonical = <String, List<TrackIdentity>>{};
     var ambiguousCount = 0;
@@ -273,13 +367,9 @@ class SqliteIdentityStore {
           missing.sizeBytes! > 0 &&
           missing.durationMs != null &&
           missing.durationMs! > 0) {
-        final sizeDurMatches = unmatchedNewTracks
-            .where(
-              (t) =>
-                  t.sizeBytes == missing.sizeBytes &&
-                  t.durationMs == missing.durationMs,
-            )
-            .toList();
+        final sizeDurMatches =
+            bySizeAndDuration[(missing.sizeBytes!, missing.durationMs!)] ??
+                const <_TrackCandidate>[];
         if (sizeDurMatches.length == 1) {
           chosen = sizeDurMatches.single;
         } else if (sizeDurMatches.length > 1) {
@@ -297,12 +387,12 @@ class SqliteIdentityStore {
           missing.titleKey != null &&
           missing.titleKey!.isNotEmpty &&
           missing.durationMs != null) {
-        final tagMatches = unmatchedNewTracks.where((t) {
-          if (t.titleKey != missing.titleKey) return false;
-          if (t.artistKey != missing.artistKey) return false;
-          if (t.albumKey != missing.albumKey) return false;
-          return (t.durationMs - missing.durationMs!).abs() <= 1500;
-        }).toList();
+        final tripleCandidates =
+            byTagTriple[(missing.titleKey!, missing.artistKey, missing.albumKey)] ??
+                const <_TrackCandidate>[];
+        final tagMatches = tripleCandidates
+            .where((t) => (t.durationMs - missing.durationMs!).abs() <= 1500)
+            .toList();
         if (tagMatches.length == 1) {
           chosen = tagMatches.single;
         } else if (tagMatches.length > 1) {
@@ -359,39 +449,50 @@ class SqliteIdentityStore {
     _db.execute('BEGIN IMMEDIATE TRANSACTION;');
     try {
       // 1. Refresh matched tracks (and clear missing_since_ms).
-      final refreshStmt = _db.prepare('''
-        UPDATE userdata.track_identity
-        SET path = ?, size_bytes = ?, duration_ms = ?, title_key = ?,
-            artist_key = ?, album_key = ?, last_seen_ms = ?,
-            missing_since_ms = NULL
-        WHERE uid = ?;
-      ''');
-      try {
-        for (final (identity, track) in matchedTracks) {
-          refreshStmt.execute([
-            track.path,
-            track.sizeBytes,
-            track.durationMs,
-            track.titleKey,
-            track.artistKey,
-            track.albumKey,
-            nowMs,
-            identity.uid,
-          ]);
-          refreshedCount++;
+      if (matchedTracks.isNotEmpty) {
+        final refreshStmt = _db.prepare('''
+          UPDATE userdata.track_identity
+          SET path = ?, path_key = ?, size_bytes = ?, duration_ms = ?,
+              title_key = ?, artist_key = ?, album_key = ?, last_seen_ms = ?,
+              missing_since_ms = NULL
+          WHERE uid = ?;
+        ''');
+        try {
+          for (final (identity, track) in matchedTracks) {
+            refreshStmt.execute([
+              track.path,
+              track.canonicalPath,
+              track.sizeBytes,
+              track.durationMs,
+              track.titleKey,
+              track.artistKey,
+              track.albumKey,
+              nowMs,
+              identity.uid,
+            ]);
+            refreshedCount++;
+          }
+        } finally {
+          refreshStmt.close();
         }
-      } finally {
-        refreshStmt.close();
       }
 
-      // 2. Apply unique relinks atomically across track_identity & all user tables.
-      for (final item in relinks) {
-        _applyRelinkInTx(
-          identity: item.identity,
-          target: item.target,
-          nowMs: nowMs,
-        );
-        relinkedCount++;
+      // 2. Apply all unique relinks using indexed equality and prepared statements.
+      if (relinks.isNotEmpty) {
+        final stmts = _RelinkStatements(_db);
+        try {
+          for (final item in relinks) {
+            _applyRelinkInTx(
+              stmts: stmts,
+              identity: item.identity,
+              target: item.target,
+              nowMs: nowMs,
+            );
+            relinkedCount++;
+          }
+        } finally {
+          stmts.dispose();
+        }
       }
 
       // 3. Mark un-relinked missing identities without deleting any user data.
@@ -417,15 +518,16 @@ class SqliteIdentityStore {
       if (remainingNewTracks.isNotEmpty) {
         final insertStmt = _db.prepare('''
           INSERT INTO userdata.track_identity (
-            uid, path, size_bytes, duration_ms, title_key, artist_key,
+            uid, path, path_key, size_bytes, duration_ms, title_key, artist_key,
             album_key, first_seen_ms, last_seen_ms, missing_since_ms
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
         ''');
         try {
           for (final track in remainingNewTracks) {
             insertStmt.execute([
               generateUid(),
               track.path,
+              track.canonicalPath,
               track.sizeBytes,
               track.durationMs,
               track.titleKey,
@@ -441,7 +543,7 @@ class SqliteIdentityStore {
         }
       }
 
-      // 5. Backfill any existing paths in favorites, ratings, playlist_items, play_events.
+      // 5. Backfill unlinked user paths & play_events.track_uid via indexed keys.
       backfilledCount = _backfillUserPathsInTx(nowMs: nowMs);
 
       _db.execute('COMMIT;');
@@ -461,6 +563,7 @@ class SqliteIdentityStore {
   }
 
   void _applyRelinkInTx({
+    required _RelinkStatements stmts,
     required TrackIdentity identity,
     required _TrackCandidate target,
     required int nowMs,
@@ -469,61 +572,43 @@ class SqliteIdentityStore {
     final newCanonical = target.canonicalPath;
     final newPath = target.path;
 
-    _db.execute(
-      '''
-      UPDATE userdata.track_identity
-      SET path = ?, size_bytes = ?, duration_ms = ?, title_key = ?,
-          artist_key = ?, album_key = ?, last_seen_ms = ?,
-          missing_since_ms = NULL
-      WHERE uid = ?;
-      ''',
-      [
-        newPath,
-        target.sizeBytes,
-        target.durationMs,
-        target.titleKey,
-        target.artistKey,
-        target.albumKey,
-        nowMs,
-        identity.uid,
-      ],
-    );
+    stmts.updateIdentity.execute([
+      newPath,
+      newCanonical,
+      target.sizeBytes,
+      target.durationMs,
+      target.titleKey,
+      target.artistKey,
+      target.albumKey,
+      nowMs,
+      identity.uid,
+    ]);
 
-    _relinkFavoritesInTx(oldCanonical, newCanonical, newPath);
-    _relinkRatingsInTx(oldCanonical, newCanonical, newPath);
+    _relinkFavoritesInTx(stmts, oldCanonical, newCanonical, newPath);
+    _relinkRatingsInTx(stmts, oldCanonical, newCanonical, newPath);
 
-    _db.execute(
-      '''
-      UPDATE userdata.playlist_items
-      SET path = ?
-      WHERE normalize_file_path(path) = ?;
-      ''',
-      [newPath, oldCanonical],
-    );
-
-    _db.execute(
-      '''
-      UPDATE userdata.play_events
-      SET uri = ?, track_uid = COALESCE(track_uid, ?)
-      WHERE normalize_file_path(uri) = ? OR track_uid = ?;
-      ''',
-      [newPath, identity.uid, oldCanonical, identity.uid],
-    );
+    stmts.updatePlaylist.execute([newPath, newCanonical, oldCanonical]);
+    stmts.updatePlayEventsByKey.execute([
+      newPath,
+      newCanonical,
+      identity.uid,
+      oldCanonical,
+    ]);
+    stmts.updatePlayEventsByUid.execute([
+      newPath,
+      newCanonical,
+      identity.uid,
+      newCanonical,
+    ]);
   }
 
   void _relinkFavoritesInTx(
+    _RelinkStatements stmts,
     String oldCanonical,
     String newCanonical,
     String newPath,
   ) {
-    final rows = _db.select(
-      '''
-      SELECT path, added_at_ms
-      FROM userdata.favorites
-      WHERE normalize_file_path(path) IN (?, ?);
-      ''',
-      [oldCanonical, newCanonical],
-    );
+    final rows = stmts.selectFav.select([oldCanonical, newCanonical]);
     if (rows.isEmpty) return;
 
     var newestAddedAt = rows.first['added_at_ms'] as int;
@@ -532,29 +617,17 @@ class SqliteIdentityStore {
       if (ts > newestAddedAt) newestAddedAt = ts;
     }
 
-    _db.execute(
-      'DELETE FROM userdata.favorites WHERE normalize_file_path(path) IN (?, ?);',
-      [oldCanonical, newCanonical],
-    );
-    _db.execute(
-      'INSERT OR REPLACE INTO userdata.favorites (path, added_at_ms) VALUES (?, ?);',
-      [newPath, newestAddedAt],
-    );
+    stmts.deleteFav.execute([oldCanonical, newCanonical]);
+    stmts.insertFav.execute([newPath, newestAddedAt, newCanonical]);
   }
 
   void _relinkRatingsInTx(
+    _RelinkStatements stmts,
     String oldCanonical,
     String newCanonical,
     String newPath,
   ) {
-    final rows = _db.select(
-      '''
-      SELECT path, stars, rated_at_ms
-      FROM userdata.ratings
-      WHERE normalize_file_path(path) IN (?, ?);
-      ''',
-      [oldCanonical, newCanonical],
-    );
+    final rows = stmts.selectRating.select([oldCanonical, newCanonical]);
     if (rows.isEmpty) return;
 
     var bestStars = rows.first['stars'] as int;
@@ -567,74 +640,88 @@ class SqliteIdentityStore {
       }
     }
 
-    _db.execute(
-      'DELETE FROM userdata.ratings WHERE normalize_file_path(path) IN (?, ?);',
-      [oldCanonical, newCanonical],
-    );
-    _db.execute(
-      'INSERT OR REPLACE INTO userdata.ratings (path, stars, rated_at_ms) VALUES (?, ?, ?);',
-      [newPath, bestStars, newestRatedAt],
-    );
+    stmts.deleteRating.execute([oldCanonical, newCanonical]);
+    stmts.insertRating.execute([newPath, bestStars, newestRatedAt, newCanonical]);
   }
 
   int _backfillUserPathsInTx({required int nowMs}) {
     final existingByCanonical = _loadIdentityByCanonical();
-    final referencedPaths = <String>{};
+    final referencedByKey = <String, String>{};
 
-    for (final r in _db.select('SELECT path FROM userdata.favorites;')) {
-      referencedPaths.add(r['path'] as String);
+    void collect(String rawPath, String? storedKey) {
+      final key = (storedKey != null && storedKey.isNotEmpty)
+          ? storedKey
+          : FilePathUtils.canonicalKey(rawPath);
+      if (key.isNotEmpty) {
+        referencedByKey.putIfAbsent(key, () => rawPath);
+      }
     }
-    for (final r in _db.select('SELECT path FROM userdata.ratings;')) {
-      referencedPaths.add(r['path'] as String);
+
+    for (final r
+        in _db.select('SELECT path, path_key FROM userdata.favorites;')) {
+      collect(r['path'] as String, r['path_key'] as String?);
     }
-    for (final r in _db.select('SELECT DISTINCT path FROM userdata.playlist_items;')) {
-      referencedPaths.add(r['path'] as String);
+    for (final r
+        in _db.select('SELECT path, path_key FROM userdata.ratings;')) {
+      collect(r['path'] as String, r['path_key'] as String?);
     }
-    for (final r in _db.select('SELECT DISTINCT uri FROM userdata.play_events;')) {
-      referencedPaths.add(r['uri'] as String);
+    for (final r in _db.select(
+      'SELECT MIN(path) AS path, path_key FROM userdata.playlist_items GROUP BY path_key;',
+    )) {
+      collect(r['path'] as String, r['path_key'] as String?);
+    }
+
+    final unlinkedEventGroups = _db.select('''
+      SELECT MIN(uri) AS uri, uri_key
+      FROM userdata.play_events
+      WHERE track_uid IS NULL
+      GROUP BY uri_key;
+    ''');
+    for (final r in unlinkedEventGroups) {
+      collect(r['uri'] as String, r['uri_key'] as String?);
     }
 
     var created = 0;
-    final insertStmt = _db.prepare('''
-      INSERT INTO userdata.track_identity (
-        uid, path, size_bytes, duration_ms, title_key, artist_key,
-        album_key, first_seen_ms, last_seen_ms, missing_since_ms
-      ) VALUES (?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL);
-    ''');
-    try {
-      for (final rawPath in referencedPaths) {
-        final canonical = FilePathUtils.canonicalKey(rawPath);
-        if (canonical.isEmpty || existingByCanonical.containsKey(canonical)) {
-          continue;
+    final missingKeys = referencedByKey.entries
+        .where((e) => !existingByCanonical.containsKey(e.key))
+        .toList();
+    if (missingKeys.isNotEmpty) {
+      final insertStmt = _db.prepare('''
+        INSERT INTO userdata.track_identity (
+          uid, path, path_key, size_bytes, duration_ms, title_key, artist_key,
+          album_key, first_seen_ms, last_seen_ms, missing_since_ms
+        ) VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL);
+      ''');
+      try {
+        for (final entry in missingKeys) {
+          final uid = generateUid();
+          insertStmt.execute([uid, entry.value, entry.key, nowMs, nowMs]);
+          existingByCanonical[entry.key] = TrackIdentity(
+            uid: uid,
+            path: entry.value,
+            firstSeenMs: nowMs,
+            lastSeenMs: nowMs,
+          );
+          created++;
         }
-        final uid = generateUid();
-        insertStmt.execute([uid, rawPath, nowMs, nowMs]);
-        existingByCanonical[canonical] = TrackIdentity(
-          uid: uid,
-          path: rawPath,
-          firstSeenMs: nowMs,
-          lastSeenMs: nowMs,
-        );
-        created++;
+      } finally {
+        insertStmt.close();
       }
-    } finally {
-      insertStmt.close();
     }
 
-    // Backfill userdata.play_events.track_uid where NULL.
-    final nullUidEvents = _db.select(
-      'SELECT id, uri FROM userdata.play_events WHERE track_uid IS NULL;',
-    );
-    if (nullUidEvents.isNotEmpty) {
+    if (unlinkedEventGroups.isNotEmpty) {
       final updateEventStmt = _db.prepare(
-        'UPDATE userdata.play_events SET track_uid = ? WHERE id = ?;',
+        'UPDATE userdata.play_events SET track_uid = ? WHERE uri_key = ? AND track_uid IS NULL;',
       );
       try {
-        for (final row in nullUidEvents) {
-          final canonical = FilePathUtils.canonicalKey(row['uri'] as String);
-          final identity = existingByCanonical[canonical];
-          if (identity != null) {
-            updateEventStmt.execute([identity.uid, row['id'] as int]);
+        for (final row in unlinkedEventGroups) {
+          final rawKey = row['uri_key'] as String?;
+          final key = (rawKey != null && rawKey.isNotEmpty)
+              ? rawKey
+              : FilePathUtils.canonicalKey(row['uri'] as String);
+          final identity = existingByCanonical[key];
+          if (identity != null && rawKey != null) {
+            updateEventStmt.execute([identity.uid, rawKey]);
           }
         }
       } finally {
@@ -647,14 +734,17 @@ class SqliteIdentityStore {
 
   Map<String, TrackIdentity> _loadIdentityByCanonical() {
     final rows = _db.select('''
-      SELECT uid, path, size_bytes, duration_ms, title_key, artist_key,
-             album_key, first_seen_ms, last_seen_ms, missing_since_ms
+      SELECT uid, path, path_key, size_bytes, duration_ms, title_key,
+             artist_key, album_key, first_seen_ms, last_seen_ms, missing_since_ms
       FROM userdata.track_identity;
     ''');
     final map = <String, TrackIdentity>{};
     for (final row in rows) {
       final identity = _mapIdentity(row);
-      final canonical = FilePathUtils.canonicalKey(identity.path);
+      final storedKey = row['path_key'] as String?;
+      final canonical = (storedKey != null && storedKey.isNotEmpty)
+          ? storedKey
+          : FilePathUtils.canonicalKey(identity.path);
       if (canonical.isNotEmpty) {
         map.putIfAbsent(canonical, () => identity);
       }
@@ -668,6 +758,11 @@ class SqliteIdentityStore {
       [tableName],
     );
     return rows.isNotEmpty;
+  }
+
+  bool _hasColumn(String schema, String tableName, String colName) {
+    final rows = _db.select('PRAGMA $schema.table_info($tableName);');
+    return rows.any((r) => r['name'] == colName);
   }
 
   static TrackIdentity _mapIdentity(Row r) {

@@ -18,30 +18,30 @@ Starting with Foundation F1 (`ADR 0001`), storage is split into two SQLite files
 1. **`library.db` (`main`, `kLibrarySchemaVersion = 4`) — Rebuildable Library Index**
    - `folders`, `tracks`, `track_artists`.
    - Can be reset (`resetLibrary()`) or recreated after corruption without losing any user data.
-2. **`userdata.db` (`userdata`, `kUserDataSchemaVersion = 2`) — Precious User Data**
+2. **`userdata.db` (`userdata`, `kUserDataSchemaVersion = 3`) — Precious User Data**
    - `meta`, `track_identity`, `favorites`, `ratings`, `playlists`, `playlist_items`, `play_events`, `artist_aliases`, `artist_no_split`.
    - Foreign keys remain strictly single-file (`playlist_items.playlist_id -> playlists.id` inside `userdata.db`; `tracks.folder_id -> folders.id` and `track_artists.track_id -> tracks.id` inside `library.db`). No cross-file foreign keys exist, and every write transaction touches exactly one database file.
 
 ### Legacy Migration State Machine (`LegacyUserDataMigrator`)
 Existing single-file `library.db` installations are migrated once using a crash-recoverable state machine tracked in `userdata.meta` (`legacy_migration_state` = `none` | `copied_verified` | `complete`):
-1. **Backup first:** Checkpoints WAL and copies `library.db` into `<support dir>/Aestheticy/backups/pre-split-<yyyyMMdd-HHmmss>/library.db` verified by `PRAGMA quick_check`. Failure aborts migration and enters `UserDataAccessMode.safeReadOnly` reading legacy tables from `main`.
-2. **Copy & verify (`userdata`-only transaction):** Creates `userdata` v1 tables, clears any partial rows, copies all legacy user tables preserving IDs and timestamps, verifies per-table row counts and SHA-256 primary-key checksums inside the transaction, and sets `legacy_migration_state = 'copied_verified'`.
+1. **Backup first:** Snapshots `library.db` via `VACUUM main INTO` (with `wal_checkpoint(TRUNCATE)` + file copy fallback) into `<support dir>/Aestheticy/backups/pre-split-<yyyyMMdd-HHmmss>/library.db`, verifies `PRAGMA quick_check`, and compares row counts across `favorites`, `ratings`, `playlists`, `playlist_items`, and `play_events` between `main` and the backup. Failure aborts migration and enters `UserDataAccessMode.safeReadOnly` reading legacy tables from `main`.
+2. **Copy & verify (`userdata`-only transaction):** Creates `userdata` tables, clears any partial rows, copies intersecting columns from legacy user tables preserving IDs and timestamps (populating canonical `path_key`/`uri_key` columns), verifies per-table row counts and full-row SHA-256 checksums across all columns ordered by primary key inside the transaction, and sets `legacy_migration_state = 'copied_verified'`.
 3. **Rename (`main`-only transaction):** Renames legacy tables in `library.db` to `legacy_<name>` (`ALTER TABLE ... RENAME TO`, never dropped in this release).
 4. **Complete (`userdata`-only transaction):** Sets `legacy_migration_state = 'complete'` and `legacy_migrated = '1'`.
 
-On every startup before any repository use, `copied_verified` recovers automatically (re-verifying checksums or finishing rename/complete) with zero duplicated or lost rows.
+On every startup before any repository use, `copied_verified` recovers automatically (re-verifying counts and full-row checksums or finishing rename/complete) with zero duplicated or lost rows.
 
 ### WAL, Corruption Recovery & Safe Read-Only Mode
 - File-backed connections enable `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL` on both `main` and `userdata`.
-- Startup runs `PRAGMA quick_check` on each file before use:
+- Startup cleans any leftover `userdata.db.restoring-*` temporary files and runs `PRAGMA quick_check` on each file before use:
   - **Corrupt `library.db`:** Quarantined to `library.db.corrupt-<timestamp>`, recreated empty, a full rescan is triggered, and a localized notice is shown.
-  - **Corrupt `userdata.db`:** Quarantined to `userdata.db.corrupt-<timestamp>`, restored from the newest `PRAGMA quick_check`-verified backup in `backups/userdata/userdata-<yyyyMMdd>.db` (or started empty with a localized warning if no valid backup exists).
+  - **Corrupt `userdata.db`:** Picks the newest `PRAGMA quick_check`-verified backup in `backups/userdata/userdata-<yyyyMMdd>.db`, copies it to `userdata.db.restoring-<timestamp>`, verifies `PRAGMA quick_check` on the staged copy, and only then quarantines `userdata.db` (`userdata.db.corrupt-<timestamp>` + `-wal`/`-shm`) and renames the verified copy into place. Any copy, verification, or rename failure rolls back quarantine (if started), cleans up only the `.restoring-*` staging file, leaves the original file untouched, and enters `UserDataAccessMode.safeReadOnly` (if no valid backup exists, quarantines and starts a fresh empty `userdata.db` with a localized warning).
   - **Locked/unreadable `userdata.db` or failed migration/backup:** Enters `UserDataAccessMode.safeReadOnly` (`SafeReadOnlyBanner` with Open Logs / Open Backups actions). Playback, browsing, search, scanning/rescanning, settings, diagnostics, and reading user data remain allowed; user-data mutations are blocked with localized messages (play event recording skips silently with one warning log per run).
-- **Automatic Daily Backups (`UserDataBackupService`):** After the first frame (non-blocking) and right before any future `userdata.db` schema upgrade, `SqliteUserDataBackupService` writes at most one verified backup per calendar day (`VACUUM userdata INTO` with `wal_checkpoint` + copy fallback + `PRAGMA quick_check`) to `backups/userdata/userdata-<yyyyMMdd>.db` and retains the newest 5 files matching that exact pattern.
+- **Automatic Daily Backups (`UserDataBackupService`):** After the first frame (non-blocking) and right before any `userdata.db` schema upgrade, `SqliteUserDataBackupService` writes at most one verified backup per calendar day (`VACUUM userdata INTO` with `wal_checkpoint` + copy fallback + `PRAGMA quick_check`) to `backups/userdata/userdata-<yyyyMMdd>.db` and retains the newest 5 files matching that exact pattern. Pre-upgrade backup failure aborts the migration and enters `UserDataAccessMode.safeReadOnly`.
 
 ---
 
-## SQLite Database Schema (Library v4 / UserData v2)
+## SQLite Database Schema (Library v4 / UserData v3)
 
 ```text
 ┌───────────────────────────────┐
@@ -173,35 +173,39 @@ On every startup before any repository use, `copied_verified` recovers automatic
    - `source`: Queue playback origin (`album`, `artist`, `playlist`, `favorites`, `search`, `queue`, `mini`, `unknown`).
    - `session_id`: Per-app-run random 128-bit session identifier.
    - `ended_reason`: Session end outcome (`completed`, `skipped`, `stopped`, `error`, `interrupted`, or `NULL` while open).
+   - `uri_key`: Canonicalized `FilePathUtils.canonicalKey(uri)` added in UserData v3 for indexed relink updates (`idx_play_events_uri_key`).
 
-7. **`track_identity`** (Introduced in UserData v2)
+7. **`track_identity`** (Introduced in UserData v2; reconciled post-first-frame at startup via `StartupIdentityReconciler` and after scans)
    - `uid`: Random 128-bit lowercase hex UID (`PRIMARY KEY`).
    - `path`: Current canonical track filesystem path (`NOT NULL`, indexed via `idx_track_identity_path`).
    - `size_bytes`, `duration_ms`: File size and duration used for exact move/rename relinking.
    - `title_key`, `artist_key`, `album_key`: `TextNormalizer`-normalized metadata keys used for tag + `<= 1500` ms duration relink fallback.
    - `first_seen_ms`, `last_seen_ms`, `missing_since_ms`: Lifecycle timestamps; disconnected/missing files keep user data intact and clear `missing_since_ms` upon return.
 
-8. **`favorites`** (Introduced in Schema v4)
+8. **`favorites`** (Introduced in Schema v4; `path_key` added in UserData v3)
    - `path`: Normalized audio file path (`PRIMARY KEY`). Keyed by file path so user favorites persist across folder removals, library rescans, and file re-upserts.
    - `added_at_ms`: UTC epoch milliseconds when the track was favorited (enables sorting newest favorite first).
+   - `path_key`: Canonical key (`FilePathUtils.canonicalKey(path)`) indexed via `idx_favorites_path_key`.
 
-8. **`ratings`** (Introduced in Schema v4)
+9. **`ratings`** (Introduced in Schema v4; `path_key` added in UserData v3)
    - `path`: Normalized audio file path (`PRIMARY KEY`). Keyed by file path so star ratings survive library rescans.
    - `stars`: Integer rating value strictly constrained between 1 and 5 (`CHECK(stars BETWEEN 1 AND 5)`). 0 removes the row.
    - `rated_at_ms`: UTC epoch milliseconds timestamp when rated.
+   - `path_key`: Canonical key (`FilePathUtils.canonicalKey(path)`) indexed via `idx_ratings_path_key`.
 
-9. **`playlists`** (Introduced in Schema v4)
-   - `id`: Auto-incrementing primary key.
-   - `name`: Trimmed display name (1 to 60 characters, case-insensitively unique).
-   - `created_at_ms`: UTC epoch milliseconds when playlist was created.
-   - `updated_at_ms`: UTC epoch milliseconds when playlist was last modified (entries added, reordered, or removed).
+10. **`playlists`** (Introduced in Schema v4)
+    - `id`: Auto-incrementing primary key.
+    - `name`: Trimmed display name (1 to 60 characters, case-insensitively unique).
+    - `created_at_ms`: UTC epoch milliseconds when playlist was created.
+    - `updated_at_ms`: UTC epoch milliseconds when playlist was last modified (entries added, reordered, or removed).
 
-10. **`playlist_items`** (Introduced in Schema v4)
+11. **`playlist_items`** (Introduced in Schema v4; `path_key` added in UserData v3)
     - `id`: Auto-incrementing primary key for the playlist entry item.
     - `playlist_id`: Foreign key referencing `playlists(id)` with `ON DELETE CASCADE`.
     - `position`: Zero-based contiguous ordering index within the playlist.
     - `path`: Audio file path of the track (`NOT NULL`). Can point to files currently not in the local library (e.g. from M3U imports).
     - `added_at_ms`: UTC epoch milliseconds when the entry was added.
+    - `path_key`: Canonical key (`FilePathUtils.canonicalKey(path)`) indexed via `idx_playlist_items_path_key`.
 
 ### Indexes & Pragmas
 

@@ -171,6 +171,7 @@ class SqliteLibraryRepository implements LibraryRepository {
     DateTime Function()? clock,
     void Function(int fromVersion, int toVersion)? onBeforeUserDataUpgrade,
     @visibleForTesting LegacyMigrationTestHooks? migrationHooks,
+    @visibleForTesting UserDataRestoreTestHooks? restoreHooks,
   }) {
     final file = File(filePath);
     if (!file.parent.existsSync()) {
@@ -212,6 +213,7 @@ class SqliteLibraryRepository implements LibraryRepository {
             userDataPath: resolvedUserDataPath,
             backupsUserDataDir: resolvedUserDataBackupsDir,
             clock: clock,
+            restoreHooks: restoreHooks,
           );
 
     if (userPrep.safeReadOnly) {
@@ -231,7 +233,7 @@ class SqliteLibraryRepository implements LibraryRepository {
       DatabaseProtection.enableWalForFileDbs(db, hasFileUserData: true);
       final effectiveUpgradeHook = onBeforeUserDataUpgrade ??
           (fromVersion, toVersion) {
-            SqliteUserDataBackupService(
+            final created = SqliteUserDataBackupService(
               backupsUserDataDir: resolvedUserDataBackupsDir,
               userDataDbPath: resolvedUserDataPath,
               databaseProvider: () => db,
@@ -240,6 +242,11 @@ class SqliteLibraryRepository implements LibraryRepository {
               fromVersion: fromVersion,
               toVersion: toVersion,
             );
+            if (File(resolvedUserDataPath).existsSync() && created == null) {
+              throw const UserDataUpgradeBackupException(
+                'Pre-migration userdata backup failed',
+              );
+            }
           };
       SqliteDbInitializer.init(
         db,
@@ -277,12 +284,6 @@ class SqliteLibraryRepository implements LibraryRepository {
         userDataSchema: schema,
         startupReport: report,
       );
-      if (mode == UserDataAccessMode.normal && schema == 'userdata') {
-        repo._identity.reconcileIdentitiesSync(
-          now: clock?.call(),
-          markUnmatchedMissing: false,
-        );
-      }
       return repo;
     } on SimulatedCrashException {
       db.close();
@@ -377,15 +378,11 @@ class SqliteLibraryRepository implements LibraryRepository {
     final migrationResult = LegacyUserDataMigrator.run(db);
     final mode = migrationResult.accessMode;
     final schema = migrationResult.readLegacyFromMain ? 'main' : 'userdata';
-    final repo = SqliteLibraryRepository._(
+    return SqliteLibraryRepository._(
       db,
       userDataAccessMode: mode,
       userDataSchema: schema,
     );
-    if (mode == UserDataAccessMode.normal && schema == 'userdata') {
-      repo._identity.reconcileIdentitiesSync(markUnmatchedMissing: false);
-    }
-    return repo;
   }
 
   /// Opens the default database files in the injected [supportDir] (or the
@@ -428,10 +425,7 @@ class SqliteLibraryRepository implements LibraryRepository {
       _tracks.markFolderScanned(folderId, timestamp);
 
   @override
-  Future<void> upsertTracks(List<Track> tracks) async {
-    await _tracks.upsertTracks(tracks);
-    await _identity.ensureIdentitiesForTracks(tracks);
-  }
+  Future<void> upsertTracks(List<Track> tracks) => _tracks.upsertTracks(tracks);
 
   @override
   Future<void> upsertTracksFromScan(List<Track> tracks) =>

@@ -4,6 +4,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -42,8 +43,16 @@ class LegacyMigrationTestHooks {
   /// When returning true, forces the pre-split backup step to fail.
   final bool Function()? failBackup;
 
-  /// When returning true, forces PK checksum verification inside step (b) to fail.
+  /// When returning true, forces PK/row checksum verification inside step (b) to fail.
   final bool Function()? forceVerificationMismatch;
+
+  /// When returning true, forces pre-split `VACUUM INTO` to fail so the
+  /// checkpoint + copy fallback is exercised.
+  final bool Function()? forceVacuumFailure;
+
+  /// When returning true, simulates a backup row-count mismatch after backup
+  /// creation to verify safe read-only abort behavior.
+  final bool Function()? forceBackupRowCountMismatch;
 
   /// Creates [LegacyMigrationTestHooks].
   const LegacyMigrationTestHooks({
@@ -53,6 +62,8 @@ class LegacyMigrationTestHooks {
     this.onBeforeComplete,
     this.failBackup,
     this.forceVerificationMismatch,
+    this.forceVacuumFailure,
+    this.forceBackupRowCountMismatch,
   });
 }
 
@@ -250,6 +261,12 @@ class LegacyUserDataMigrator {
       _commitCompleteState(db, hooks: hooks);
       log.info('Migration', 'Legacy migration completed successfully');
       return LegacyMigrationResult.normal(preSplitBackupDir: preSplitDir);
+    } on UserDataUpgradeBackupException catch (e, st) {
+      log.error('Migration', 'Pre-upgrade backup failed: ${e.message}', e, st);
+      return LegacyMigrationResult.safeReadOnly(
+        readLegacyFromMain: _safeHasLegacyTables(db),
+        failureReason: e.message,
+      );
     } on SimulatedCrashException {
       rethrow;
     } catch (e, st) {
@@ -328,12 +345,6 @@ class LegacyUserDataMigrator {
 
     try {
       log.info('Migration', 'Step (a): creating pre-split backup of library.db');
-      try {
-        db.execute('PRAGMA main.wal_checkpoint(TRUNCATE);');
-      } catch (_) {
-        // Non-WAL databases or read-only handles may ignore checkpoint.
-      }
-
       if (!backupsDir.existsSync()) {
         backupsDir.createSync(recursive: true);
       }
@@ -350,20 +361,48 @@ class LegacyUserDataMigrator {
       }
       targetDir.createSync(recursive: true);
 
-      final sourceFile = File(libraryFilePath);
-      if (!sourceFile.existsSync()) {
-        log.error('Migration', 'Pre-split backup failed: source library.db missing');
-        return (
-          success: false,
-          backupDir: null,
-          error: 'Source library.db does not exist',
-        );
+      final destFile = File(p.join(targetDir.path, 'library.db'));
+      var vacuumed = false;
+      if (hooks?.forceVacuumFailure?.call() != true) {
+        try {
+          final escapedDest = destFile.path.replaceAll("'", "''");
+          db.execute("VACUUM main INTO '$escapedDest';");
+          vacuumed = destFile.existsSync();
+        } catch (e) {
+          log.warning(
+            'Migration',
+            'Pre-split VACUUM INTO failed, falling back to checkpoint + copy: $e',
+          );
+          if (destFile.existsSync()) {
+            try {
+              destFile.deleteSync();
+            } catch (_) {}
+          }
+        }
       }
 
-      final destFile = File(p.join(targetDir.path, 'library.db'));
-      sourceFile.copySync(destFile.path);
+      if (!vacuumed) {
+        try {
+          db.execute('PRAGMA main.wal_checkpoint(TRUNCATE);');
+        } catch (_) {
+          // Non-WAL databases or read-only handles may ignore checkpoint.
+        }
+        final sourceFile = File(libraryFilePath);
+        if (!sourceFile.existsSync()) {
+          log.error(
+            'Migration',
+            'Pre-split backup failed: source library.db missing',
+          );
+          return (
+            success: false,
+            backupDir: null,
+            error: 'Source library.db does not exist',
+          );
+        }
+        sourceFile.copySync(destFile.path);
+      }
 
-      // Verify copied backup is a readable, valid SQLite database.
+      // Verify copied backup is a readable SQLite DB with matching user table row counts.
       final verifyDb = sqlite3.open(destFile.path, mode: OpenMode.readOnly);
       try {
         final qc = verifyDb.select('PRAGMA quick_check;');
@@ -379,6 +418,67 @@ class LegacyUserDataMigrator {
             backupDir: null,
             error: 'Pre-split backup quick_check returned $status',
           );
+        }
+
+        if (hooks?.forceBackupRowCountMismatch?.call() == true) {
+          log.error(
+            'Migration',
+            'Pre-split backup row count mismatch (forced hook)',
+          );
+          return (
+            success: false,
+            backupDir: null,
+            error: 'Pre-split backup row count mismatch',
+          );
+        }
+
+        const verifiedTables = [
+          'favorites',
+          'ratings',
+          'playlists',
+          'playlist_items',
+          'play_events',
+        ];
+        final mainTables = db
+            .select("SELECT name FROM main.sqlite_master WHERE type = 'table';")
+            .map((r) => r['name'] as String)
+            .toSet();
+        final backupTables = verifyDb
+            .select("SELECT name FROM sqlite_master WHERE type = 'table';")
+            .map((r) => r['name'] as String)
+            .toSet();
+
+        for (final table in verifiedTables) {
+          if (!mainTables.contains(table)) continue;
+          if (!backupTables.contains(table)) {
+            log.error(
+              'Migration',
+              'Pre-split backup missing user table $table',
+            );
+            return (
+              success: false,
+              backupDir: null,
+              error: 'Pre-split backup missing table $table',
+            );
+          }
+          final mainCount = db
+              .select('SELECT COUNT(*) AS c FROM main.$table;')
+              .single['c'] as int;
+          final backupCount = verifyDb
+              .select('SELECT COUNT(*) AS c FROM $table;')
+              .single['c'] as int;
+          if (mainCount != backupCount) {
+            log.error(
+              'Migration',
+              'Pre-split backup row count mismatch for $table: main=$mainCount backup=$backupCount',
+            );
+            return (
+              success: false,
+              backupDir: null,
+              error:
+                  'Pre-split backup row count mismatch for $table ($mainCount != $backupCount)',
+            );
+          }
         }
       } finally {
         verifyDb.close();
@@ -406,6 +506,7 @@ class LegacyUserDataMigrator {
     try {
       UserDataMigrator.createV1SchemaStatements(db);
       UserDataMigrator.createV2SchemaStatements(db);
+      UserDataMigrator.createV3SchemaStatements(db);
 
       // Clear any partial rows from prior aborted attempts (reverse FK order).
       for (final table in _reverseFkTableOrder) {
@@ -414,21 +515,20 @@ class LegacyUserDataMigrator {
 
       // Copy each existing legacy table in FK-safe order preserving IDs & timestamps.
       for (final table in legacyTables) {
-        if (table == 'play_events') {
-          db.execute('''
-            INSERT INTO userdata.play_events (
-              id, uri, title, artist, album, album_artist,
-              duration_ms, started_at_ms, listened_ms, counted, completed
-            )
-            SELECT id, uri, title, artist, album, album_artist,
-                   duration_ms, started_at_ms, listened_ms, counted, completed
-            FROM main.play_events;
-          ''');
-        } else {
-          db.execute(
-            'INSERT INTO userdata.$table SELECT * FROM main.$table;',
-          );
-        }
+        final mainCols = db
+            .select('PRAGMA main.table_info($table);')
+            .map((r) => r['name'] as String)
+            .toList(growable: false);
+        final userCols = db
+            .select('PRAGMA userdata.table_info($table);')
+            .map((r) => r['name'] as String)
+            .toSet();
+        final commonCols =
+            mainCols.where(userCols.contains).toList(growable: false);
+        final colList = commonCols.join(', ');
+        db.execute(
+          'INSERT INTO userdata.$table ($colList) SELECT $colList FROM main.$table;',
+        );
       }
 
       // Verify per-table row count and primary-key checksum INSIDE the transaction.
@@ -449,6 +549,18 @@ class LegacyUserDataMigrator {
       db.execute(
         'INSERT OR REPLACE INTO userdata.meta (key, value) VALUES (?, ?);',
         [metaStateKey, 'copied_verified'],
+      );
+      db.execute(
+        'UPDATE userdata.favorites SET path_key = normalize_file_path(path) WHERE path_key IS NULL;',
+      );
+      db.execute(
+        'UPDATE userdata.ratings SET path_key = normalize_file_path(path) WHERE path_key IS NULL;',
+      );
+      db.execute(
+        'UPDATE userdata.playlist_items SET path_key = normalize_file_path(path) WHERE path_key IS NULL;',
+      );
+      db.execute(
+        'UPDATE userdata.play_events SET uri_key = normalize_file_path(uri) WHERE uri_key IS NULL;',
       );
       db.execute('PRAGMA userdata.user_version = $kUserDataSchemaVersion;');
       db.execute('COMMIT;');
@@ -524,8 +636,13 @@ class LegacyUserDataMigrator {
 
     for (final table in tables) {
       final pk = _primaryKeyByTable[table]!;
-      final mainStats = _tableCountAndPkChecksum(db, 'main', table, pk);
-      final userStats = _tableCountAndPkChecksum(db, 'userdata', table, pk);
+      final mainCols = db
+          .select('PRAGMA main.table_info($table);')
+          .map((r) => r['name'] as String)
+          .toList(growable: false);
+      final mainStats = _tableCountAndRowChecksum(db, 'main', table, pk, mainCols);
+      final userStats =
+          _tableCountAndRowChecksum(db, 'userdata', table, pk, mainCols);
       if (mainStats.count != userStats.count ||
           mainStats.checksum != userStats.checksum) {
         return false;
@@ -534,19 +651,35 @@ class LegacyUserDataMigrator {
     return true;
   }
 
-  static ({int count, String checksum}) _tableCountAndPkChecksum(
+  static ({int count, String checksum}) _tableCountAndRowChecksum(
     Database db,
     String schema,
     String table,
     String pkColumn,
+    List<String> columns,
   ) {
+    final selectList = columns.join(', ');
     final rows = db.select(
-      'SELECT $pkColumn AS pk FROM $schema.$table ORDER BY $pkColumn ASC;',
+      'SELECT $selectList FROM $schema.$table ORDER BY $pkColumn ASC;',
     );
     final buffer = StringBuffer('${rows.length}:');
     for (final row in rows) {
-      final val = row['pk'].toString();
-      buffer.write('${val.length}:$val|');
+      for (final col in columns) {
+        final v = row[col];
+        if (v == null) {
+          buffer.write('N;');
+        } else if (v is int) {
+          buffer.write('I:$v;');
+        } else if (v is double) {
+          buffer.write('D:$v;');
+        } else if (v is Uint8List) {
+          buffer.write('B:${v.length}:${base64Encode(v)};');
+        } else {
+          final s = v.toString();
+          buffer.write('S:${s.length}:$s;');
+        }
+      }
+      buffer.write('|');
     }
     final digest = sha256.convert(utf8.encode(buffer.toString())).toString();
     return (count: rows.length, checksum: digest);
