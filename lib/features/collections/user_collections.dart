@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/result.dart';
 import '../../diagnostics/app_logger.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
@@ -18,6 +19,9 @@ class UserCollections extends ChangeNotifier {
   /// by [UserDataAccessMode.safeReadOnly].
   void Function(String messageKey)? onReadOnlyBlocked;
 
+  /// Optional callback notified when a user-visible persistence failure occurs.
+  void Function(AppError error)? onError;
+
   final Set<String> _favorites = {};
   final List<Track> _favoriteTracks = [];
   final Map<String, int> _ratings = {};
@@ -28,6 +32,7 @@ class UserCollections extends ChangeNotifier {
   UserCollections({
     required this.repository,
     this.onReadOnlyBlocked,
+    this.onError,
   });
 
   /// Whether user data is currently in [UserDataAccessMode.safeReadOnly].
@@ -162,8 +167,20 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
         if (onReadOnlyBlocked != null) return;
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -200,8 +217,20 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
         if (onReadOnlyBlocked != null) return;
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -222,7 +251,19 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -251,7 +292,19 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -277,7 +330,19 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -298,8 +363,20 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
         if (onReadOnlyBlocked != null) return 0;
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -319,8 +396,20 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
         if (onReadOnlyBlocked != null) return;
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -340,8 +429,20 @@ class UserCollections extends ChangeNotifier {
         st,
       );
       if (e is UserDataReadOnlyException) {
+        onError?.call(
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
+        );
         onReadOnlyBlocked?.call(e.messageKey);
         if (onReadOnlyBlocked != null) return;
+      } else {
+        onError?.call(
+          AppError.fromException(e, st, 'error.userDataActionFailed'),
+        );
       }
       rethrow;
     }
@@ -389,6 +490,9 @@ class UserCollections extends ChangeNotifier {
         'Failed to refresh user collections: $e',
         e,
         st,
+      );
+      onError?.call(
+        AppError.fromException(e, st, 'error.userDataActionFailed'),
       );
     }
   }

@@ -7,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 const Map<String, String> kWriteApiAllowlist = {
   'lib/features/persistence/atomic_file_writer.dart':
       'Shared atomic temp-file/rename helper used only for app-data files.',
+  'lib/features/persistence/versioned_json_store.dart':
+      'Quarantines corrupt config JSON and rotates rolling backups inside app-support.',
   'lib/ui/settings/settings_store.dart':
       'Persists app settings JSON inside the app-support directory only.',
   'lib/ui/audio_panels/eq_store.dart':

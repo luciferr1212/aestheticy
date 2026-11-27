@@ -56,7 +56,9 @@ class WindowsTrayService with tm.TrayListener implements TrayService {
       if (!file.existsSync()) return false;
       final bytes = await file.readAsBytes();
       return isValidIcoBytes(bytes);
-    } catch (_) {
+    } catch (e, st) {
+      // ignore-silent: probing optional cached ICO asset candidate before extraction fallback
+      AppLogger.swallow(e, st, where: 'WindowsTrayService._isValidIcoFile');
       return false;
     }
   }

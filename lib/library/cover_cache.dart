@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/album_identity.dart';
 
 /// Manages caching of album artwork images on the local filesystem.
@@ -105,7 +106,9 @@ abstract final class CoverCache {
     final file = File(filePath);
     try {
       return file.existsSync() && file.lengthSync() > 0;
-    } catch (_) {
+    } catch (e, st) {
+      // ignore-silent: reading optional cover cache file stat returns false on miss
+      AppLogger.instance.debug('CoverCache', 'hasCover stat failed', e, st);
       return false;
     }
   }
@@ -135,7 +138,9 @@ abstract final class CoverCache {
     bool existsAndValid = false;
     try {
       existsAndValid = file.existsSync() && file.lengthSync() > 0;
-    } catch (_) {
+    } catch (e, st) {
+      // ignore-silent: checking optional cover cache entry returns false on miss
+      AppLogger.instance.debug('CoverCache', 'saveCoverSync stat failed', e, st);
       existsAndValid = false;
     }
 
@@ -149,11 +154,25 @@ abstract final class CoverCache {
       tempFile.writeAsBytesSync(bytes, flush: true);
       try {
         tempFile.renameSync(filePath);
-      } catch (_) {
+      } catch (e, st) {
+        AppLogger.instance.debug(
+          'CoverCache',
+          'Cover atomic renameSync hit conflict, retrying after delete',
+          e,
+          st,
+        );
         if (file.existsSync()) {
           try {
             file.deleteSync();
-          } catch (_) {}
+          } catch (delErr, delSt) {
+            // ignore-silent: deleting stale cover cache file before atomic rename retry
+            AppLogger.instance.debug(
+              'CoverCache',
+              'Failed deleting stale cover file',
+              delErr,
+              delSt,
+            );
+          }
         }
         tempFile.renameSync(filePath);
       }
@@ -187,7 +206,9 @@ abstract final class CoverCache {
     bool existsAndValid = false;
     try {
       existsAndValid = file.existsSync() && (await file.length()) > 0;
-    } catch (_) {
+    } catch (e, st) {
+      // ignore-silent: checking optional cover cache entry returns false on miss
+      AppLogger.instance.debug('CoverCache', 'saveCover stat failed', e, st);
       existsAndValid = false;
     }
 
@@ -201,11 +222,25 @@ abstract final class CoverCache {
       await tempFile.writeAsBytes(bytes, flush: true);
       try {
         await tempFile.rename(filePath);
-      } catch (_) {
+      } catch (e, st) {
+        AppLogger.instance.debug(
+          'CoverCache',
+          'Cover atomic rename hit conflict, retrying after delete',
+          e,
+          st,
+        );
         if (file.existsSync()) {
           try {
             await file.delete();
-          } catch (_) {}
+          } catch (delErr, delSt) {
+            // ignore-silent: deleting stale cover cache file before atomic rename retry
+            AppLogger.instance.debug(
+              'CoverCache',
+              'Failed deleting stale cover file',
+              delErr,
+              delSt,
+            );
+          }
         }
         await tempFile.rename(filePath);
       }

@@ -7,6 +7,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
+import '../diagnostics/app_logger.dart';
 import 'audio_engine.dart';
 import 'audio_models.dart';
 import 'playback_queue.dart';
@@ -980,11 +981,32 @@ class PlaybackController {
     _openedUri = source.uri;
     try {
       await engine.open(source, autoPlay: true);
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'PlaybackController',
+        'Failed opening track in playback path',
+        e,
+        st,
+      );
       if (!_disposed && !_isStale(gen)) {
         await _setFadeGain(1.0);
+        // Schedule asynchronously outside _enqueueTransition so _onError
+        // can safely advance past the broken track without deadlocking.
+        Timer.run(() {
+          if (!_disposed) {
+            unawaited(
+              _onError(
+                AudioError(
+                  code: AudioErrorCode.engineFailure,
+                  message: 'Failed opening track: $e',
+                  isFatal: true,
+                ),
+              ),
+            );
+          }
+        });
       }
-      rethrow;
+      return;
     }
     if (_isStale(gen)) return;
 
@@ -1075,7 +1097,13 @@ class PlaybackController {
     if (_disposed || !engine.capabilities.gapless) return;
     try {
       await engine.preloadNext(queue.peekNext());
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'PlaybackController',
+        'Preloading the next track failed',
+        e,
+        st,
+      );
       if (_disposed) return;
       _errorCtrl.add(AudioError(
         code: AudioErrorCode.engineFailure,

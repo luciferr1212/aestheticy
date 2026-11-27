@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../diagnostics/app_logger.dart';
 import '../../features/library/artist_rules_sheet.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
@@ -315,7 +316,13 @@ class _ArtistsViewState extends State<ArtistsView> {
                                             ),
                                           );
                                         }
-                                      } on UserDataReadOnlyException catch (e) {
+                                      } on UserDataReadOnlyException catch (e, st) {
+                                        AppLogger.instance.warn(
+                                          'ArtistsView',
+                                          'Merge blocked in safe read-only mode',
+                                          e,
+                                          st,
+                                        );
                                         if (mounted) {
                                           messenger.showSnackBar(
                                             SnackBar(
@@ -325,7 +332,13 @@ class _ArtistsViewState extends State<ArtistsView> {
                                             ),
                                           );
                                         }
-                                      } catch (e) {
+                                      } catch (e, st) {
+                                        AppLogger.instance.error(
+                                          'ArtistsView',
+                                          'Artist merge failed',
+                                          e,
+                                          st,
+                                        );
                                         if (mounted) {
                                           messenger.showSnackBar(
                                             SnackBar(

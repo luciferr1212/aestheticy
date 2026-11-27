@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:aestheticy/core/result.dart';
 import 'package:aestheticy/library/library_scanner.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
@@ -275,6 +276,40 @@ void main() {
 
       expect(await repo.trackCount(), equals(1));
       expect((await repo.listTracks()).single.path, equals(filePath));
+    });
+
+    test('addFolderResult returns Ok on success and Err(AppError) when repository fails',
+        () async {
+      final repo = SqliteLibraryRepository.inMemory();
+      final tempDir = await Directory.systemTemp.createTemp('add_folder_res_');
+      final musicDir = Directory(p.join(tempDir.path, 'music'))..createSync();
+      final coversDir = Directory(p.join(tempDir.path, 'covers'))..createSync();
+      addTearDown(() async {
+        await repo.close();
+        if (tempDir.existsSync()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+
+      final scanService = ScanService(
+        repository: repo,
+        scanner: LibraryScanner(
+          repository: repo,
+          coversDirectory: coversDir.path,
+        ),
+      );
+      addTearDown(scanService.dispose);
+
+      final okRes = await scanService.addFolderResult(musicDir.path);
+      expect(okRes.isOk, isTrue);
+      expect(okRes.valueOrNull?.path, equals(musicDir.path));
+
+      // Closing the DB forces addFolder to fail -> returns Err(DatabaseFailure)
+      await repo.close();
+      final errRes = await scanService.addFolderResult(musicDir.path);
+      expect(errRes.isErr, isTrue);
+      expect(errRes.errorOrNull, isA<DatabaseFailure>());
+      expect(errRes.errorOrNull?.messageKey, equals('error.folderAddFailed'));
     });
   });
 }

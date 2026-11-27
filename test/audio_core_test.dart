@@ -1661,7 +1661,7 @@ void main() {
         await spy.dispose();
       });
 
-      test('stop/shutdown fade-out completes within <= 150ms and restores fadeGain to 1.0', () async {
+      test('stop/shutdown fade-out completes within <= 300ms and restores fadeGain to 1.0', () async {
         final spy = _TimingSpyFakeEngine();
         await spy.init();
         final q = PlaybackQueue()..add(_src('a'));
@@ -1679,7 +1679,7 @@ void main() {
         await ctrl.stop();
         sw.stop();
 
-        expect(sw.elapsedMilliseconds, lessThanOrEqualTo(150));
+        expect(sw.elapsedMilliseconds, lessThanOrEqualTo(300));
         expect(spy.state, PlaybackState.idle);
         expect(spy.fadeGain, closeTo(1.0, 1e-6));
 

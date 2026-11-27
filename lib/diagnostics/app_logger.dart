@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 /// Severity levels for application diagnostic logging.
 enum LogLevel {
+  debug,
   info,
-  warning,
+  warn,
   error,
 }
 
@@ -16,8 +18,15 @@ class AppLogger {
   /// Maximum single log file size before rotation (1 MB).
   static const int maxFileSizeBytes = 1024 * 1024;
 
-  /// Maximum number of rotated log archives to keep.
-  static const int maxRotatedFiles = 3;
+  /// Maximum total log files kept on disk (`aestheticy.log` + `.1.log`..`.4.log`).
+  static const int maxLogFiles = 5;
+
+  /// Maximum number of rotated log archives to keep (`aestheticy.1.log`..`aestheticy.4.log`).
+  static const int maxRotatedFiles = maxLogFiles - 1;
+
+  /// Exact pattern matching rotated archive files owned by [AppLogger].
+  static final RegExp _rotatedFilePattern =
+      RegExp(r'^aestheticy\.(\d+)\.log$');
 
   /// Maximum character length per log message before truncation.
   static const int maxMessageLength = 500;
@@ -26,6 +35,8 @@ class AppLogger {
   final Future<Directory> Function()? directoryProvider;
   final StringSink? customSink;
   final String Function()? userNameProvider;
+  final LogLevel minLevel;
+  final int _effectiveMaxFileSizeBytes;
 
   Directory? _resolvedDir;
   File? _currentLogFile;
@@ -35,13 +46,16 @@ class AppLogger {
   bool _isDisposed = false;
   bool _disabled = false;
 
-  /// Creates an [AppLogger] with optional injected directory or sink for testing.
+  /// Creates an [AppLogger] with optional injected directory, sink, or log level.
   AppLogger({
     this.logsDirectory,
     this.directoryProvider,
     this.customSink,
     this.userNameProvider,
-  });
+    this.minLevel = LogLevel.debug,
+    @visibleForTesting int? maxFileSizeBytesOverride,
+  }) : _effectiveMaxFileSizeBytes =
+            maxFileSizeBytesOverride ?? maxFileSizeBytes;
 
   static AppLogger? _instance;
 
@@ -71,8 +85,30 @@ class AppLogger {
       _currentLogFile = File(p.join(_resolvedDir!.path, 'aestheticy.log'));
       _checkRotationSync();
     } catch (_) {
+      // ignore-silent: AppLogger.init disables file logging when support dir is unwritable
       _disabled = true;
     }
+  }
+
+  /// Records an intentionally swallowed non-fatal error at [LogLevel.debug].
+  static void swallow(
+    Object error,
+    StackTrace stack, {
+    required String where,
+    String? context,
+  }) {
+    final message = (context == null || context.isEmpty)
+        ? 'Swallowed error in $where'
+        : 'Swallowed error in $where ($context)';
+    instance.debug(where, message, error, stack);
+  }
+
+  /// Logs a debug message with optional error and stack trace.
+  void debug(String tag, String message, [Object? error, StackTrace? stackTrace]) {
+    final sb = StringBuffer(message);
+    if (error != null) sb.write(' | error: $error');
+    if (stackTrace != null) sb.write(' | $stackTrace');
+    _log(LogLevel.debug, tag, sb.toString());
   }
 
   /// Logs an informational message.
@@ -81,11 +117,16 @@ class AppLogger {
   }
 
   /// Logs a warning message with optional error and stack trace.
-  void warning(String tag, String message, [Object? error, StackTrace? stackTrace]) {
+  void warn(String tag, String message, [Object? error, StackTrace? stackTrace]) {
     final sb = StringBuffer(message);
     if (error != null) sb.write(' | error: $error');
     if (stackTrace != null) sb.write(' | $stackTrace');
-    _log(LogLevel.warning, tag, sb.toString());
+    _log(LogLevel.warn, tag, sb.toString());
+  }
+
+  /// Alias for [warn] kept for compatibility with existing callers.
+  void warning(String tag, String message, [Object? error, StackTrace? stackTrace]) {
+    warn(tag, message, error, stackTrace);
   }
 
   /// Logs an error message and immediately flushes the buffer.
@@ -97,7 +138,7 @@ class AppLogger {
   }
 
   void _log(LogLevel level, String tag, String rawMessage, {bool immediateFlush = false}) {
-    if (_isDisposed) return;
+    if (_isDisposed || level.index < minLevel.index) return;
 
     final sanitized = sanitizeMessage(rawMessage, userName: userNameProvider?.call());
     final timestamp = DateTime.now().toUtc().toIso8601String();
@@ -106,11 +147,13 @@ class AppLogger {
     if (customSink != null) {
       try {
         customSink!.writeln(formattedLine);
-      } catch (_) {}
+      } catch (_) {
+        // ignore-silent: writing to injected customSink inside AppLogger cannot recurse
+      }
       return;
     }
 
-    if (_disabled) return;
+    if (_disabled || _currentLogFile == null) return;
 
     _writeBuffer.add(formattedLine);
 
@@ -140,13 +183,25 @@ class AppLogger {
       (m) => '${m.group(1)}: [REDACTED]',
     );
 
-    // 3. Strip full directory paths down to file/folder name only
+    // 3. Strip full directory paths (quoted or unquoted) down to file/folder name only
+    text = text.replaceAllMapped(
+      RegExp(r'"(?:[a-zA-Z]:[\\/]|file:\/\/\/?|\/)[^"\r\n]+[\\/]([^"\\/\r\n]+)"'),
+      (m) => '"${m.group(1) ?? ''}"',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r"'(?:[a-zA-Z]:[\\/]|file:\/\/\/?|\/)[^'\r\n]+[\\/]([^'\\/\r\n]+)'"),
+      (m) => "'${m.group(1) ?? ''}'",
+    );
     text = text.replaceAllMapped(
       RegExp(r'(?:[a-zA-Z]:[\\/]|file:\/\/\/?|\/)[^\s"<>]+[\\/]([^\s\\/]+)'),
       (m) => m.group(1) ?? '',
     );
     text = text.replaceAllMapped(
       RegExp(r'(?:\\{1,2}[^\s"<>]+[\\/])([^\s\\/]+)'),
+      (m) => m.group(1) ?? '',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'\b[a-zA-Z]:[\\/]([^\s\\/"]+)'),
       (m) => m.group(1) ?? '',
     );
 
@@ -187,7 +242,7 @@ class AppLogger {
         flush: true,
       );
     } catch (_) {
-      // Unwritable -> do not throw
+      // ignore-silent: AppLogger.flush avoids recursion when log file is unwritable
     } finally {
       _isFlushing = false;
     }
@@ -198,47 +253,56 @@ class AppLogger {
 
     try {
       final length = _currentLogFile!.lengthSync();
-      if (length >= maxFileSizeBytes) {
+      if (length >= _effectiveMaxFileSizeBytes) {
         _rotateLogsSync();
       }
-    } catch (_) {}
+    } catch (_) {
+      // ignore-silent: reading log file length for rotation avoids AppLogger recursion
+    }
   }
 
   void _rotateLogsSync() {
     if (_resolvedDir == null) return;
     try {
       final base = _resolvedDir!.path;
-      // aestheticy.3.log is overwritten/deleted
-      final file3 = File(p.join(base, 'aestheticy.3.log'));
-      if (file3.existsSync()) {
-        try {
-          file3.deleteSync();
-        } catch (_) {}
+      // Delete only exact rotated archive files strictly beyond maxRotatedFiles.
+      for (final entity in _resolvedDir!.listSync()) {
+        if (entity is! File) continue;
+        final match = _rotatedFilePattern.firstMatch(p.basename(entity.path));
+        if (match == null) continue;
+        final index = int.tryParse(match.group(1)!);
+        if (index != null && index >= maxRotatedFiles) {
+          try {
+            entity.deleteSync();
+          } catch (_) {
+            // ignore-silent: deleting expired rotated log archive created by AppLogger
+          }
+        }
       }
 
-      // aestheticy.2.log -> aestheticy.3.log
-      final file2 = File(p.join(base, 'aestheticy.2.log'));
-      if (file2.existsSync()) {
-        try {
-          file2.renameSync(file3.path);
-        } catch (_) {}
-      }
-
-      // aestheticy.1.log -> aestheticy.2.log
-      final file1 = File(p.join(base, 'aestheticy.1.log'));
-      if (file1.existsSync()) {
-        try {
-          file1.renameSync(file2.path);
-        } catch (_) {}
+      // Shift aestheticy.(i).log -> aestheticy.(i+1).log from (maxRotatedFiles - 1) down to 1.
+      for (var i = maxRotatedFiles - 1; i >= 1; i--) {
+        final src = File(p.join(base, 'aestheticy.$i.log'));
+        final dst = File(p.join(base, 'aestheticy.${i + 1}.log'));
+        if (src.existsSync()) {
+          if (dst.existsSync()) {
+            dst.deleteSync();
+          }
+          src.renameSync(dst.path);
+        }
       }
 
       // aestheticy.log -> aestheticy.1.log
       if (_currentLogFile != null && _currentLogFile!.existsSync()) {
-        try {
-          _currentLogFile!.renameSync(file1.path);
-        } catch (_) {}
+        final file1 = File(p.join(base, 'aestheticy.1.log'));
+        if (file1.existsSync()) {
+          file1.deleteSync();
+        }
+        _currentLogFile!.renameSync(file1.path);
       }
-    } catch (_) {}
+    } catch (_) {
+      // ignore-silent: rotating/renaming AppLogger archive files avoids recursive logging
+    }
   }
 
   /// Reads up to [limit] most recent log lines from the current and archive files.
@@ -255,11 +319,11 @@ class AppLogger {
         lines.addAll(currentLines);
       }
 
-      // If we need more lines, check aestheticy.1.log
-      if (lines.length < limit) {
-        final file1 = File(p.join(_resolvedDir!.path, 'aestheticy.1.log'));
-        if (file1.existsSync()) {
-          final olderLines = file1.readAsLinesSync();
+      // Backfill from newest rotated archives until limit is reached.
+      for (var i = 1; i <= maxRotatedFiles && lines.length < limit; i++) {
+        final rotated = File(p.join(_resolvedDir!.path, 'aestheticy.$i.log'));
+        if (rotated.existsSync()) {
+          final olderLines = rotated.readAsLinesSync();
           lines.insertAll(0, olderLines);
         }
       }
@@ -269,6 +333,7 @@ class AppLogger {
       }
       return lines.sublist(lines.length - limit);
     } catch (_) {
+      // ignore-silent: reading optional recent log cache returns empty list on failure
       return [];
     }
   }

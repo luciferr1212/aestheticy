@@ -6,30 +6,57 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/result.dart';
 import '../../diagnostics/app_logger.dart';
 import '../../features/persistence/atomic_file_writer.dart';
+import '../../features/persistence/versioned_json_store.dart';
 import '../glass/glass_scope.dart';
 import 'app_settings.dart';
 
 /// Single source of truth managing UI settings persistence and in-memory state.
 class SettingsStore extends ChangeNotifier {
+  static const int currentSchemaVersion = 1;
+  static final Set<String> _knownKeys = const AppSettings().toJson().keys.toSet();
+
   Future<Directory> Function()? _directoryProvider;
   Directory? _directory;
+  final void Function(AppError error)? onError;
   AppSettings _settings;
   Timer? _debounceTimer;
   AtomicFileWriter? _writer;
+  Map<String, Object?> _unknownFields = const {};
+  final VersionedJsonStoreHelper _versionHelper = VersionedJsonStoreHelper(
+    storeName: 'Settings',
+    fileName: 'ui_settings.json',
+    currentSchemaVersion: currentSchemaVersion,
+    knownKeys: _knownKeys,
+    migrations: {
+      0: (data) {
+        final migrated = Map<String, Object?>.from(data);
+        if (!migrated.containsKey('transitionSmoothness') &&
+            migrated['smoothTransitions'] is bool) {
+          migrated['transitionSmoothness'] =
+              (migrated['smoothTransitions'] as bool) ? 'smooth' : 'off';
+        }
+        return migrated;
+      },
+    },
+  );
 
   /// Creates a [SettingsStore] with an optional injected [directory] or [directoryProvider].
   SettingsStore({
     Future<Directory> Function()? directoryProvider,
     Directory? directory,
+    this.onError,
     AppSettings initialSettings = const AppSettings(),
   }) : _settings = initialSettings {
     _directoryProvider = directoryProvider;
     _directory = directory;
     if (directory != null) {
-      _writer =
-          AtomicFileWriter(File(p.join(directory.path, 'ui_settings.json')));
+      _writer = AtomicFileWriter(
+        File(p.join(directory.path, 'ui_settings.json')),
+        onError: onError,
+      );
     }
   }
 
@@ -39,8 +66,10 @@ class SettingsStore extends ChangeNotifier {
   AtomicFileWriter? _getWriter() {
     if (_writer != null) return _writer;
     if (_directory != null) {
-      return _writer =
-          AtomicFileWriter(File(p.join(_directory!.path, 'ui_settings.json')));
+      return _writer = AtomicFileWriter(
+        File(p.join(_directory!.path, 'ui_settings.json')),
+        onError: onError,
+      );
     }
     return null;
   }
@@ -60,11 +89,19 @@ class SettingsStore extends ChangeNotifier {
       if (!_directory!.existsSync()) {
         _directory!.createSync(recursive: true);
       }
-      _writer ??=
-          AtomicFileWriter(File(p.join(_directory!.path, 'ui_settings.json')));
+      _writer ??= AtomicFileWriter(
+        File(p.join(_directory!.path, 'ui_settings.json')),
+        onError: onError,
+      );
       await _loadFromFile();
-    } catch (_) {
+    } catch (e, st) {
       // Keep in-memory defaults, never throw to the UI
+      AppLogger.instance.warn(
+        'Settings',
+        'SettingsStore.init failed, keeping defaults',
+        e,
+        st,
+      );
     }
   }
 
@@ -86,39 +123,17 @@ class SettingsStore extends ChangeNotifier {
   }
 
   Future<void> _loadFromFile() async {
-    if (_directory == null) return;
-    final file = File(p.join(_directory!.path, 'ui_settings.json'));
-    if (!file.existsSync()) {
+    final dir = _directory;
+    if (dir == null) return;
+    final loaded = await _versionHelper.load(dir);
+    if (loaded.wasQuarantined) {
+      _settings = const AppSettings();
+      _unknownFields = const {};
       return;
     }
-
-    try {
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content);
-      if (decoded is Map<String, Object?>) {
-        _settings = AppSettings.fromJson(decoded);
-      } else if (decoded is Map) {
-        _settings =
-            AppSettings.fromJson(Map<String, Object?>.from(decoded));
-      } else {
-        _handleCorruptFile(file);
-      }
-    } catch (_) {
-      _handleCorruptFile(file);
-    }
-  }
-
-  void _handleCorruptFile(File file) {
-    _settings = const AppSettings();
-    AppLogger.instance.warning(
-      'Settings',
-      'Corrupt ui_settings.json backed up to ui_settings.json.bad',
-    );
-    try {
-      final badPath = p.join(_directory!.path, 'ui_settings.json.bad');
-      file.renameSync(badPath);
-    } catch (_) {
-      // Ignore renaming errors, never crash
+    if (loaded.data != null) {
+      _settings = AppSettings.fromJson(loaded.data);
+      _unknownFields = loaded.unknownFields;
     }
   }
 
@@ -133,11 +148,25 @@ class SettingsStore extends ChangeNotifier {
     final writer = _getWriter();
     if (writer == null) return;
     try {
-      final jsonStr =
-          const JsonEncoder.withIndent('  ').convert(_settings.toJson());
+      final payload = _versionHelper.preparePayload(
+        _settings.toJson(),
+        _unknownFields,
+      );
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
       await writer.write(jsonStr);
-    } catch (_) {
+      final dir = _directory;
+      if (dir != null) {
+        _versionHelper.writeRollingBackupSync(dir, jsonStr);
+      }
+    } catch (e, st) {
       // In-memory value is preserved; failed write does not crash
+      AppLogger.instance.error(
+        'Settings',
+        'Failed writing ui_settings.json',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.settingsSaveFailed'));
     }
   }
 

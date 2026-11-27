@@ -3,6 +3,7 @@ library;
 
 import 'dart:convert';
 
+import '../../diagnostics/app_logger.dart';
 import 'lyrics_models.dart';
 
 const int _kMaxLyricsLines = 20000;
@@ -46,7 +47,13 @@ String decodeLyricsBytes(List<int> bytes) {
 
   try {
     return const Utf8Decoder(allowMalformed: false).convert(bytes);
-  } catch (_) {
+  } catch (e, st) {
+    AppLogger.instance.debug(
+      'LrcParser',
+      'Strict UTF-8 decode failed, falling back to Windows-1256',
+      e,
+      st,
+    );
     final sb = StringBuffer();
     for (final b in bytes) {
       if (b >= 0 && b <= 0x7F) {

@@ -3,9 +3,12 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'package:aestheticy/core/result.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
+import 'package:aestheticy/ui/common/error_presenter.dart';
 import 'package:aestheticy/ui/l10n/app_strings.dart';
 
 /// Modal bottom sheet displaying active artist rules (merges and never-split entries).
@@ -63,10 +66,22 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
     try {
       await widget.repository.unmergeArtist(aliasKey);
       await _loadRules();
-    } on UserDataReadOnlyException catch (e) {
+    } on UserDataReadOnlyException catch (e, st) {
+      AppLogger.instance.warn(
+        'ArtistRules',
+        'unmergeArtist blocked in safe read-only mode',
+        e,
+        st,
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.t(e.messageKey))),
+        ErrorPresenter.show(
+          context,
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
         );
       }
     }
@@ -76,10 +91,22 @@ class _ArtistRulesSheetState extends State<ArtistRulesSheet> {
     try {
       await widget.repository.removeNoSplit(artistKey);
       await _loadRules();
-    } on UserDataReadOnlyException catch (e) {
+    } on UserDataReadOnlyException catch (e, st) {
+      AppLogger.instance.warn(
+        'ArtistRules',
+        'removeNoSplit blocked in safe read-only mode',
+        e,
+        st,
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.t(e.messageKey))),
+        ErrorPresenter.show(
+          context,
+          DatabaseFailure(
+            code: 'userdata_read_only',
+            messageKey: e.messageKey,
+            cause: e,
+            stackTrace: st,
+          ),
         );
       }
     }

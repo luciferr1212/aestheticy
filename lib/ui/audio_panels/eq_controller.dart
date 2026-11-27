@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../audio/audio_engine.dart';
+import '../../diagnostics/app_logger.dart';
 import '../settings/audio_settings_applier.dart';
 import 'eq_store.dart';
 
@@ -68,8 +69,14 @@ class EqController extends ChangeNotifier {
       _lastGoodGains = List.of(_gains);
       _lastGoodPreamp = _preampDb;
       _lastGoodPresetId = _presetId;
-    } catch (_) {
+    } catch (e, st) {
       // Non-fatal if startup application fails
+      AppLogger.instance.warn(
+        'EqController',
+        'Startup EQ applyAll failed',
+        e,
+        st,
+      );
     }
   }
 
@@ -85,7 +92,8 @@ class EqController extends ChangeNotifier {
       store.update((s) => s.copyWith(enabled: enabled));
       notifyListeners();
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn('EqController', 'setEnabled failed', e, st);
       return AudioSettingsError.failed;
     }
   }
@@ -178,7 +186,8 @@ class EqController extends ChangeNotifier {
           ));
       notifyListeners();
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn('EqController', 'applyPreset failed', e, st);
       // Revert to last good values
       _gains = List.of(_lastGoodGains);
       _preampDb = _lastGoodPreamp;
@@ -295,7 +304,13 @@ class EqController extends ChangeNotifier {
               preampDb: _lastGoodPreamp,
             ));
       }
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'EqController',
+        'EQ engine dispatch failed, reverting gains',
+        e,
+        st,
+      );
       // Revert to last successfully applied values
       _gains = List.of(_lastGoodGains);
       _preampDb = _lastGoodPreamp;

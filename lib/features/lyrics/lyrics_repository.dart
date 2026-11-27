@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../diagnostics/app_logger.dart';
 import '../../library/artist_splitter.dart';
 import '../../library/tag_reader.dart';
 import 'lrc_parser.dart';
@@ -232,8 +233,14 @@ class LyricsRepository {
           source: LyricsSourceOrigin.embedded,
         );
       }
-    } catch (_) {
+    } catch (e, st) {
       // Local file access failures return null safely
+      AppLogger.instance.warn(
+        'LyricsRepository',
+        'Failed reading local lyrics source',
+        e,
+        st,
+      );
     }
 
     return null;
@@ -317,11 +324,24 @@ class LyricsRepository {
       }
 
       return const LyricsResultError(LyricsErrorReason.badResponse);
-    } on TimeoutException {
+    } on TimeoutException catch (e, st) {
+      AppLogger.instance.warn(
+        'LyricsRepository',
+        'LRCLIB request timed out',
+        e,
+        st,
+      );
       return const LyricsResultError(LyricsErrorReason.timeout);
-    } on SocketException {
+    } on SocketException catch (e, st) {
+      AppLogger.instance.warn('LyricsRepository', 'LRCLIB request offline', e, st);
       return const LyricsResultError(LyricsErrorReason.offline);
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'LyricsRepository',
+        'LRCLIB online lookup failed',
+        e,
+        st,
+      );
       return const LyricsResultError(LyricsErrorReason.offline);
     }
   }
@@ -347,7 +367,13 @@ class LyricsRepository {
       }
 
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'LyricsRepository',
+        'Failed parsing LRCLIB JSON response',
+        e,
+        st,
+      );
       return null;
     }
   }
@@ -400,7 +426,13 @@ class LyricsRepository {
       }
 
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'LyricsRepository',
+        'Failed parsing LRCLIB search candidates',
+        e,
+        st,
+      );
       return null;
     }
   }

@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/ui/settings/settings_store.dart';
 import 'saved_session.dart';
 import 'session_store.dart';
@@ -64,7 +65,13 @@ Future<SessionRestoreResult> restoreSession({
             return true;
           }
           return File(path).existsSync();
-        } catch (_) {
+        } catch (e, st) {
+          AppLogger.instance.debug(
+            'SessionRestorer',
+            'File existence probe failed during restore',
+            e,
+            st,
+          );
           return false;
         }
       };

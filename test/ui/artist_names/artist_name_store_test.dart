@@ -157,8 +157,12 @@ void main() {
       await store3.init();
       expect(store3.count, equals(0));
 
-      final badFile = File(p.join(tempDir.path, 'artist_display_names.json.bad'));
-      expect(badFile.existsSync(), isTrue);
+      final badFiles = tempDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => RegExp(r'artist_display_names\.json\.bad-\d{8}-\d{6}(?:-\d+)?$').hasMatch(f.path))
+          .toList();
+      expect(badFiles, hasLength(1));
       store3.dispose();
     });
 

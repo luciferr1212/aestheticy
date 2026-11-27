@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../audio/audio_models.dart';
 import '../../audio/playback_controller.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../features/collections/user_collections.dart';
 import '../../library/models.dart';
 import '../glass/glass_button.dart';
@@ -239,7 +240,13 @@ class _QueueViewState extends State<QueueView> {
                     );
                   }
                 }
-              } catch (e) {
+              } catch (e, st) {
+                AppLogger.instance.warn(
+                  'QueueView',
+                  'Save queue as playlist failed',
+                  e,
+                  st,
+                );
                 setDialogState(() => errorMessage = e.toString());
               }
             }

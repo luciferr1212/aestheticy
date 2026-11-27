@@ -287,6 +287,7 @@ class _QueueRowState extends State<QueueRow> {
           coverFile = File(CoverCache.pathFor(coverKey));
         }
       } on StateError {
+        // ignore-silent: reading optional cover cache falls back cleanly when uninitialized
         coverFile = null;
       }
     }

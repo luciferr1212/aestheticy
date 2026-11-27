@@ -4,6 +4,8 @@ library;
 
 import 'package:path/path.dart' as p;
 
+import '../diagnostics/app_logger.dart';
+
 /// Pure utilities for converting between `file://` URIs and filesystem paths.
 abstract final class FilePathUtils {
   /// Returns `true` when [value] uses Windows drive/UNC syntax or backslashes.
@@ -27,7 +29,14 @@ abstract final class FilePathUtils {
         var decoded = afterScheme;
         try {
           decoded = Uri.decodeFull(decoded);
-        } catch (_) {}
+        } catch (e, st) {
+          AppLogger.instance.debug(
+            'FilePathUtils',
+            'Percent decode fallback used on Windows file URI',
+            e,
+            st,
+          );
+        }
         return decoded.replaceAll('/', r'\');
       }
 
@@ -41,15 +50,28 @@ abstract final class FilePathUtils {
             return uri.toFilePath(windows: true);
           }
           return uri.toFilePath(windows: false);
-        } catch (_) {
-          // Fall through to best-effort manual decode below.
+        } catch (e, st) {
+          // Fall through to manual decode below.
+          AppLogger.instance.debug(
+            'FilePathUtils',
+            'Uri.toFilePath failed, using manual path fallback',
+            e,
+            st,
+          );
         }
       }
 
       var rest = afterScheme;
       try {
         rest = Uri.decodeFull(rest);
-      } catch (_) {}
+      } catch (e, st) {
+        AppLogger.instance.debug(
+          'FilePathUtils',
+          'Percent decode fallback used on URI remainder',
+          e,
+          st,
+        );
+      }
       if (RegExp(r'^/[a-zA-Z]:($|[/\\])').hasMatch(rest)) {
         return rest.substring(1).replaceAll('/', r'\');
       }

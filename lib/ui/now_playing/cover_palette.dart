@@ -6,6 +6,7 @@ import 'dart:ui';
 
 import 'package:flutter/painting.dart';
 
+import '../../diagnostics/app_logger.dart';
 import '../../library/cover_cache.dart';
 
 /// Extracted calm color palette from album artwork.
@@ -250,7 +251,9 @@ Future<CoverPalette> paletteForCover(
     _paletteLruCache[coverKey] = palette;
 
     return palette;
-  } catch (_) {
+  } catch (e, st) {
+    // ignore-silent: reading optional cover color palette cache falls back to CoverPalette.fallback
+    AppLogger.instance.debug('CoverPalette', 'Palette extraction fallback', e, st);
     return CoverPalette.fallback;
   } finally {
     image?.dispose();

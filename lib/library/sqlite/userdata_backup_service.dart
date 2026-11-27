@@ -267,7 +267,10 @@ class SqliteUserDataBackupService implements UserDataBackupService {
     } finally {
       try {
         standalone?.close();
-      } catch (_) {}
+      } catch (e, st) {
+        // ignore-silent: closing standalone SQLite backup connection after VACUUM INTO
+        _log.debug('Backup', 'Failed closing standalone backup connection', e, st);
+      }
     }
   }
 
@@ -276,18 +279,24 @@ class SqliteUserDataBackupService implements UserDataBackupService {
     if (attachedDb != null) {
       try {
         attachedDb.execute('PRAGMA userdata.wal_checkpoint(TRUNCATE);');
-      } catch (_) {}
+      } catch (e, st) {
+        _log.debug('Backup', 'Attached WAL checkpoint skipped before copy', e, st);
+      }
     } else {
       Database? standalone;
       try {
         standalone = sqlite3.open(userDataDbPath);
         standalone.execute('PRAGMA busy_timeout = 1000;');
         standalone.execute('PRAGMA wal_checkpoint(TRUNCATE);');
-      } catch (_) {
+      } catch (e, st) {
+        _log.debug('Backup', 'Standalone WAL checkpoint skipped before copy', e, st);
       } finally {
         try {
           standalone?.close();
-        } catch (_) {}
+        } catch (e, st) {
+          // ignore-silent: closing standalone SQLite connection after WAL checkpoint
+          _log.debug('Backup', 'Failed closing standalone checkpoint connection', e, st);
+        }
       }
     }
 
@@ -322,7 +331,15 @@ class SqliteUserDataBackupService implements UserDataBackupService {
       if (file.existsSync()) {
         file.deleteSync();
       }
-    } catch (_) {}
+    } catch (e, st) {
+      // ignore-silent: deleting temporary backup file created by UserDataBackupService
+      AppLogger.instance.debug(
+        'Backup',
+        'Failed deleting temporary backup file',
+        e,
+        st,
+      );
+    }
   }
 
   static String _formatDateKey(DateTime dt) {

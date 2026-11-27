@@ -5,6 +5,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:aestheticy/core/result.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/library_scanner.dart';
 import 'package:aestheticy/library/models.dart';
@@ -45,6 +47,25 @@ class ScanService extends ChangeNotifier {
 
   /// Broadcast stream of [ScanProgress] events emitted during scans.
   Stream<ScanProgress> get progressStream => _progressController.stream;
+
+  /// Adds a filesystem folder path to the library and scans it immediately,
+  /// returning a typed [Result] without throwing on I/O or database failures.
+  Future<Result<LibraryFolder>> addFolderResult(String path) async {
+    try {
+      final folder = await addFolder(path);
+      return Ok(folder);
+    } catch (error, stackTrace) {
+      AppLogger.instance.error(
+        'ScanService',
+        'Failed to add folder',
+        error,
+        stackTrace,
+      );
+      return Err(
+        AppError.fromException(error, stackTrace, 'error.folderAddFailed'),
+      );
+    }
+  }
 
   /// Adds a filesystem folder path to the library and scans it immediately.
   Future<LibraryFolder> addFolder(String path) async {

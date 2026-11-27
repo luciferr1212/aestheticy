@@ -103,7 +103,7 @@ class AppShutdownCoordinator {
     try {
       await logger.flush();
     } catch (_) {
-      // Ignore flush failure on exit
+      // ignore-silent: flushing AppLogger during shutdown cannot log recursively
     }
     flushSw.stop();
 

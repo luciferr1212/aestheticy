@@ -282,7 +282,13 @@ class LegacyUserDataMigrator {
   static bool _safeHasLegacyTables(Database db) {
     try {
       return _existingLegacyTables(db).isNotEmpty;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.debug(
+        'Migration',
+        'Failed inspecting legacy tables during recovery',
+        e,
+        st,
+      );
       return false;
     }
   }
@@ -376,7 +382,15 @@ class LegacyUserDataMigrator {
           if (destFile.existsSync()) {
             try {
               destFile.deleteSync();
-            } catch (_) {}
+            } catch (delErr, delSt) {
+              // ignore-silent: deleting partial temporary backup file before checkpoint fallback
+              log.debug(
+                'Migration',
+                'Failed removing partial VACUUM INTO temp file',
+                delErr,
+                delSt,
+              );
+            }
           }
         }
       }
@@ -384,8 +398,14 @@ class LegacyUserDataMigrator {
       if (!vacuumed) {
         try {
           db.execute('PRAGMA main.wal_checkpoint(TRUNCATE);');
-        } catch (_) {
+        } catch (e, st) {
           // Non-WAL databases or read-only handles may ignore checkpoint.
+          log.debug(
+            'Migration',
+            'WAL checkpoint skipped before pre-split copy',
+            e,
+            st,
+          );
         }
         final sourceFile = File(libraryFilePath);
         if (!sourceFile.existsSync()) {
@@ -567,7 +587,10 @@ class LegacyUserDataMigrator {
     } catch (e, st) {
       try {
         db.execute('ROLLBACK;');
-      } catch (_) {}
+      } catch (rbErr, rbSt) {
+        // ignore-silent: rolling back already-failing userdata copy transaction
+        log.debug('Migration', 'Rollback after Step (b) error failed', rbErr, rbSt);
+      }
       log.error('Migration', 'Step (b) copy transaction failed: $e', e, st);
       return false;
     }
@@ -593,7 +616,13 @@ class LegacyUserDataMigrator {
         db.execute('ALTER TABLE main.$table RENAME TO legacy_$table;');
       }
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'Migration',
+        'Step (c) legacy table rename transaction failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -619,7 +648,13 @@ class LegacyUserDataMigrator {
       );
       db.execute('PRAGMA userdata.user_version = $kUserDataSchemaVersion;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'Migration',
+        'Step (d) complete state commit failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }

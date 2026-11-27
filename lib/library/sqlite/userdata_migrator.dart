@@ -3,6 +3,7 @@ library;
 
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/file_path_utils.dart';
 
 /// Current schema version for `userdata.db`.
@@ -77,7 +78,13 @@ class UserDataMigrator {
         );
       ''');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'UserDataMigrator',
+        'UserData schema migration transaction failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -181,7 +188,13 @@ class UserDataMigrator {
       createV1SchemaStatements(db);
       db.execute('PRAGMA userdata.user_version = 1;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'UserDataMigrator',
+        'UserData schema migration transaction failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -243,7 +256,13 @@ class UserDataMigrator {
       createV2SchemaStatements(db);
       db.execute('PRAGMA userdata.user_version = 2;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'UserDataMigrator',
+        'UserData schema migration transaction failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -301,7 +320,13 @@ class UserDataMigrator {
     try {
       createV3SchemaStatements(db);
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'UserDataMigrator',
+        'UserData schema migration transaction failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -346,7 +371,13 @@ class UserDataMigrator {
     try {
       db.execute('PRAGMA userdata.user_version = 3;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'UserDataMigrator',
+        'UserData schema migration transaction failed',
+        e,
+        st,
+      );
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -385,7 +416,13 @@ class UserDataMigrator {
           stmt.close();
         }
         db.execute('COMMIT;');
-      } catch (e) {
+      } catch (e, st) {
+        AppLogger.instance.error(
+          'UserDataMigrator',
+          'Key backfill batch failed for $table.$keyCol',
+          e,
+          st,
+        );
         db.execute('ROLLBACK;');
         rethrow;
       }

@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'package:mpv_audio_kit/mpv_audio_kit.dart' as mpv;
 
+import '../diagnostics/app_logger.dart';
 import 'audio_engine.dart';
 import 'audio_models.dart';
 
@@ -163,13 +164,25 @@ class MpvAudioEngine extends AudioEngine {
     // This prevents mpv from failing when external .lrc lyrics or sidecar tracks are present.
     try {
       await _player!.setRawProperty('sub-auto', 'no');
-    } catch (_) {
+    } catch (e, st) {
       // Fallback: the .lrc safety net filter in errorStream handles it if unsupported.
+      AppLogger.instance.warn(
+        'MpvAudioEngine',
+        'Failed setting sub-auto=no',
+        e,
+        st,
+      );
     }
     try {
       await _player!.setRawProperty('audio-file-auto', 'no');
-    } catch (_) {
+    } catch (e, st) {
       // Fallback: safety net filter handles it.
+      AppLogger.instance.warn(
+        'MpvAudioEngine',
+        'Failed setting audio-file-auto=no',
+        e,
+        st,
+      );
     }
 
     // Cache initial devices synchronously from player state if already available
@@ -533,9 +546,15 @@ class MpvAudioEngine extends AudioEngine {
 
       // Enable prefetch  →  mpv property `prefetch-playlist=yes`
       await p.setPrefetchPlaylist(true);
-    } catch (e) {
+    } catch (e, st) {
       // The real state of mpv's playlist is unknown now; forget our mirror
       // and report a non-fatal error instead of losing it silently.
+      AppLogger.instance.warn(
+        'MpvAudioEngine',
+        'Failed preloading next track',
+        e,
+        st,
+      );
       _preloadedUri = null;
       _errorCtrl.add(AudioError(
         code: AudioErrorCode.engineFailure,
@@ -602,8 +621,14 @@ class MpvAudioEngine extends AudioEngine {
           return;
         }
       }
-    } catch (_) {
+    } catch (e, st) {
       // Fall back to state.audioDevices if raw node query fails
+      AppLogger.instance.warn(
+        'MpvAudioEngine',
+        'audio-device-list query failed, using player state fallback',
+        e,
+        st,
+      );
     }
 
     final stateDevices = p.state.audioDevices;

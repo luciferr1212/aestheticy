@@ -1,5 +1,6 @@
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/sqlite_row_mappers.dart';
@@ -45,7 +46,13 @@ class SqliteTracksStore {
       _db.execute('DELETE FROM main.tracks WHERE folder_id = ?;', [folderId]);
       _db.execute('DELETE FROM main.folders WHERE id = ?;', [folderId]);
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'TracksStore',
+        'Tracks write transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -62,7 +69,13 @@ class SqliteTracksStore {
       _db.execute('DELETE FROM main.tracks;');
       _db.execute('DELETE FROM main.folders;');
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'TracksStore',
+        'Tracks write transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -145,7 +158,13 @@ class SqliteTracksStore {
 
       stmt.close();
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'TracksStore',
+        'Tracks write transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -180,7 +199,13 @@ class SqliteTracksStore {
       }
       stmt.close();
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'TracksStore',
+        'Tracks write transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }

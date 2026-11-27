@@ -192,10 +192,10 @@ class SqliteLibraryRepository implements LibraryRepository {
       if (!userFile.parent.existsSync()) {
         userFile.parent.createSync(recursive: true);
       }
-    } catch (e) {
+    } catch (e, st) {
       userDataParentError = true;
       parentErrorReason = 'Cannot prepare userdata directory: $e';
-      AppLogger.instance.error('Database', parentErrorReason);
+      AppLogger.instance.error('Database', parentErrorReason, e, st);
     }
 
     final libPrep = DatabaseProtection.prepareLibraryDb(
@@ -318,7 +318,13 @@ class SqliteLibraryRepository implements LibraryRepository {
         libraryRecreated: libPrep.recreated,
         reason: e.toString(),
       );
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'Database',
+        'Unexpected failure opening file library repository',
+        e,
+        st,
+      );
       db.close();
       rethrow;
     }
@@ -361,7 +367,13 @@ class SqliteLibraryRepository implements LibraryRepository {
         userDataSchema: schema,
         startupReport: report,
       );
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'Database',
+        'Failed opening safe read-only fallback repository',
+        e,
+        st,
+      );
       db.close();
       rethrow;
     }

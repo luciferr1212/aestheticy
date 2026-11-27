@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../../diagnostics/app_logger.dart';
 import '../../library/library_repository.dart';
 import '../../library/library_scanner.dart';
 import '../../library/models.dart';
@@ -175,8 +176,13 @@ class LibraryDataCache extends ChangeNotifier {
         _revision++;
         notifyListeners();
       }
-    } catch (_) {
-      // Graceful error handling
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'LibraryDataCache',
+        'Background library cache refresh failed',
+        e,
+        st,
+      );
     } finally {
       _isRefreshing = false;
       if (_pendingRefresh && !_disposed) {

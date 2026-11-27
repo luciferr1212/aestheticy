@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../features/integration/tray_window_controller.dart';
 import '../../library/library_repository.dart';
 import '../artist_names/artist_name_store.dart';
@@ -139,7 +140,13 @@ class _SettingsViewState extends State<SettingsView> {
           _isLoadingStats = false;
         });
       }
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'SettingsView',
+        'Failed loading library statistics',
+        e,
+        st,
+      );
       if (mounted) {
         setState(() => _isLoadingStats = false);
       }

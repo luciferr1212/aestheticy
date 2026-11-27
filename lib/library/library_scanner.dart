@@ -7,6 +7,7 @@ import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/cover_cache.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
@@ -232,7 +233,14 @@ class LibraryScanner {
       linksRebuilt = true;
       try {
         await repository.rebuildArtistLinks();
-      } catch (_) {}
+      } catch (e, st) {
+        AppLogger.instance.warn(
+          'LibraryScanner',
+          'Failed rebuilding artist links after scan',
+          e,
+          st,
+        );
+      }
     }
 
     try {
@@ -497,7 +505,13 @@ void _scanWorkerEntry(_WorkerConfig config) async {
         throw const FileSystemException('Directory unreadable (simulated permission/IO error)');
       }
       entities = currentDir.listSync(followLinks: false);
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'LibraryScanner',
+        'Directory unreadable during scan',
+        e,
+        st,
+      );
       unreadableDirsCount++;
       continue;
     }
@@ -520,7 +534,13 @@ void _scanWorkerEntry(_WorkerConfig config) async {
         FileStat stat;
         try {
           stat = entity.statSync();
-        } catch (_) {
+        } catch (e, st) {
+          AppLogger.instance.warn(
+            'LibraryScanner',
+            'Failed stat on scanned file',
+            e,
+            st,
+          );
           errorCount++;
           corruptPaths.add(filePath);
           processedCount++;
@@ -651,8 +671,14 @@ void _scanWorkerEntry(_WorkerConfig config) async {
             addedInBatch = 0;
             updatedInBatch = 0;
           }
-        } catch (e) {
+        } catch (e, st) {
           // Per-file try/catch: a corrupt file never stops the scan; count it and record the path.
+          AppLogger.instance.warn(
+            'LibraryScanner',
+            'Failed reading tags for scanned file',
+            e,
+            st,
+          );
           errorCount++;
           corruptPaths.add(filePath);
           processedCount++;

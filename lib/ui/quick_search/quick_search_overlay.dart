@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../audio/playback_controller.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../library/cover_cache.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
@@ -259,7 +260,13 @@ class _QuickSearchOverlayState extends State<QuickSearchOverlay> {
         _isLoading = false;
         _selectedIndex = 0;
       });
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'QuickSearch',
+        'Quick search query failed',
+        e,
+        st,
+      );
       if (token == _activeQueryToken && mounted) {
         setState(() => _isLoading = false);
       }

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../diagnostics/app_logger.dart';
 import '../../../library/library_repository.dart';
 import '../../../library/models.dart';
 import '../../../library/user_data_access_mode.dart';
@@ -238,7 +239,13 @@ class ArtistTrackActionMenu extends StatelessWidget {
               );
               await onReload();
             }
-          } on UserDataReadOnlyException catch (e) {
+          } on UserDataReadOnlyException catch (e, st) {
+            AppLogger.instance.warn(
+              'ArtistTracks',
+              'addNoSplit blocked in safe read-only mode',
+              e,
+              st,
+            );
             if (context.mounted) {
               messenger.showSnackBar(
                 SnackBar(content: Text(context.t(e.messageKey))),

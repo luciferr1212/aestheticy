@@ -168,7 +168,9 @@ class MediaSessionController {
         if (CoverCache.hasCover(coverKey)) {
           coverPath = CoverCache.pathFor(coverKey);
         }
-      } catch (_) {
+      } catch (e, st) {
+        // ignore-silent: reading optional cover cache path falls back without SMTC artwork
+        AppLogger.instance.debug('MediaSession', 'Optional cover path lookup failed', e, st);
         coverPath = null;
       }
     }

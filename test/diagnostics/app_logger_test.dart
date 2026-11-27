@@ -71,47 +71,104 @@ void main() {
       final posixSanitized = AppLogger.sanitizeMessage(posixInput, userName: 'mido');
       expect(posixSanitized, isNot(contains('/home/mido/tracks/jazz')));
       expect(posixSanitized, contains('take_five.flac'));
+
+      // Quoted paths with spaces, UNC paths, and file:// URIs strip to basename
+      const extraInput =
+          'Opened "C:\\Users\\mido\\My Music\\Artist Name\\track 01.mp3" '
+          'from \\\\NAS\\MusicShare\\Albums\\cover.jpg and file:///D:/Audio/song.wav';
+      final extraSanitized = AppLogger.sanitizeMessage(extraInput, userName: 'mido');
+      expect(extraSanitized, isNot(contains('My Music')));
+      expect(extraSanitized, isNot(contains('NAS')));
+      expect(extraSanitized, isNot(contains('D:/Audio')));
+      expect(extraSanitized, contains('"track 01.mp3"'));
+      expect(extraSanitized, contains('cover.jpg'));
+      expect(extraSanitized, contains('song.wav'));
     });
 
-    test('Rotation rotates when exceeding 1 MB and keeps at most 3 old files', () async {
+    test('Levels debug/info/warn/error, minLevel filtering, customSink, and AppLogger.swallow',
+        () async {
+      final buffer = StringBuffer();
+      final logger = AppLogger(
+        customSink: buffer,
+        minLevel: LogLevel.warn,
+        userNameProvider: () => 'mido',
+      );
+      await logger.init();
+
+      logger.debug('Audio', 'Filtered debug');
+      logger.info('Audio', 'Filtered info');
+      logger.warn('Audio', 'Kept warn C:\\Users\\mido\\Music\\warn.mp3');
+      logger.error('Audio', 'Kept error');
+
+      final out = buffer.toString();
+      expect(out, isNot(contains('Filtered debug')));
+      expect(out, isNot(contains('Filtered info')));
+      expect(out, contains('[WARN] [Audio] Kept warn warn.mp3'));
+      expect(out, contains('[ERROR] [Audio] Kept error'));
+      await logger.dispose();
+
+      // AppLogger.swallow emits debug entry via instance with redacted context
+      final swallowBuffer = StringBuffer();
+      final prev = AppLogger.instance;
+      AppLogger.instance = AppLogger(
+        customSink: swallowBuffer,
+        minLevel: LogLevel.debug,
+      );
+      addTearDown(() => AppLogger.instance = prev);
+
+      try {
+        throw StateError('failed reading C:\\Users\\mido\\Music\\bad.flac');
+      } catch (e, st) {
+        AppLogger.swallow(
+          e,
+          st,
+          where: 'TrackScanner',
+          context: 'while cleaning C:\\Users\\mido\\temp\\work.tmp',
+        );
+      }
+
+      final swallowOut = swallowBuffer.toString();
+      expect(swallowOut, contains('[DEBUG] [TrackScanner]'));
+      expect(swallowOut, contains('Swallowed error in TrackScanner'));
+      expect(swallowOut, contains('work.tmp'));
+      expect(swallowOut, contains('bad.flac'));
+      expect(swallowOut, isNot(contains('C:\\Users\\mido')));
+    });
+
+    test('Rotation rotates when exceeding 1 MB, keeps 5 files total, and preserves unrelated files',
+        () async {
       final logDir = Directory('${tempDir.path}/logs_rotation');
+      logDir.createSync(recursive: true);
+      final unrelated = File('${logDir.path}/custom_notes.txt')
+        ..writeAsStringSync('keep me');
+      final staleArchive = File('${logDir.path}/aestheticy.5.log')
+        ..writeAsStringSync('old archive beyond keep-5');
+
       final logger = AppLogger(logsDirectory: logDir);
       await logger.init();
 
       final logFile = File('${logDir.path}/aestheticy.log');
-      // Create a large file > 1MB
       final largeChunk = 'x' * (1024 * 512); // 512 KB
-      await logFile.writeAsString(largeChunk);
-      await logFile.writeAsString(largeChunk, mode: FileMode.append);
-      expect(logFile.lengthSync(), greaterThanOrEqualTo(AppLogger.maxFileSizeBytes));
 
-      // Writing a new message triggers rotation
-      logger.info('Rotation', 'Message after 1st rotation trigger');
-      await logger.flush();
+      for (var round = 1; round <= 5; round++) {
+        await logFile.writeAsString(largeChunk);
+        await logFile.writeAsString(largeChunk, mode: FileMode.append);
+        expect(logFile.lengthSync(), greaterThanOrEqualTo(AppLogger.maxFileSizeBytes));
+        logger.info('Rotation', 'Message after rotation trigger #$round');
+        await logger.flush();
+      }
 
-      expect(File('${logDir.path}/aestheticy.1.log').existsSync(), isTrue);
+      // Keeps aestheticy.log + aestheticy.1.log .. aestheticy.4.log (5 total)
+      expect(logFile.existsSync(), isTrue);
+      for (var i = 1; i <= 4; i++) {
+        expect(File('${logDir.path}/aestheticy.$i.log').existsSync(), isTrue);
+      }
+      expect(File('${logDir.path}/aestheticy.5.log').existsSync(), isFalse);
+      expect(staleArchive.existsSync(), isFalse);
 
-      // Trigger 2nd rotation
-      await logFile.writeAsString(largeChunk);
-      await logFile.writeAsString(largeChunk, mode: FileMode.append);
-      logger.info('Rotation', 'Message after 2nd rotation trigger');
-      await logger.flush();
-      expect(File('${logDir.path}/aestheticy.2.log').existsSync(), isTrue);
-
-      // Trigger 3rd rotation
-      await logFile.writeAsString(largeChunk);
-      await logFile.writeAsString(largeChunk, mode: FileMode.append);
-      logger.info('Rotation', 'Message after 3rd rotation trigger');
-      await logger.flush();
-      expect(File('${logDir.path}/aestheticy.3.log').existsSync(), isTrue);
-
-      // Trigger 4th rotation (3.log overwritten, never 4.log)
-      await logFile.writeAsString(largeChunk);
-      await logFile.writeAsString(largeChunk, mode: FileMode.append);
-      logger.info('Rotation', 'Message after 4th rotation trigger');
-      await logger.flush();
-      expect(File('${logDir.path}/aestheticy.3.log').existsSync(), isTrue);
-      expect(File('${logDir.path}/aestheticy.4.log').existsSync(), isFalse);
+      // Unrelated files in the log directory are never touched
+      expect(unrelated.existsSync(), isTrue);
+      expect(unrelated.readAsStringSync(), equals('keep me'));
 
       await logger.dispose();
     });

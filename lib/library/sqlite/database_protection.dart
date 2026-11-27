@@ -103,7 +103,13 @@ class DatabaseProtection {
         QuickCheckStatus.corrupt,
         'PRAGMA quick_check failed: ${rows.map((r) => r.values.first).join('; ')}',
       );
-    } on SqliteException catch (e) {
+    } on SqliteException catch (e, st) {
+      AppLogger.instance.debug(
+        'DatabaseProtection',
+        'quick_check SqliteException (${e.resultCode & 0xFF})',
+        e,
+        st,
+      );
       final primaryCode = e.resultCode & 0xFF;
       // 5=SQLITE_BUSY, 6=SQLITE_LOCKED, 8=SQLITE_READONLY, 10=SQLITE_IOERR, 14=SQLITE_CANTOPEN
       if (primaryCode == 5 ||
@@ -118,12 +124,24 @@ class DatabaseProtection {
       }
       // 11=SQLITE_CORRUPT, 26=SQLITE_NOTADB
       return QuickCheckResult(QuickCheckStatus.corrupt, e.toString());
-    } on FileSystemException catch (e) {
+    } on FileSystemException catch (e, st) {
+      AppLogger.instance.debug(
+        'DatabaseProtection',
+        'quick_check FileSystemException',
+        e,
+        st,
+      );
       return QuickCheckResult(
         QuickCheckStatus.lockedOrUnreadable,
         e.toString(),
       );
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'DatabaseProtection',
+        'Unexpected error in quick_check',
+        e,
+        st,
+      );
       return QuickCheckResult(
         QuickCheckStatus.lockedOrUnreadable,
         e.toString(),
@@ -131,7 +149,15 @@ class DatabaseProtection {
     } finally {
       try {
         db?.close();
-      } catch (_) {}
+      } catch (e, st) {
+        // ignore-silent: closing SQLite handle after quick_check completes or fails
+        AppLogger.instance.debug(
+          'DatabaseProtection',
+          'Failed closing SQLite handle after quick_check',
+          e,
+          st,
+        );
+      }
     }
   }
 
@@ -484,7 +510,15 @@ class DatabaseProtection {
       if (f.existsSync()) {
         f.deleteSync();
       }
-    } catch (_) {}
+    } catch (e, st) {
+      // ignore-silent: deleting temporary restoring staging file created by prepareUserDataDb
+      AppLogger.instance.debug(
+        'Database',
+        'Failed deleting temporary restoring file',
+        e,
+        st,
+      );
+    }
   }
 
   static void _rollbackQuarantine(
@@ -504,7 +538,14 @@ class DatabaseProtection {
         if (qSide.existsSync() && !origSide.existsSync()) {
           try {
             qSide.renameSync(origSide.path);
-          } catch (_) {}
+          } catch (e, st) {
+            log.warning(
+              'Database',
+              'Failed rolling back WAL/SHM sidecar ($suffix)',
+              e,
+              st,
+            );
+          }
         }
       }
     } catch (e, st) {
@@ -539,7 +580,14 @@ class DatabaseProtection {
         if (sidecar.existsSync()) {
           try {
             sidecar.renameSync('$targetBase$suffix');
-          } catch (_) {}
+          } catch (e, st) {
+            log.warning(
+              'Database',
+              'Failed quarantining WAL/SHM sidecar ($suffix)',
+              e,
+              st,
+            );
+          }
         }
       }
       return movedMain ? targetBase : '';

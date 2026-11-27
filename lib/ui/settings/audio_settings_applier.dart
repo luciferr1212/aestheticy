@@ -1,5 +1,6 @@
 import '../../audio/audio_engine.dart';
 import '../../audio/audio_models.dart';
+import '../../diagnostics/app_logger.dart';
 import 'settings_store.dart';
 
 /// Error categories surfaced when applying audio settings mutations.
@@ -30,8 +31,14 @@ class AudioSettingsApplier {
   Future<void> applyAll() async {
     try {
       await engine.refreshDevices();
-    } catch (_) {
+    } catch (e, st) {
       // Non-fatal if device discovery fails during startup
+      AppLogger.instance.warn(
+        'AudioSettings',
+        'Startup refreshDevices failed',
+        e,
+        st,
+      );
     }
 
     final settings = settingsStore.settings;
@@ -43,8 +50,14 @@ class AudioSettingsApplier {
       if (exists) {
         try {
           await engine.selectDevice(savedDeviceId);
-        } catch (_) {
+        } catch (e, st) {
           // Keep active device, do not overwrite saved id
+          AppLogger.instance.warn(
+            'AudioSettings',
+            'Startup selectDevice failed',
+            e,
+            st,
+          );
         }
       }
     }
@@ -53,7 +66,14 @@ class AudioSettingsApplier {
     if (engine.capabilities.exclusiveMode) {
       try {
         await engine.setExclusiveMode(settings.exclusiveMode);
-      } catch (_) {}
+      } catch (e, st) {
+        AppLogger.instance.warn(
+          'AudioSettings',
+          'Startup setExclusiveMode failed',
+          e,
+          st,
+        );
+      }
     }
 
     // 3. ReplayGain mode
@@ -64,19 +84,35 @@ class AudioSettingsApplier {
     };
     try {
       await engine.setReplayGainMode(rgMode);
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'AudioSettings',
+        'Startup setReplayGainMode failed',
+        e,
+        st,
+      );
+    }
 
     // 4. ReplayGain preamp (clamped -15.0 to 15.0 dB)
     final clampedPreamp = settings.replayGainPreampDb.clamp(-15.0, 15.0);
     try {
       await engine.setReplayGainPreamp(clampedPreamp);
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'AudioSettings',
+        'Startup setReplayGainPreamp failed',
+        e,
+        st,
+      );
+    }
 
     // 5. Volume (clamped 0.0 to 1.0)
     final clampedVolume = settings.volume.clamp(0.0, 1.0);
     try {
       await engine.setVolume(clampedVolume);
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.warn('AudioSettings', 'Startup setVolume failed', e, st);
+    }
   }
 
   /// Selects the audio output device by [id].
@@ -88,7 +124,8 @@ class AudioSettingsApplier {
       await engine.selectDevice(id);
       settingsStore.update((s) => s.copyWith(outputDeviceId: id));
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn('AudioSettings', 'setDevice failed', e, st);
       return AudioSettingsError.failed;
     }
   }
@@ -105,7 +142,8 @@ class AudioSettingsApplier {
       await engine.setExclusiveMode(enabled);
       settingsStore.update((s) => s.copyWith(exclusiveMode: enabled));
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn('AudioSettings', 'setExclusive failed', e, st);
       return AudioSettingsError.failed;
     }
   }
@@ -118,7 +156,13 @@ class AudioSettingsApplier {
       await engine.setReplayGainMode(mode);
       settingsStore.update((s) => s.copyWith(replayGainMode: mode.name));
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'AudioSettings',
+        'setReplayGainMode failed',
+        e,
+        st,
+      );
       return AudioSettingsError.failed;
     }
   }
@@ -132,7 +176,13 @@ class AudioSettingsApplier {
       await engine.setReplayGainPreamp(clamped);
       settingsStore.update((s) => s.copyWith(replayGainPreampDb: clamped));
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'AudioSettings',
+        'setReplayGainPreamp failed',
+        e,
+        st,
+      );
       return AudioSettingsError.failed;
     }
   }

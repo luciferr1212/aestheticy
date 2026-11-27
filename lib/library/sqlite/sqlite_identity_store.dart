@@ -251,7 +251,13 @@ class SqliteIdentityStore {
         updateStmt.close();
       }
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'IdentityStore',
+        'Backfill track identities transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -547,7 +553,13 @@ class SqliteIdentityStore {
       backfilledCount = _backfillUserPathsInTx(nowMs: nowMs);
 
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'IdentityStore',
+        'Backfill track identities transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }

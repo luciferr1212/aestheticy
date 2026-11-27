@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../../audio/audio_engine.dart';
 import '../../audio/playback_controller.dart';
+import '../../core/result.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../features/collections/user_collections.dart';
 import '../../features/integration/tray_window_controller.dart';
 import '../../features/library/folder_management_sheet.dart';
@@ -18,6 +20,7 @@ import '../../library/user_data_access_mode.dart';
 import '../../platform/window_service.dart';
 import '../artist_names/artist_name_store.dart';
 import '../audio_panels/eq_controller.dart';
+import '../common/error_presenter.dart';
 import '../l10n/app_strings.dart';
 import '../library/library_data_cache.dart';
 import '../lyrics/lyrics_view.dart';
@@ -413,16 +416,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _onAddFolder() async {
-    final String? path;
-    if (widget.directoryPicker != null) {
-      path = await widget.directoryPicker!();
-    } else {
-      path = await FilePicker.getDirectoryPath();
-    }
+    try {
+      final String? path;
+      if (widget.directoryPicker != null) {
+        path = await widget.directoryPicker!();
+      } else {
+        path = await FilePicker.getDirectoryPath();
+      }
 
-    if (path != null && path.isNotEmpty) {
-      await widget.scanService.addFolder(path);
-      await _loadFolders();
+      if (path == null || path.isEmpty) return;
+
+      final result = await widget.scanService.addFolderResult(path);
+      if (!mounted) return;
+      switch (result) {
+        case Ok():
+          await _loadFolders();
+        case Err(:final error):
+          ErrorPresenter.show(context, error, onRetry: _onAddFolder);
+      }
+    } catch (error, stackTrace) {
+      AppLogger.instance.error(
+        'AppShell',
+        'Directory picker failed when adding folder',
+        error,
+        stackTrace,
+      );
+      if (mounted) {
+        ErrorPresenter.show(
+          context,
+          AppError.fromException(error, stackTrace, 'error.folderAddFailed'),
+          onRetry: _onAddFolder,
+        );
+      }
     }
   }
 

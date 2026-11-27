@@ -323,7 +323,7 @@ void main() {
       final warnLines = logBuffer
           .toString()
           .split('\n')
-          .where((l) => l.contains('[WARNING]') && l.contains('[PlayRecorder]'))
+          .where((l) => l.contains('[WARN]') && l.contains('[PlayRecorder]'))
           .toList();
       expect(warnLines, hasLength(1));
       expect(await repo.playEventCount(), equals(1)); // untouched

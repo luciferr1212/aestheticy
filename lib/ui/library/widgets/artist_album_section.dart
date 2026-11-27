@@ -358,6 +358,7 @@ class ArtistAlbumCover extends StatelessWidget {
       if (!CoverCache.hasCover(key)) return null;
       return File(CoverCache.pathFor(key));
     } on StateError {
+      // ignore-silent: reading optional cover cache falls back cleanly when uninitialized
       return null;
     }
   }

@@ -6,6 +6,11 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/result.dart';
+import '../../diagnostics/app_logger.dart';
+import '../persistence/atomic_file_writer.dart';
+import '../persistence/versioned_json_store.dart';
+
 /// Minimum user-configurable lyrics offset in milliseconds (-15 seconds).
 const int kMinLyricsOffsetMs = -15000;
 
@@ -20,23 +25,53 @@ const int kLyricsOffsetStepMs = 100;
 /// Keys entries by the MD5 hash of the track file path. Offsets never expire,
 /// zero removes the entry, and writes are debounced (300 ms) and atomic.
 class LyricsOffsetStore {
+  static const int currentSchemaVersion = 1;
   static const String _fileName = 'lyrics_offsets.json';
+  static final RegExp _md5KeyPattern = RegExp(r'^[a-f0-9]{32}$');
 
   final Future<Directory> Function()? _directoryProvider;
   Directory? _directory;
+  final void Function(AppError error)? onError;
   final Map<String, int> _offsets = {};
+  Map<String, Object?> _unknownFields = const {};
   bool _loaded = false;
   Future<void>? _loadFuture;
   Timer? _debounceTimer;
   Future<void>? _writeFuture;
   bool _disposed = false;
+  AtomicFileWriter? _writer;
+  final VersionedJsonStoreHelper _versionHelper = VersionedJsonStoreHelper(
+    storeName: 'LyricsOffsetStore',
+    fileName: _fileName,
+    currentSchemaVersion: currentSchemaVersion,
+    isKnownKey: (key) => key == 'schemaVersion' || _md5KeyPattern.hasMatch(key),
+  );
 
   /// Creates a [LyricsOffsetStore] with an optional injectable [directory]
   /// or [directoryProvider].
   LyricsOffsetStore({
     this._directory,
     this._directoryProvider,
-  });
+    this.onError,
+  }) {
+    if (_directory != null) {
+      _writer = AtomicFileWriter(
+        File(p.join(_directory!.path, _fileName)),
+        onError: onError,
+      );
+    }
+  }
+
+  AtomicFileWriter? _getWriter() {
+    if (_writer != null) return _writer;
+    if (_directory != null) {
+      return _writer = AtomicFileWriter(
+        File(p.join(_directory!.path, _fileName)),
+        onError: onError,
+      );
+    }
+    return null;
+  }
 
   /// Returns the canonical MD5 storage key for [trackPath].
   static String keyForPath(String trackPath) {
@@ -68,9 +103,19 @@ class LyricsOffsetStore {
       if (!_directory!.existsSync()) {
         _directory!.createSync(recursive: true);
       }
+      _writer ??= AtomicFileWriter(
+        File(p.join(_directory!.path, _fileName)),
+        onError: onError,
+      );
       await _loadFromDisk();
-    } catch (_) {
+    } catch (e, st) {
       // Corrupt data or unavailable support dir falls back cleanly to empty.
+      AppLogger.instance.warn(
+        'LyricsOffsetStore',
+        'Failed initializing lyrics offsets store',
+        e,
+        st,
+      );
       _offsets.clear();
     } finally {
       _loaded = true;
@@ -80,29 +125,26 @@ class LyricsOffsetStore {
   Future<void> _loadFromDisk() async {
     final dir = _directory;
     if (dir == null) return;
-    final file = File(p.join(dir.path, _fileName));
-    if (!file.existsSync()) return;
-
-    try {
-      final raw = await file.readAsString();
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
-        _offsets.clear();
-        return;
-      }
+    final loaded = await _versionHelper.load(dir);
+    if (loaded.wasQuarantined) {
       _offsets.clear();
-      for (final entry in decoded.entries) {
-        final key = entry.key;
-        final val = entry.value;
-        if (key is String && val is num) {
-          final clamped = clampOffsetMs(val.round());
-          if (clamped != 0) {
-            _offsets[key] = clamped;
-          }
+      _unknownFields = const {};
+      return;
+    }
+    final data = loaded.data;
+    if (data == null) return;
+
+    _unknownFields = loaded.unknownFields;
+    _offsets.clear();
+    for (final entry in data.entries) {
+      final key = entry.key;
+      final val = entry.value;
+      if (_md5KeyPattern.hasMatch(key) && val is num) {
+        final clamped = clampOffsetMs(val.round());
+        if (clamped != 0) {
+          _offsets[key] = clamped;
         }
       }
-    } catch (_) {
-      _offsets.clear();
     }
   }
 
@@ -143,20 +185,28 @@ class LyricsOffsetStore {
   }
 
   Future<void> _writeToDisk() async {
-    final dir = _directory;
-    if (dir == null) return;
+    final writer = _getWriter();
+    if (writer == null) return;
     try {
-      if (!dir.existsSync()) {
-        dir.createSync(recursive: true);
+      final payload = _versionHelper.preparePayload(
+        _offsets.map((k, v) => MapEntry<String, Object?>(k, v)),
+        _unknownFields,
+      );
+      final encoded = jsonEncode(payload);
+      await writer.write(encoded);
+      final dir = _directory;
+      if (dir != null) {
+        _versionHelper.writeRollingBackupSync(dir, encoded);
       }
-      final targetPath = p.join(dir.path, _fileName);
-      final tmpPath = p.join(dir.path, '$_fileName.tmp');
-      final tmpFile = File(tmpPath);
-      final encoded = jsonEncode(_offsets);
-      await tmpFile.writeAsString(encoded, flush: true);
-      await tmpFile.rename(targetPath);
-    } catch (_) {
+    } catch (e, st) {
       // Preserve in-memory offsets if disk write fails.
+      AppLogger.instance.error(
+        'LyricsOffsetStore',
+        'Failed writing lyrics_offsets.json',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.settingsSaveFailed'));
     }
   }
 
@@ -170,6 +220,7 @@ class LyricsOffsetStore {
     _writeFuture =
         (_writeFuture ?? Future<void>.value()).then((_) => _writeToDisk());
     await _writeFuture;
+    await _writer?.flush();
   }
 
   /// Cancels any pending debounce timer without writing if disposed.
@@ -177,5 +228,6 @@ class LyricsOffsetStore {
     _disposed = true;
     _debounceTimer?.cancel();
     _debounceTimer = null;
+    _writer?.dispose();
   }
 }

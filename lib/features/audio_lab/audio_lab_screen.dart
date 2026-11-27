@@ -15,9 +15,12 @@ import 'package:flutter/services.dart';
 import 'package:aestheticy/audio/audio_engine.dart';
 import 'package:aestheticy/audio/audio_models.dart';
 import 'package:aestheticy/audio/playback_controller.dart';
+import 'package:aestheticy/core/result.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/features/audio_lab/widgets/audio_lab_diagnostics_sections.dart';
 import 'package:aestheticy/features/audio_lab/widgets/audio_lab_dsp_sections.dart';
 import 'package:aestheticy/features/audio_lab/widgets/audio_lab_playback_sections.dart';
+import 'package:aestheticy/ui/common/error_presenter.dart';
 
 /// Developer Audio Lab test bench screen.
 class AudioLabScreen extends StatefulWidget {
@@ -201,8 +204,12 @@ class _AudioLabScreenState extends State<AudioLabScreen> {
         setState(() {});
         _log('Added $addedCount file(s) to queue');
       }
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error('AudioLab', 'File picker error', e, st);
       _log('File picker error: $e');
+      if (mounted) {
+        ErrorPresenter.show(context, AppError.fromException(e, st));
+      }
     }
   }
 

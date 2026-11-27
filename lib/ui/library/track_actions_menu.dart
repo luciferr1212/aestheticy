@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../audio/playback_controller.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../features/collections/user_collections.dart';
 import '../../library/models.dart';
 import '../../library/track_audio_source_mapper.dart';
@@ -53,11 +54,23 @@ Future<PlaylistSummary?> showCreatePlaylistDialog(
               if (innerCtx.mounted) {
                 Navigator.of(innerCtx).pop(pl);
               }
-            } on UserDataReadOnlyException catch (e) {
+            } on UserDataReadOnlyException catch (e, st) {
+              AppLogger.instance.warn(
+                'TrackActions',
+                'Create playlist blocked in safe read-only mode',
+                e,
+                st,
+              );
               if (innerCtx.mounted) {
                 setState(() => errorMessage = innerCtx.t(e.messageKey));
               }
-            } catch (e) {
+            } catch (e, st) {
+              AppLogger.instance.warn(
+                'TrackActions',
+                'Create playlist failed',
+                e,
+                st,
+              );
               setState(() => errorMessage = e.toString());
             }
           }
@@ -159,11 +172,23 @@ Future<bool> showRenamePlaylistDialog(
               if (innerCtx.mounted) {
                 Navigator.of(innerCtx).pop(true);
               }
-            } on UserDataReadOnlyException catch (e) {
+            } on UserDataReadOnlyException catch (e, st) {
+              AppLogger.instance.warn(
+                'TrackActions',
+                'Create playlist blocked in safe read-only mode',
+                e,
+                st,
+              );
               if (innerCtx.mounted) {
                 setState(() => errorMessage = innerCtx.t(e.messageKey));
               }
-            } catch (e) {
+            } catch (e, st) {
+              AppLogger.instance.warn(
+                'TrackActions',
+                'Create playlist failed',
+                e,
+                st,
+              );
               setState(() => errorMessage = e.toString());
             }
           }
@@ -266,7 +291,13 @@ Future<bool> showDeletePlaylistDialog(
                 if (dialogCtx.mounted) {
                   Navigator.of(dialogCtx).pop(true);
                 }
-              } on UserDataReadOnlyException catch (e) {
+              } on UserDataReadOnlyException catch (e, st) {
+                AppLogger.instance.warn(
+                  'TrackActions',
+                  'Delete playlist blocked in safe read-only mode',
+                  e,
+                  st,
+                );
                 if (dialogCtx.mounted) {
                   Navigator.of(dialogCtx).pop(false);
                   ScaffoldMessenger.of(context).showSnackBar(

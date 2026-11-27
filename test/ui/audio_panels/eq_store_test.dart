@@ -124,9 +124,13 @@ void main() {
       expect(store.settings.enabled, isFalse);
       expect(store.settings.gains, everyElement(0.0));
 
-      final badFile = File('${tempDir.path}/eq_settings.json.bad');
-      expect(badFile.existsSync(), isTrue);
-      expect(badFile.readAsStringSync(), '{ invalid json syntax !!!');
+      final badFiles = tempDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => RegExp(r'eq_settings\.json\.bad-\d{8}-\d{6}(?:-\d+)?$').hasMatch(f.path))
+          .toList();
+      expect(badFiles, hasLength(1));
+      expect(badFiles.single.readAsStringSync(), '{ invalid json syntax !!!');
     });
 
     test('atomic write leaves no .tmp file behind', () async {

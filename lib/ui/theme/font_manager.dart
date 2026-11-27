@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
+import '../../diagnostics/app_logger.dart';
+
 /// Descriptor for a selectable UI font option.
 class FontOption {
   /// Font family identifier stored in settings ('system' or bundled family name).
@@ -67,8 +69,14 @@ abstract final class FontManager {
           }
         }
       }
-    } catch (_) {
+    } catch (e, st) {
       // Missing or corrupt manifest falls back to system only
+      AppLogger.instance.warn(
+        'FontManager',
+        'Failed loading FontManifest.json, falling back to system font',
+        e,
+        st,
+      );
     }
 
     return options;

@@ -301,7 +301,12 @@ void main() {
       await freshStore.init();
 
       expect(freshStore.session.isEmpty, isTrue);
-      expect(File('${tempDir.path}/session.json.bad').existsSync(), isTrue);
+      final badFiles = tempDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => RegExp(r'session\.json\.bad-\d{8}-\d{6}(?:-\d+)?$').hasMatch(f.path))
+          .toList();
+      expect(badFiles, hasLength(1));
 
       final result = await restoreSession(
         controller: controller,

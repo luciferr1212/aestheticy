@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/result.dart';
+import '../../diagnostics/app_logger.dart';
+
 /// Atomically persists string content to [target] using serialized, coalesced
 /// temporary file writes and atomic filesystem renames without deleting the target first.
 class AtomicFileWriter {
@@ -12,6 +15,9 @@ class AtomicFileWriter {
 
   /// Optional override hook for testing concurrency and slow disk writes.
   final Future<void> Function(String content)? onPerformWrite;
+
+  /// Optional error callback invoked when persisting [target] fails.
+  final void Function(AppError error)? onError;
 
   int _counter = 0;
   int _writeId = 0;
@@ -26,6 +32,7 @@ class AtomicFileWriter {
   AtomicFileWriter(
     this.target, {
     @visibleForTesting this.onPerformWrite,
+    this.onError,
   });
 
   /// Enqueues [content] to be written to disk.
@@ -62,8 +69,15 @@ class AtomicFileWriter {
 
       try {
         await performWrite(content);
-      } catch (_) {
+      } catch (e, st) {
         // Failures never break the chain
+        AppLogger.instance.error(
+          'AtomicFileWriter',
+          'Queued atomic write failed for ${p.basename(target.path)}',
+          e,
+          st,
+        );
+        onError?.call(AppError.fromException(e, st, 'error.ioFailure'));
       } finally {
         completer?.complete();
       }
@@ -91,7 +105,14 @@ class AtomicFileWriter {
     if (!parentDir.existsSync()) {
       try {
         await parentDir.create(recursive: true);
-      } catch (_) {}
+      } catch (e, st) {
+        AppLogger.instance.warn(
+          'AtomicFileWriter',
+          'Failed creating parent directory for ${p.basename(target.path)}',
+          e,
+          st,
+        );
+      }
     }
 
     final tmpFile = File(p.join(
@@ -109,7 +130,13 @@ class AtomicFileWriter {
 
       try {
         await tmpFile.rename(target.path);
-      } catch (_) {
+      } catch (renameErr, renameSt) {
+        AppLogger.instance.debug(
+          'AtomicFileWriter',
+          'Atomic rename failed, attempting copy fallback',
+          renameErr,
+          renameSt,
+        );
         // Fallback 1: copy temp to target, then delete temp
         try {
           await tmpFile.copy(target.path);
@@ -117,25 +144,61 @@ class AtomicFileWriter {
             if (tmpFile.existsSync()) {
               await tmpFile.delete();
             }
-          } catch (_) {}
-        } catch (_) {
+          } catch (delErr, delSt) {
+            // ignore-silent: deleting temporary file created by AtomicFileWriter
+            AppLogger.instance.debug(
+              'AtomicFileWriter',
+              'Failed removing temp file after copy fallback',
+              delErr,
+              delSt,
+            );
+          }
+        } catch (copyErr, copySt) {
+          AppLogger.instance.debug(
+            'AtomicFileWriter',
+            'Copy fallback failed, attempting direct write',
+            copyErr,
+            copySt,
+          );
           // Fallback 2: write directly to target
           try {
             await target.writeAsString(content, flush: true);
-          } catch (_) {
-            // Never throw to callers
+          } catch (directErr, directSt) {
+            AppLogger.instance.error(
+              'AtomicFileWriter',
+              'All write fallbacks failed for ${p.basename(target.path)}',
+              directErr,
+              directSt,
+            );
+            onError?.call(
+              AppError.fromException(directErr, directSt, 'error.ioFailure'),
+            );
           }
         }
       }
-    } catch (_) {
-      // Never throw to callers
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'AtomicFileWriter',
+        'Temp write failed for ${p.basename(target.path)}',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.ioFailure'));
     } finally {
       // Always delete leftover temp file
       try {
         if (tmpFile.existsSync()) {
           await tmpFile.delete();
         }
-      } catch (_) {}
+      } catch (e, st) {
+        // ignore-silent: deleting temporary file created by AtomicFileWriter
+        AppLogger.instance.debug(
+          'AtomicFileWriter',
+          'Failed deleting leftover temp file',
+          e,
+          st,
+        );
+      }
     }
   }
 
@@ -148,7 +211,14 @@ class AtomicFileWriter {
     if (!parentDir.existsSync()) {
       try {
         parentDir.createSync(recursive: true);
-      } catch (_) {}
+      } catch (e, st) {
+        AppLogger.instance.warn(
+          'AtomicFileWriter',
+          'Failed creating parent directory synchronously',
+          e,
+          st,
+        );
+      }
     }
 
     final tmpFile = File(p.join(
@@ -160,7 +230,13 @@ class AtomicFileWriter {
       tmpFile.writeAsStringSync(content, flush: true);
       try {
         tmpFile.renameSync(target.path);
-      } catch (_) {
+      } catch (renameErr, renameSt) {
+        AppLogger.instance.debug(
+          'AtomicFileWriter',
+          'Sync rename failed, attempting copy fallback',
+          renameErr,
+          renameSt,
+        );
         // Fallback 1: copy temp to target, then delete temp
         try {
           tmpFile.copySync(target.path);
@@ -168,24 +244,60 @@ class AtomicFileWriter {
             if (tmpFile.existsSync()) {
               tmpFile.deleteSync();
             }
-          } catch (_) {}
-        } catch (_) {
+          } catch (delErr, delSt) {
+            // ignore-silent: deleting temporary file created by AtomicFileWriter
+            AppLogger.instance.debug(
+              'AtomicFileWriter',
+              'Failed removing temp file after sync copy fallback',
+              delErr,
+              delSt,
+            );
+          }
+        } catch (copyErr, copySt) {
+          AppLogger.instance.debug(
+            'AtomicFileWriter',
+            'Sync copy fallback failed, attempting direct write',
+            copyErr,
+            copySt,
+          );
           // Fallback 2: write directly to target
           try {
             target.writeAsStringSync(content, flush: true);
-          } catch (_) {
-            // Never throw to callers
+          } catch (directErr, directSt) {
+            AppLogger.instance.error(
+              'AtomicFileWriter',
+              'All sync write fallbacks failed for ${p.basename(target.path)}',
+              directErr,
+              directSt,
+            );
+            onError?.call(
+              AppError.fromException(directErr, directSt, 'error.ioFailure'),
+            );
           }
         }
       }
-    } catch (_) {
-      // Never throw to callers
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'AtomicFileWriter',
+        'Sync temp write failed for ${p.basename(target.path)}',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.ioFailure'));
     } finally {
       try {
         if (tmpFile.existsSync()) {
           tmpFile.deleteSync();
         }
-      } catch (_) {}
+      } catch (e, st) {
+        // ignore-silent: deleting temporary file created by AtomicFileWriter
+        AppLogger.instance.debug(
+          'AtomicFileWriter',
+          'Failed deleting leftover sync temp file',
+          e,
+          st,
+        );
+      }
     }
   }
 

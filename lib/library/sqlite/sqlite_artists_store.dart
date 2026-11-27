@@ -1,5 +1,6 @@
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/migrations.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/sqlite_row_mappers.dart';
@@ -273,7 +274,8 @@ class SqliteArtistsStore {
       ''', [sKey, rootTargetKey, canonicalName]);
 
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error('ArtistsStore', 'mergeArtist transaction failed', e, st);
       _db.execute('ROLLBACK;');
       rethrow;
     }

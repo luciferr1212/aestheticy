@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../diagnostics/app_logger.dart';
 import '../../library/library_repository.dart';
 import '../../library/text_normalizer.dart';
 import '../l10n/app_strings.dart';
@@ -147,7 +148,13 @@ class RepositoryPlayCountSource implements TrackPlayCountSource {
         counts[event.uri] = (counts[event.uri] ?? 0) + 1;
       }
       return counts;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'SortPlayCount',
+        'Failed loading recent play counts',
+        e,
+        st,
+      );
       return const {};
     }
   }

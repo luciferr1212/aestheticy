@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../diagnostics/app_logger.dart';
 import 'lyrics_models.dart';
 
 /// Cache entry wrapping a resolved document or a recorded negative result.
@@ -122,7 +123,9 @@ class LyricsCache {
       }
 
       return entry;
-    } catch (_) {
+    } catch (e, st) {
+      // ignore-silent: reading optional disk lyrics cache returns null on miss
+      AppLogger.instance.debug('LyricsCache', 'Failed reading lyrics cache', e, st);
       return null;
     }
   }
@@ -165,11 +168,20 @@ class LyricsCache {
       if (file.existsSync()) {
         try {
           file.deleteSync();
-        } catch (_) {}
+        } catch (delErr, delSt) {
+          // ignore-silent: deleting stale lyrics cache file before atomic rename
+          AppLogger.instance.debug(
+            'LyricsCache',
+            'Failed deleting stale lyrics cache file',
+            delErr,
+            delSt,
+          );
+        }
       }
       await tmpFile.rename(file.path);
-    } catch (_) {
-      // Disk failures never throw into audio playback
+    } catch (e, st) {
+      // ignore-silent: writing optional lyrics cache never blocks audio playback
+      AppLogger.instance.debug('LyricsCache', 'Failed writing lyrics cache', e, st);
     }
   }
 
@@ -231,7 +243,14 @@ class LyricsCache {
         source: source,
         hasWordTiming: hasWordTiming,
       );
-    } catch (_) {
+    } catch (e, st) {
+      // ignore-silent: parsing optional cached lyrics JSON returns null on miss
+      AppLogger.instance.debug(
+        'LyricsCache',
+        'Failed parsing cached lyrics JSON',
+        e,
+        st,
+      );
       return null;
     }
   }
@@ -241,6 +260,14 @@ class LyricsCache {
       if (file.existsSync()) {
         file.deleteSync();
       }
-    } catch (_) {}
+    } catch (e, st) {
+      // ignore-silent: deleting corrupt temporary lyrics cache file
+      AppLogger.instance.debug(
+        'LyricsCache',
+        'Failed deleting corrupt lyrics cache file',
+        e,
+        st,
+      );
+    }
   }
 }

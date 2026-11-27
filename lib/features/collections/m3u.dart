@@ -6,10 +6,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/result.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../library/file_path_utils.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/user_data_access_mode.dart';
+import '../../ui/common/error_presenter.dart';
 import '../../ui/l10n/app_strings.dart';
 import '../../ui/l10n/number_format.dart';
 import 'user_collections.dart';
@@ -365,12 +368,21 @@ abstract final class M3u {
     try {
       tmpFile.writeAsBytesSync(bytes, flush: true);
       tmpFile.renameSync(targetFile.path);
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.error('M3U', 'Atomic M3U write failed', e, st);
       try {
         if (tmpFile.existsSync()) {
           tmpFile.deleteSync();
         }
-      } catch (_) {}
+      } catch (delErr, delSt) {
+        // ignore-silent: deleting temporary .tmp file created by writeM3uAtomically
+        AppLogger.instance.debug(
+          'M3U',
+          'Failed cleaning up temporary M3U file',
+          delErr,
+          delSt,
+        );
+      }
       rethrow;
     }
   }
@@ -415,6 +427,28 @@ abstract final class M3u {
     Future<bool> Function(BuildContext context, String fileName)?
         confirmOverwrite,
   }) async {
+    final result = await exportPlaylistResult(
+      context,
+      repository: repository,
+      playlist: playlist,
+      saveFilePicker: saveFilePicker,
+      pickDirectory: pickDirectory,
+      confirmOverwrite: confirmOverwrite,
+    );
+    return result.valueOrNull ?? false;
+  }
+
+  /// Exports [playlist] to a validated `.m3u`/`.m3u8` file and returns a
+  /// structured [Result], surfacing failures through [ErrorPresenter].
+  static Future<Result<bool>> exportPlaylistResult(
+    BuildContext context, {
+    required LibraryRepository repository,
+    required PlaylistSummary playlist,
+    M3uSaveFilePicker? saveFilePicker,
+    M3uDirectoryPicker? pickDirectory,
+    Future<bool> Function(BuildContext context, String fileName)?
+        confirmOverwrite,
+  }) async {
     try {
       final dialogTitle = context.t('playlist.exportM3u');
       final sanitizedName =
@@ -440,7 +474,9 @@ abstract final class M3u {
             : null;
       }
 
-      if (rawTargetPath == null || rawTargetPath.trim().isEmpty) return false;
+      if (rawTargetPath == null || rawTargetPath.trim().isEmpty) {
+        return const Ok(false);
+      }
 
       final validation = validateExportTarget(rawTargetPath);
       if (!validation.isAllowed) {
@@ -462,17 +498,17 @@ abstract final class M3u {
             ),
           );
         }
-        return false;
+        return const Ok(false);
       }
 
       final targetPath = validation.targetPath!;
       if (validation.requiresOverwriteConfirmation) {
-        if (!context.mounted) return false;
+        if (!context.mounted) return const Ok(false);
         final confirmed = await (confirmOverwrite ?? _defaultConfirmOverwrite)(
           context,
           p.basename(targetPath),
         );
-        if (!confirmed) return false;
+        if (!confirmed) return const Ok(false);
       }
 
       await writeM3uAtomically(targetPath, bytes);
@@ -485,17 +521,18 @@ abstract final class M3u {
           ),
         );
       }
-      return true;
-    } catch (_) {
+      return const Ok(true);
+    } catch (error, stackTrace) {
+      AppLogger.instance.error('M3U', 'Failed to export playlist', error, stackTrace);
+      final appError = AppError.fromException(
+        error,
+        stackTrace,
+        'm3u.exportFailed',
+      );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.t('m3u.exportFailed')),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        ErrorPresenter.show(context, appError);
       }
-      return false;
+      return Err(appError);
     }
   }
 
@@ -508,16 +545,34 @@ abstract final class M3u {
     M3uPickFilesPicker? pickFilesPicker,
     M3uFileContentReader? fileContentReader,
   }) async {
+    final result = await importPlaylistWithSummaryResult(
+      context,
+      repository: repository,
+      collections: collections,
+      pickFilesPicker: pickFilesPicker,
+      fileContentReader: fileContentReader,
+    );
+    return result.valueOrNull;
+  }
+
+  /// Imports an M3U / M3U8 playlist file and returns a structured [Result],
+  /// surfacing failures through [ErrorPresenter].
+  static Future<Result<M3uImportSummary?>> importPlaylistWithSummaryResult(
+    BuildContext context, {
+    required LibraryRepository repository,
+    required UserCollections collections,
+    M3uPickFilesPicker? pickFilesPicker,
+    M3uFileContentReader? fileContentReader,
+  }) async {
     if (repository.userDataAccessMode == UserDataAccessMode.safeReadOnly) {
+      const appError = DatabaseFailure(
+        code: 'userdata_read_only',
+        messageKey: 'userdata.safeReadOnlyBlocked',
+      );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.t('userdata.safeReadOnlyBlocked')),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        ErrorPresenter.show(context, appError);
       }
-      return null;
+      return const Err(appError);
     }
     try {
       List<String>? pickedPaths;
@@ -538,7 +593,9 @@ abstract final class M3u {
         }
       }
 
-      if (pickedPaths == null || pickedPaths.isEmpty) return null;
+      if (pickedPaths == null || pickedPaths.isEmpty) {
+        return const Ok(null);
+      }
       final filePath = pickedPaths.first;
 
       final String content;
@@ -611,33 +668,38 @@ abstract final class M3u {
         );
       }
 
-      return M3uImportSummary(
-        playlist: created,
-        addedCount: addedCount,
-        missingCount: missingCount,
-        missingPaths: missingPaths,
-        skippedWebLinks: parseResult.skippedWebLinks,
+      return Ok(
+        M3uImportSummary(
+          playlist: created,
+          addedCount: addedCount,
+          missingCount: missingCount,
+          missingPaths: missingPaths,
+          skippedWebLinks: parseResult.skippedWebLinks,
+        ),
       );
-    } on UserDataReadOnlyException catch (e) {
+    } on UserDataReadOnlyException catch (e, stackTrace) {
+      AppLogger.instance.warn('M3U', 'Import blocked in safe read-only mode', e, stackTrace);
+      final appError = DatabaseFailure(
+        code: 'userdata_read_only',
+        messageKey: e.messageKey,
+        cause: e,
+        stackTrace: stackTrace,
+      );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.t(e.messageKey)),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        ErrorPresenter.show(context, appError);
       }
-      return null;
-    } catch (_) {
+      return Err(appError);
+    } catch (error, stackTrace) {
+      AppLogger.instance.error('M3U', 'Failed to import playlist', error, stackTrace);
+      final appError = AppError.fromException(
+        error,
+        stackTrace,
+        'm3u.importFailed',
+      );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.t('m3u.importFailed')),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        ErrorPresenter.show(context, appError);
       }
-      return null;
+      return Err(appError);
     }
   }
 

@@ -3,6 +3,7 @@ library;
 
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/artist_splitter.dart';
 
 /// Target schema version for `library.db`.
@@ -91,7 +92,8 @@ class SchemaMigrator {
 
       db.execute('PRAGMA main.user_version = 1;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error('SchemaMigrator', 'Migration to v1 failed', e, st);
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -118,7 +120,8 @@ class SchemaMigrator {
 
       db.execute('PRAGMA main.user_version = 2;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error('SchemaMigrator', 'Migration to v2 failed', e, st);
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -130,7 +133,8 @@ class SchemaMigrator {
       // play_events now lives in userdata.db; keep main schema version aligned.
       db.execute('PRAGMA main.user_version = 3;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error('SchemaMigrator', 'Migration to v3 failed', e, st);
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -142,7 +146,8 @@ class SchemaMigrator {
       // favorites, ratings, playlists, and playlist_items now live in userdata.db.
       db.execute('PRAGMA main.user_version = 4;');
       db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error('SchemaMigrator', 'Migration to v4 failed', e, st);
       db.execute('ROLLBACK;');
       rethrow;
     }
@@ -330,7 +335,13 @@ class SchemaMigrator {
       try {
         executeRebuild();
         db.execute('COMMIT;');
-      } catch (e) {
+      } catch (e, st) {
+        AppLogger.instance.error(
+          'SchemaMigrator',
+          'rebuildArtistLinks transaction failed',
+          e,
+          st,
+        );
         db.execute('ROLLBACK;');
         rethrow;
       }

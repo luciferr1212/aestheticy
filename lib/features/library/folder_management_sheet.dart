@@ -4,9 +4,12 @@ library;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'package:aestheticy/core/result.dart';
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/scan_service.dart';
+import 'package:aestheticy/ui/common/error_presenter.dart';
 import 'package:aestheticy/ui/l10n/app_strings.dart';
 
 /// Modal view displaying library folders, rescan controls, and scanning progress.
@@ -91,18 +94,32 @@ class _FolderManagementSheetState extends State<FolderManagementSheet> {
     try {
       final picker = widget.directoryPicker ?? FilePicker.getDirectoryPath;
       final selectedPath = await picker();
-      if (selectedPath != null && selectedPath.isNotEmpty) {
-        await widget.scanService.addFolder(selectedPath);
-        await _loadFolders();
+      if (selectedPath == null || selectedPath.isEmpty) return;
+
+      final result = await widget.scanService.addFolderResult(selectedPath);
+      if (!mounted) return;
+      switch (result) {
+        case Ok():
+          await _loadFolders();
+        case Err(:final error):
+          ErrorPresenter.show(
+            context,
+            error,
+            onRetry: _pickAndAddFolder,
+          );
       }
-    } catch (e) {
+    } catch (error, stackTrace) {
+      AppLogger.instance.error(
+        'Folders',
+        'Directory picker failed when adding folder',
+        error,
+        stackTrace,
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.t('folders.errorAdding', args: {'error': '$e'}),
-            ),
-          ),
+        ErrorPresenter.show(
+          context,
+          AppError.fromException(error, stackTrace, 'error.folderAddFailed'),
+          onRetry: _pickAndAddFolder,
         );
       }
     }

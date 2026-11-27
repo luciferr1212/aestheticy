@@ -645,6 +645,16 @@ abstract final class AppStrings {
         'User data was damaged and automatically restored from the newest valid backup.',
     'userdata.resetEmptyNotice':
         'User data was damaged and no valid backup was found; started with empty user data.',
+    'error.ioFailure': 'Could not read or write the file.',
+    'error.databaseFailure': 'A local database error occurred.',
+    'error.networkFailure': 'A network connection error occurred.',
+    'error.parseFailure': 'The file format could not be read.',
+    'error.platformFailure': 'A system operation failed.',
+    'error.actionRetry': 'Retry',
+    'error.actionOpenLog': 'Open logs',
+    'error.settingsSaveFailed': 'Could not save settings to disk.',
+    'error.userDataActionFailed': 'Could not save changes to your library data.',
+    'error.folderAddFailed': 'Could not add the music folder.',
   };
 
   /// Modern Standard Arabic (العربية الفصحى) dictionary.
@@ -1223,6 +1233,16 @@ abstract final class AppStrings {
         'تعرضت بيانات المستخدم للتلف وتمت استعادتها تلقائياً من أحدث نسخة احتياطية صالحة.',
     'userdata.resetEmptyNotice':
         'تعرضت بيانات المستخدم للتلف ولم يُعثر على نسخة احتياطية صالحة؛ تم البدء ببيانات مستخدم فارغة.',
+    'error.ioFailure': 'تعذّر قراءة الملف أو كتابته.',
+    'error.databaseFailure': 'حدث خطأ في قاعدة البيانات المحلية.',
+    'error.networkFailure': 'حدث خطأ في الاتصال بالشبكة.',
+    'error.parseFailure': 'تعذّر قراءة تنسيق الملف.',
+    'error.platformFailure': 'تعذّر تنفيذ عملية النظام.',
+    'error.actionRetry': 'إعادة المحاولة',
+    'error.actionOpenLog': 'فتح السجلات',
+    'error.settingsSaveFailed': 'تعذّر حفظ الإعدادات على القرص.',
+    'error.userDataActionFailed': 'تعذّر حفظ التغييرات في بيانات المكتبة.',
+    'error.folderAddFailed': 'تعذّر إضافة مجلد الموسيقى.',
   };
 
   /// Resolves [key] for [language].

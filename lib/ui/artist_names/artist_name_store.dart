@@ -6,6 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/result.dart';
+import '../../diagnostics/app_logger.dart';
+import '../../features/persistence/atomic_file_writer.dart';
+import '../../features/persistence/versioned_json_store.dart';
 import '../../library/text_normalizer.dart';
 import '../settings/app_settings.dart';
 
@@ -62,24 +66,62 @@ class ArtistDisplayNameEntry {
 
 /// Store managing artist display names, disk persistence, and name resolution.
 class ArtistNameStore extends ChangeNotifier {
+  static const int currentSchemaVersion = 1;
+  static const Set<String> _knownKeys = {'entries'};
+
   Future<Directory> Function()? _directoryProvider;
   Directory? _directory;
+  final void Function(AppError error)? onError;
   final Map<String, ArtistDisplayNameEntry> _entries = {};
   Timer? _debounceTimer;
+  AtomicFileWriter? _writer;
+  Map<String, Object?> _unknownFields = const {};
+  final VersionedJsonStoreHelper _versionHelper = VersionedJsonStoreHelper(
+    storeName: 'ArtistNameStore',
+    fileName: 'artist_display_names.json',
+    currentSchemaVersion: currentSchemaVersion,
+    knownKeys: _knownKeys,
+    legacyRootAdapter: (decoded) {
+      if (decoded is List) {
+        return <String, Object?>{'schemaVersion': 0, 'entries': decoded};
+      }
+      throw const FormatException(
+        'Expected List or Map root for artist_display_names.json',
+      );
+    },
+  );
 
   /// Creates an [ArtistNameStore].
   ArtistNameStore({
     Future<Directory> Function()? directoryProvider,
     Directory? directory,
+    this.onError,
     Map<String, ArtistDisplayNameEntry>? initialEntries,
   }) {
     _directoryProvider = directoryProvider;
     _directory = directory;
+    if (directory != null) {
+      _writer = AtomicFileWriter(
+        File(p.join(directory.path, 'artist_display_names.json')),
+        onError: onError,
+      );
+    }
     if (initialEntries != null) {
       for (final entry in initialEntries.values) {
         _entries[TextNormalizer.normalize(entry.original)] = entry;
       }
     }
+  }
+
+  AtomicFileWriter? _getWriter() {
+    if (_writer != null) return _writer;
+    if (_directory != null) {
+      return _writer = AtomicFileWriter(
+        File(p.join(_directory!.path, 'artist_display_names.json')),
+        onError: onError,
+      );
+    }
+    return null;
   }
 
   /// All entries currently held in memory.
@@ -251,55 +293,54 @@ class ArtistNameStore extends ChangeNotifier {
       if (!_directory!.existsSync()) {
         _directory!.createSync(recursive: true);
       }
+      _writer ??= AtomicFileWriter(
+        File(p.join(_directory!.path, 'artist_display_names.json')),
+        onError: onError,
+      );
       await _loadFromFile();
-    } catch (_) {
+    } catch (e, st) {
       // Keep empty defaults, never throw to the UI
+      AppLogger.instance.warn(
+        'ArtistNameStore',
+        'Failed initializing artist display names store',
+        e,
+        st,
+      );
     }
   }
 
   Future<void> _loadFromFile() async {
-    if (_directory == null) return;
-    final file = File(p.join(_directory!.path, 'artist_display_names.json'));
-    if (!file.existsSync()) return;
+    final dir = _directory;
+    if (dir == null) return;
+    final loaded = await _versionHelper.load(dir);
+    if (loaded.wasQuarantined) {
+      _entries.clear();
+      _unknownFields = const {};
+      return;
+    }
+    final data = loaded.data;
+    if (data == null) return;
 
-    try {
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content);
-      if (decoded is List) {
-        _entries.clear();
-        for (final item in decoded) {
-          if (item is Map<String, Object?>) {
-            final entry = ArtistDisplayNameEntry.fromJson(item);
-            if (entry.original.isNotEmpty) {
-              _entries[TextNormalizer.normalize(entry.original)] = entry;
-            }
-          } else if (item is Map) {
-            final entry = ArtistDisplayNameEntry.fromJson(
-                Map<String, Object?>.from(item));
-            if (entry.original.isNotEmpty) {
-              _entries[TextNormalizer.normalize(entry.original)] = entry;
-            }
+    _unknownFields = loaded.unknownFields;
+    final rawEntries = data['entries'];
+    if (rawEntries is List) {
+      _entries.clear();
+      for (final item in rawEntries) {
+        if (item is Map<String, Object?>) {
+          final entry = ArtistDisplayNameEntry.fromJson(item);
+          if (entry.original.isNotEmpty) {
+            _entries[TextNormalizer.normalize(entry.original)] = entry;
+          }
+        } else if (item is Map) {
+          final entry = ArtistDisplayNameEntry.fromJson(
+            Map<String, Object?>.from(item),
+          );
+          if (entry.original.isNotEmpty) {
+            _entries[TextNormalizer.normalize(entry.original)] = entry;
           }
         }
-      } else {
-        _handleCorruptFile(file);
       }
-    } catch (_) {
-      _handleCorruptFile(file);
     }
-  }
-
-  void _handleCorruptFile(File file) {
-    _entries.clear();
-    try {
-      final badPath =
-          p.join(_directory!.path, 'artist_display_names.json.bad');
-      final badFile = File(badPath);
-      if (badFile.existsSync()) {
-        badFile.deleteSync();
-      }
-      file.renameSync(badPath);
-    } catch (_) {}
   }
 
   void _scheduleWrite() {
@@ -314,30 +355,41 @@ class ArtistNameStore extends ChangeNotifier {
     _debounceTimer?.cancel();
     _debounceTimer = null;
     await _writeNow();
+    await _writer?.flush();
   }
 
   Future<void> _writeNow() async {
-    if (_directory == null) return;
+    final writer = _getWriter();
+    if (writer == null) return;
     try {
-      final targetPath =
-          p.join(_directory!.path, 'artist_display_names.json');
-      final tmpPath = '$targetPath.tmp';
-      final tmpFile = File(tmpPath);
-
       final list = _entries.values.map((e) => e.toJson()).toList();
-      final jsonStr = const JsonEncoder.withIndent('  ').convert(list);
-      await tmpFile.writeAsString(jsonStr, flush: true);
-
-      // Atomic rename
-      await tmpFile.rename(targetPath);
-    } catch (_) {
-      // Disk errors are ignored gracefully
+      final payload = _versionHelper.preparePayload(
+        {'entries': list},
+        _unknownFields,
+      );
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
+      await writer.write(jsonStr);
+      final dir = _directory;
+      if (dir != null) {
+        _versionHelper.writeRollingBackupSync(dir, jsonStr);
+      }
+    } catch (e, st) {
+      // Preserve in-memory entries on failure and notify owner/logger
+      AppLogger.instance.error(
+        'ArtistNameStore',
+        'Failed writing artist_display_names.json',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.settingsSaveFailed'));
     }
   }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _debounceTimer = null;
+    _writer?.dispose();
     super.dispose();
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../audio/audio_engine.dart';
 import '../../../audio/audio_models.dart';
+import '../../../core/result.dart';
 import '../../../diagnostics/app_logger.dart';
 import '../../../diagnostics/diagnostic_report.dart';
 import '../../../features/integration/tray_window_controller.dart';
@@ -13,6 +14,7 @@ import '../../../library/migrations.dart';
 import '../../../library/user_data_access_mode.dart';
 import '../../audio_panels/eq_controller.dart';
 import '../../audio_panels/eq_scope.dart';
+import '../../common/error_presenter.dart';
 import '../../glass/glass_button.dart';
 import '../../l10n/app_strings.dart';
 import '../../l10n/number_format.dart';
@@ -354,7 +356,13 @@ class SettingsHistorySection extends StatelessWidget {
                               ),
                             );
                           }
-                        } on UserDataReadOnlyException catch (e) {
+                        } on UserDataReadOnlyException catch (e, st) {
+                          AppLogger.instance.warn(
+                            'Settings',
+                            'Clear history blocked in safe read-only mode',
+                            e,
+                            st,
+                          );
                           if (context.mounted) {
                             onConfirmingClearChanged(false);
                             messenger.showSnackBar(
@@ -363,9 +371,23 @@ class SettingsHistorySection extends StatelessWidget {
                               ),
                             );
                           }
-                        } catch (_) {
+                        } catch (e, st) {
+                          AppLogger.instance.error(
+                            'Settings',
+                            'Failed clearing play history',
+                            e,
+                            st,
+                          );
                           if (context.mounted) {
                             onConfirmingClearChanged(false);
+                            ErrorPresenter.show(
+                              context,
+                              AppError.fromException(
+                                e,
+                                st,
+                                'error.userDataActionFailed',
+                              ),
+                            );
                           }
                         }
                       },
@@ -549,10 +571,22 @@ class SettingsDiagnosticsSection extends StatelessWidget {
                   userNameToScrub: settings.userName,
                 );
 
+                var copied = false;
                 try {
                   await Clipboard.setData(ClipboardData(text: report));
-                } catch (_) {}
-                if (context.mounted) {
+                  copied = true;
+                } catch (e, st) {
+                  AppLogger.instance.warn(
+                    'Settings',
+                    'Clipboard.setData failed for diagnostics report',
+                    e,
+                    st,
+                  );
+                  if (context.mounted) {
+                    ErrorPresenter.show(context, AppError.fromException(e, st));
+                  }
+                }
+                if (copied && context.mounted) {
                   messenger.showSnackBar(
                     SnackBar(
                       content: Text(copiedText),
@@ -566,6 +600,9 @@ class SettingsDiagnosticsSection extends StatelessWidget {
                   e,
                   st,
                 );
+                if (context.mounted) {
+                  ErrorPresenter.show(context, AppError.fromException(e, st));
+                }
               }
             },
           ),
@@ -580,10 +617,22 @@ class SettingsDiagnosticsSection extends StatelessWidget {
               final messenger = ScaffoldMessenger.of(context);
               final copiedText = context.t('settings.logPathCopied');
               final logDir = AppLogger.instance.logDirectory?.path ?? '';
+              var copied = false;
               try {
                 await Clipboard.setData(ClipboardData(text: logDir));
-              } catch (_) {}
-              if (context.mounted) {
+                copied = true;
+              } catch (e, st) {
+                AppLogger.instance.warn(
+                  'Settings',
+                  'Clipboard.setData failed for log path',
+                  e,
+                  st,
+                );
+                if (context.mounted) {
+                  ErrorPresenter.show(context, AppError.fromException(e, st));
+                }
+              }
+              if (copied && context.mounted) {
                 messenger.showSnackBar(
                   SnackBar(
                     content: Text(copiedText),

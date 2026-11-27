@@ -92,8 +92,14 @@ class SmtcMediaSession implements MediaSessionService {
           if (file.existsSync()) {
             thumbnailUri = file.uri.toString();
           }
-        } catch (_) {
-          // Fallback to no thumbnail if file check fails
+        } catch (e, st) {
+          // ignore-silent: reading optional cached cover file falls back cleanly without SMTC artwork
+          AppLogger.instance.debug(
+            'SMTC',
+            'Optional cover thumbnail check failed',
+            e,
+            st,
+          );
         }
       }
 

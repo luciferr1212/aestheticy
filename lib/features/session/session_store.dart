@@ -6,27 +6,53 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/result.dart';
 import '../../diagnostics/app_logger.dart';
 import '../persistence/atomic_file_writer.dart';
+import '../persistence/versioned_json_store.dart';
 import 'saved_session.dart';
 
 /// Single source of truth managing playback session persistence to `session.json`.
 class SessionStore {
+  static const int currentSchemaVersion = 1;
+  static const Set<String> _knownKeys = {
+    'queue',
+    'currentIndex',
+    'currentEntryId',
+    'currentUri',
+    'positionMs',
+    'shuffle',
+    'repeatMode',
+    'savedAt',
+  };
+
   final Future<Directory> Function()? directoryProvider;
   Directory? directory;
+  final void Function(AppError error)? onError;
   SavedSession _session = SavedSession.empty;
   Timer? _debounceTimer;
   int _writeGeneration = 0;
   AtomicFileWriter? _writer;
+  Map<String, Object?> _unknownFields = const {};
+  final VersionedJsonStoreHelper _versionHelper = VersionedJsonStoreHelper(
+    storeName: 'Session',
+    fileName: 'session.json',
+    currentSchemaVersion: currentSchemaVersion,
+    knownKeys: _knownKeys,
+  );
 
   /// Creates a [SessionStore] with an optional injected [directory] or [directoryProvider].
   SessionStore({
     this.directoryProvider,
     this.directory,
+    this.onError,
     SavedSession initialSession = SavedSession.empty,
   }) : _session = initialSession {
     if (directory != null) {
-      _writer = AtomicFileWriter(File(p.join(directory!.path, 'session.json')));
+      _writer = AtomicFileWriter(
+        File(p.join(directory!.path, 'session.json')),
+        onError: onError,
+      );
     }
   }
 
@@ -40,8 +66,10 @@ class SessionStore {
   AtomicFileWriter? _getWriter() {
     if (_writer != null) return _writer;
     if (directory != null) {
-      return _writer =
-          AtomicFileWriter(File(p.join(directory!.path, 'session.json')));
+      return _writer = AtomicFileWriter(
+        File(p.join(directory!.path, 'session.json')),
+        onError: onError,
+      );
     }
     return null;
   }
@@ -60,11 +88,19 @@ class SessionStore {
       if (!directory!.existsSync()) {
         directory!.createSync(recursive: true);
       }
-      _writer ??=
-          AtomicFileWriter(File(p.join(directory!.path, 'session.json')));
+      _writer ??= AtomicFileWriter(
+        File(p.join(directory!.path, 'session.json')),
+        onError: onError,
+      );
       await _loadFromFile();
-    } catch (_) {
+    } catch (e, st) {
       // Keep empty defaults, never throw to playback
+      AppLogger.instance.warn(
+        'Session',
+        'SessionStore.init failed, continuing with empty session',
+        e,
+        st,
+      );
     }
   }
 
@@ -95,11 +131,25 @@ class SessionStore {
     final writer = _getWriter();
     if (writer == null) return;
     try {
-      final jsonStr =
-          const JsonEncoder.withIndent('  ').convert(_session.toJson());
+      final payload = _versionHelper.preparePayload(
+        _session.toJson(),
+        _unknownFields,
+      );
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
       writer.writeSync(jsonStr);
-    } catch (_) {
+      final dir = directory;
+      if (dir != null) {
+        _versionHelper.writeRollingBackupSync(dir, jsonStr);
+      }
+    } catch (e, st) {
       // In-memory value preserved, failed write does not crash
+      AppLogger.instance.error(
+        'Session',
+        'Synchronous session write failed',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.ioFailure'));
     }
   }
 
@@ -113,35 +163,18 @@ class SessionStore {
   }
 
   Future<void> _loadFromFile() async {
-    if (directory == null) return;
-    final file = File(p.join(directory!.path, 'session.json'));
-    if (!file.existsSync()) return;
-
-    try {
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content);
-      if (decoded is Map<String, Object?>) {
-        _session = SavedSession.fromJson(decoded);
-      } else if (decoded is Map) {
-        _session = SavedSession.fromJson(Map<String, Object?>.from(decoded));
-      } else {
-        _handleCorruptFile(file);
-      }
-    } catch (_) {
-      _handleCorruptFile(file);
+    final dir = directory;
+    if (dir == null) return;
+    final loaded = await _versionHelper.load(dir);
+    if (loaded.wasQuarantined) {
+      _session = SavedSession.empty;
+      _unknownFields = const {};
+      return;
     }
-  }
-
-  void _handleCorruptFile(File file) {
-    _session = SavedSession.empty;
-    AppLogger.instance.warning(
-      'Session',
-      'Corrupt session.json backed up to session.json.bad',
-    );
-    try {
-      final badPath = p.join(directory!.path, 'session.json.bad');
-      file.renameSync(badPath);
-    } catch (_) {}
+    if (loaded.data != null) {
+      _session = SavedSession.fromJson(loaded.data);
+      _unknownFields = loaded.unknownFields;
+    }
   }
 
   void _scheduleWrite() {
@@ -156,12 +189,26 @@ class SessionStore {
     if (writer == null) return;
     final gen = _writeGeneration;
     try {
-      final jsonStr =
-          const JsonEncoder.withIndent('  ').convert(_session.toJson());
+      final payload = _versionHelper.preparePayload(
+        _session.toJson(),
+        _unknownFields,
+      );
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
       if (_writeGeneration != gen) return;
       await writer.write(jsonStr);
-    } catch (_) {
+      final dir = directory;
+      if (dir != null && _writeGeneration == gen) {
+        _versionHelper.writeRollingBackupSync(dir, jsonStr);
+      }
+    } catch (e, st) {
       // In-memory value preserved, failed write does not crash
+      AppLogger.instance.error(
+        'Session',
+        'Async session write failed',
+        e,
+        st,
+      );
+      onError?.call(AppError.fromException(e, st, 'error.ioFailure'));
     }
   }
 

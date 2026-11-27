@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../diagnostics/app_logger.dart';
 import '../../library/models.dart';
 
 /// Available top-level navigation destinations.
@@ -177,7 +178,14 @@ class AppNavigator extends ChangeNotifier {
   void _captureViewState() {
     try {
       onCaptureViewState?.call(currentEntry.viewState);
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'AppNavigator',
+        'Failed capturing view state on navigation',
+        e,
+        st,
+      );
+    }
   }
 
   void _pushEntry(NavEntry entry) {

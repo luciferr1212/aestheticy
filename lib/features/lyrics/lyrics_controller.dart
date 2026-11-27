@@ -333,7 +333,13 @@ class LyricsController extends ChangeNotifier {
           _state = const LyricsStateOff();
           notifyListeners();
       }
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.instance.warn(
+        'Lyrics',
+        'Unexpected error resolving lyrics',
+        e,
+        st,
+      );
       if (_disposed || thisRequestId != _requestId) return;
       _resetPositionSelection();
       _state = const LyricsStateError(LyricsErrorReason.badResponse);

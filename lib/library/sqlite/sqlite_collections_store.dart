@@ -1,5 +1,6 @@
 import 'package:sqlite3/sqlite3.dart';
 
+import 'package:aestheticy/diagnostics/app_logger.dart';
 import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/models.dart';
 import 'package:aestheticy/library/sqlite/sqlite_row_mappers.dart';
@@ -145,7 +146,13 @@ class SqliteCollectionsStore {
         updatedAt: nowDt,
         coverKey: null,
       );
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'CollectionsStore',
+        'Playlist transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -172,7 +179,13 @@ class SqliteCollectionsStore {
         [trimmed, now, id],
       );
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'CollectionsStore',
+        'Playlist transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -189,7 +202,13 @@ class SqliteCollectionsStore {
       );
       _db.execute('DELETE FROM $u.playlists WHERE id = ?;', [id]);
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'CollectionsStore',
+        'Playlist transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -327,7 +346,13 @@ class SqliteCollectionsStore {
       );
       _db.execute('COMMIT;');
       return paths.length;
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'CollectionsStore',
+        'Playlist transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -368,7 +393,13 @@ class SqliteCollectionsStore {
         [now, id],
       );
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'CollectionsStore',
+        'Playlist transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }
@@ -415,7 +446,13 @@ class SqliteCollectionsStore {
         [now, id],
       );
       _db.execute('COMMIT;');
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.error(
+        'CollectionsStore',
+        'Playlist transaction failed',
+        e,
+        st,
+      );
       _db.execute('ROLLBACK;');
       rethrow;
     }

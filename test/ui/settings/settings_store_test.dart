@@ -201,9 +201,13 @@ void main() {
       expect(store.settings.language, equals('en'));
       expect(store.settings.glassQuality, equals(GlassQuality.full));
 
-      // Bad file was created and original replaced
-      final badFile = File(p.join(tempDir.path, 'ui_settings.json.bad'));
-      expect(badFile.existsSync(), isTrue);
+      // Bad file was created with timestamped quarantine name and original replaced
+      final badFiles = tempDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => RegExp(r'ui_settings\.json\.bad-\d{8}-\d{6}(?:-\d+)?$').hasMatch(f.path))
+          .toList();
+      expect(badFiles, hasLength(1));
       store.dispose();
     });
 

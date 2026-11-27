@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:aestheticy/core/result.dart';
 import 'package:aestheticy/features/collections/m3u.dart';
 import 'package:aestheticy/features/collections/user_collections.dart';
 import 'package:aestheticy/library/file_path_utils.dart';
@@ -613,6 +614,62 @@ void main() {
             .where((e) => p.extension(e.path) == '.tmp')
             .toList();
         expect(leftoverTmps, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'M3u.importPlaylistWithSummaryResult returns Err(IoFailure) and surfaces ErrorPresenter on read failure',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final settingsStore = SettingsStore(
+          initialSettings: const AppSettings(language: 'en'),
+        );
+        addTearDown(settingsStore.dispose);
+
+        Result<M3uImportSummary?>? importResult;
+
+        await tester.pumpWidget(
+          SettingsScope(
+            store: settingsStore,
+            child: MaterialApp(
+              theme: buildAppTheme(),
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => ElevatedButton(
+                    key: const Key('import_fail_btn'),
+                    onPressed: () async {
+                      importResult = await M3u.importPlaylistWithSummaryResult(
+                        context,
+                        repository: repo,
+                        collections: collections,
+                        pickFilesPicker: ({
+                          String? dialogTitle,
+                          List<String>? allowedExtensions,
+                          bool allowMultiple = false,
+                        }) async =>
+                            [p.join(tempDir.path, 'broken.m3u8')],
+                        fileContentReader: (_) => Future<String>.error(
+                          const FileSystemException('cannot read'),
+                        ),
+                      );
+                    },
+                    child: const Text('Import Fail'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('import_fail_btn')));
+        await tester.pumpAndSettle();
+
+        expect(importResult, isNotNull);
+        expect(importResult!.isErr, isTrue);
+        expect(importResult!.errorOrNull, isA<IoFailure>());
+        expect(importResult!.errorOrNull?.messageKey, equals('m3u.importFailed'));
+        expect(find.text('Failed to import playlist'), findsOneWidget);
       },
     );
   });

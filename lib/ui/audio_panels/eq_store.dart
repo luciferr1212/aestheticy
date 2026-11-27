@@ -6,7 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/result.dart';
+import '../../diagnostics/app_logger.dart';
 import '../../features/persistence/atomic_file_writer.dart';
+import '../../features/persistence/versioned_json_store.dart';
 
 /// Predefined equalizer preset descriptor.
 class EqPreset {
@@ -271,23 +274,43 @@ class EqSettings {
 
 /// Persistent store managing equalizer settings in `eq_settings.json`.
 class EqStore extends ChangeNotifier {
+  static const int currentSchemaVersion = 1;
+  static const Set<String> _knownKeys = {
+    'enabled',
+    'gains',
+    'preampDb',
+    'presetId',
+    'customPresets',
+  };
+
   Future<Directory> Function()? _directoryProvider;
   Directory? _directory;
+  final void Function(AppError error)? onError;
   EqSettings _settings;
   Timer? _debounceTimer;
   AtomicFileWriter? _writer;
+  Map<String, Object?> _unknownFields = const {};
+  final VersionedJsonStoreHelper _versionHelper = VersionedJsonStoreHelper(
+    storeName: 'EqStore',
+    fileName: 'eq_settings.json',
+    currentSchemaVersion: currentSchemaVersion,
+    knownKeys: _knownKeys,
+  );
 
   /// Creates an [EqStore] with an optional injected directory or directory provider.
   EqStore({
     Future<Directory> Function()? directoryProvider,
     Directory? directory,
+    this.onError,
     EqSettings initialSettings = const EqSettings(),
   }) : _settings = initialSettings {
     _directoryProvider = directoryProvider;
     _directory = directory;
     if (directory != null) {
-      _writer =
-          AtomicFileWriter(File(p.join(directory.path, 'eq_settings.json')));
+      _writer = AtomicFileWriter(
+        File(p.join(directory.path, 'eq_settings.json')),
+        onError: onError,
+      );
     }
   }
 
@@ -297,8 +320,10 @@ class EqStore extends ChangeNotifier {
   AtomicFileWriter? _getWriter() {
     if (_writer != null) return _writer;
     if (_directory != null) {
-      return _writer =
-          AtomicFileWriter(File(p.join(_directory!.path, 'eq_settings.json')));
+      return _writer = AtomicFileWriter(
+        File(p.join(_directory!.path, 'eq_settings.json')),
+        onError: onError,
+      );
     }
     return null;
   }
@@ -318,11 +343,19 @@ class EqStore extends ChangeNotifier {
       if (!_directory!.existsSync()) {
         _directory!.createSync(recursive: true);
       }
-      _writer ??=
-          AtomicFileWriter(File(p.join(_directory!.path, 'eq_settings.json')));
+      _writer ??= AtomicFileWriter(
+        File(p.join(_directory!.path, 'eq_settings.json')),
+        onError: onError,
+      );
       await _loadFromFile();
-    } catch (_) {
+    } catch (e, st) {
       // Retain in-memory defaults on error
+      AppLogger.instance.warn(
+        'EqStore',
+        'EqStore.init failed, keeping defaults',
+        e,
+        st,
+      );
     }
   }
 
@@ -334,31 +367,19 @@ class EqStore extends ChangeNotifier {
   }
 
   Future<void> _loadFromFile() async {
-    if (_directory == null) return;
-    final file = File(p.join(_directory!.path, 'eq_settings.json'));
-    if (!file.existsSync()) return;
-
-    try {
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content);
-      if (decoded is Map<String, Object?>) {
-        _settings = EqSettings.fromJson(decoded);
-      } else if (decoded is Map) {
-        _settings = EqSettings.fromJson(Map<String, Object?>.from(decoded));
-      } else {
-        _handleCorruptFile(file);
-      }
-    } catch (_) {
-      _handleCorruptFile(file);
+    final dir = _directory;
+    if (dir == null) return;
+    final loaded = await _versionHelper.load(dir);
+    if (loaded.wasQuarantined) {
+      _settings = const EqSettings();
+      _unknownFields = const {};
+      return;
     }
-  }
-
-  void _handleCorruptFile(File file) {
-    _settings = const EqSettings();
-    try {
-      final badPath = p.join(_directory!.path, 'eq_settings.json.bad');
-      file.renameSync(badPath);
-    } catch (_) {}
+    final data = loaded.data;
+    if (data != null) {
+      _settings = EqSettings.fromJson(data);
+      _unknownFields = loaded.unknownFields;
+    }
   }
 
   void _scheduleWrite() {
@@ -372,10 +393,20 @@ class EqStore extends ChangeNotifier {
     final writer = _getWriter();
     if (writer == null) return;
     try {
-      final jsonStr =
-          const JsonEncoder.withIndent('  ').convert(_settings.toJson());
+      final payload = _versionHelper.preparePayload(
+        _settings.toJson(),
+        _unknownFields,
+      );
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
       await writer.write(jsonStr);
-    } catch (_) {}
+      final dir = _directory;
+      if (dir != null) {
+        _versionHelper.writeRollingBackupSync(dir, jsonStr);
+      }
+    } catch (e, st) {
+      AppLogger.instance.error('EqStore', 'Failed writing eq_settings.json', e, st);
+      onError?.call(AppError.fromException(e, st, 'error.settingsSaveFailed'));
+    }
   }
 
   /// Immediately flushes pending writes to disk (used primarily for unit tests).
