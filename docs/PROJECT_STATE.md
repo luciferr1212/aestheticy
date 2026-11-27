@@ -15,17 +15,17 @@
 - **Foundation F1 (`userdata.db` split, SQLite protection & automatic backups):** Separated user data into `userdata.db` (now `kUserDataSchemaVersion = 3`) attached to `library.db` (`kLibrarySchemaVersion = 4`), added crash-recoverable legacy migration (`LegacyUserDataMigrator` with `VACUUM INTO` + row-count-verified `pre-split-*` backups and full-row SHA-256 verification), added WAL + `PRAGMA quick_check` corruption recovery (`DatabaseProtection` staging `.restoring-*` and verifying before quarantining corrupt `userdata.db`), `UserDataAccessMode.safeReadOnly` with localized `SafeReadOnlyBanner`, and daily `VACUUM INTO` backups (`UserDataBackupService`, 5-backup rotation).
 - **Foundation F2 (Stable track identity, move/rename relink & play-event log hardening):** Added `userdata.track_identity` (`kUserDataSchemaVersion = 2`), canonical indexed `path_key`/`uri_key` columns in `userdata.db` v3 (batched backfill behind mandatory pre-migration backup), indexed single-transaction prepared-statement relinking (`SqliteIdentityStore`) with post-first-frame startup reconcile (`StartupIdentityReconciler`) and reconcile-owned identity creation (`upsertTracks` no longer creates identities eagerly), `missing_since_ms` offline-drive preservation, 30s heartbeat & startup `'interrupted'` recovery, origin `source`/`session_id`/`track_uid`/`ended_reason` capture in `PlayRecorder`, and date-range analytics read queries (`SqliteHistoryAnalytics`).
 - **Foundation F3 (Error model, rotating privacy logger, no-silent-catch enforcement & versioned JSON stores):** Added `Result<T>` / `AppError` (`lib/core/result.dart`), localized `ErrorPresenter` (`lib/ui/common/error_presenter.dart`, `en`+`ar` `error.*` strings) wired in M3U import/export and add-folder pilots (`ScanService.addFolderResult`, `FolderManagementSheet`, `AppShell`); upgraded `AppLogger` (`lib/diagnostics/app_logger.dart`) with `LogLevel` (`debug`, `info`, `warn`, `error`), `minLevel`, `customSink`, `AppLogger.swallow(...)`, 1 MB x 5 rolling rotation, quoted/UNC/`file://` redaction, and safe uninitialized no-op buffering; audited every `catch`/`on` clause across `lib/` (261 total: 38 class `(a)`, 182 class `(b)`, 41 class `(c)`) guarded by `test/architecture/no_silent_catch_test.dart` (`kSilentCatchAllowlist = {}`); and added `VersionedJsonStoreHelper` (`lib/features/persistence/versioned_json_store.dart`) + `AtomicFileWriter` across `SettingsStore`, `EqStore`, `ArtistNameStore`, `LyricsOffsetStore`, and `SessionStore` with `schemaVersion`, ordered migrations, unknown-key preservation, `.bad-<timestamp>` quarantine, and 3-file rolling backups under `backups/settings/`.
+- **Foundation F4 (Composition root, PlaybackController split, platform layer, feature flags & architecture tests — Foundation complete):** Extracted composition root into `lib/app/` (`AppBootstrap`, `AppServices`, `WindowLifecycleCoordinator`, `AestheticyApp`, `init_error_apps.dart`, shrinking `lib/main.dart` from 1,159 to 60 lines); split `lib/audio/playback_controller.dart` (1,121 -> 661 lines) into internal collaborators under `lib/audio/playback/` with zero behavior change verified by pre-refactor characterization tests; added `PlatformServices` OS selector, `FileAssociationService`, production no-op fallbacks, and typed `FeatureFlags` (`lib/app/feature_flags.dart`, hidden `featureFlags` map in `AppSettings`); and added architecture guards (`ui_layer_boundaries_test.dart`, `no_direct_queue_mutation_in_ui_test.dart`, `windows_platform_isolation_test.dart`) while removing `main.dart` and `playback_controller.dart` from `kFileSizeAllowlist`.
 
 ## NOT DONE (In Order)
-1. Foundation (remaining: composition root, platform layer, feature flags).
-2. Prompt 9 (Home, Stats, Wrapped monthly + weekly listening activity, Recommended, Smart playlists, shareable image).
-3. Quick wins.
-4. Logic audit.
-5. Open-with + drag-drop + single instance.
-6. UI redesign.
-7. Installer + auto-update + signing.
-8. Long soak test.
-9. v1.0.
+1. Prompt 9 (Home, Stats, Wrapped monthly + weekly listening activity, Recommended, Smart playlists, shareable image).
+2. Quick wins.
+3. Logic audit.
+4. Open-with + drag-drop + single instance.
+5. UI redesign.
+6. Installer + auto-update + signing.
+7. Long soak test.
+8. v1.0.
 
 ## Key Decisions
 - [ADR 0001](decisions/0001-split-userdata-db.md): Split user data (`userdata.db`) from rebuildable library index (`library.db`) via `ATTACH DATABASE`, single-file transactions, crash-recoverable migration, WAL + `quick_check`, and daily backups.
@@ -34,6 +34,9 @@
 - [ADR 0004](decisions/0004-play-event-log.md): Hardened `play_events` schema, 30s heartbeat crash safety, startup `'interrupted'` closing, and date-range analytics queries.
 - [ADR 0005](decisions/0005-error-model-and-logging.md): Typed `Result<T>`/`AppError` model, calm localized `ErrorPresenter`, rotating privacy-redacted `AppLogger`, and empty-allowlist no-silent-catch enforcement.
 - [ADR 0006](decisions/0006-versioned-settings.md): Shared `VersionedJsonStoreHelper` with `schemaVersion`, ordered migrations, unknown-key preservation, `.bad-<timestamp>` quarantine, and rolling 3-copy backups.
+- [ADR 0007](decisions/0007-composition-root.md): Composition root under `lib/app/` (`AppBootstrap`, `AppServices`, `WindowLifecycleCoordinator`) with slim 60-line `main.dart`.
+- [ADR 0008](decisions/0008-platform-layer.md): Cross-OS `PlatformServices` selector, `FileAssociationService`, no-op fallbacks, and typed `FeatureFlags` backed by hidden `AppSettings.featureFlags`.
+- [ADR 0009](decisions/0009-architecture-tests.md): Automated architecture guards for file-size budget, UI layer boundaries, controller-only queue mutations, and Windows platform isolation.
 - Unified album identity uses `AlbumIdentity` (`album + normalized albumArtist` with `artist` fallback, or `track::<path>` for untagged singles) across SQLite queries, `CoverCache`, `ReleaseKindClassifier`, and UI views.
 - M3U export validates targets before any disk write (`FilePicker.getDirectoryPath` rather than `FilePicker.saveFile` which eagerly writes bytes on Windows), enforces `.m3u`/`.m3u8`, refuses audio/existing non-playlist targets, requires localized overwrite confirmation, and writes atomically via temp sibling + flush + rename.
 - Display-only artist translations live in `ArtistNameStore` (`artist_names.json`) and never mutate library merge aliases.

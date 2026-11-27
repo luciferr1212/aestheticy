@@ -16,7 +16,10 @@ import 'app_settings.dart';
 /// Single source of truth managing UI settings persistence and in-memory state.
 class SettingsStore extends ChangeNotifier {
   static const int currentSchemaVersion = 1;
-  static final Set<String> _knownKeys = const AppSettings().toJson().keys.toSet();
+  static final Set<String> _knownKeys = {
+    ...const AppSettings().toJson().keys,
+    'featureFlags',
+  };
 
   Future<Directory> Function()? _directoryProvider;
   Directory? _directory;

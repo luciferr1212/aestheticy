@@ -10,12 +10,6 @@ const int kMaxLibFileLines = 1000;
 const Map<String, String> kFileSizeAllowlist = {
   'lib/ui/l10n/app_strings.dart':
       'Static English and Arabic localization dictionary data.',
-  // TODO split: handled in the Foundation task.
-  'lib/main.dart':
-      'App entry point and bootstrap wiring; handled in the Foundation task.',
-  // TODO split: handled in the Foundation task.
-  'lib/audio/playback_controller.dart':
-      'Core playback coordinator; handled in the Foundation task.',
 };
 
 void main() {

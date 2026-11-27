@@ -10,6 +10,11 @@ import 'dart:math' as math;
 import '../diagnostics/app_logger.dart';
 import 'audio_engine.dart';
 import 'audio_models.dart';
+import 'playback/playback_fade_handler.dart';
+import 'playback/playback_gapless_preloader.dart';
+import 'playback/playback_play_source_tracker.dart';
+import 'playback/playback_queue_operations.dart';
+import 'playback/playback_resume_state.dart';
 import 'playback_queue.dart';
 
 /// Coordinates the [AudioEngine] with a [PlaybackQueue]: auto-advances
@@ -40,6 +45,10 @@ class PlaybackController {
   /// Hard upper bound for stop/shutdown fade-out so exit stays responsive.
   static const Duration kStopMaxFadeOutDuration = Duration(milliseconds: 130);
 
+  /// Allowed play-event origin sources stored in `play_events.source`.
+  static const Set<String> allowedPlaySources =
+      PlaybackPlaySourceTracker.allowedPlaySources;
+
   /// The underlying audio engine (real or fake).
   final AudioEngine engine;
 
@@ -49,8 +58,6 @@ class PlaybackController {
   /// Timer cadence used for fade gain interpolation.
   final Duration fadeTickInterval;
 
-  FadeProfile _fadeProfile = FadeProfile.off;
-
   final List<StreamSubscription<dynamic>> _subs = [];
 
   final _stateCtrl = StreamController<PlaybackState>.broadcast();
@@ -59,36 +66,20 @@ class PlaybackController {
   final _seekCtrl = StreamController<Duration>.broadcast();
   final _queueChangeCtrl = StreamController<void>.broadcast();
 
-  /// Allowed play-event origin sources stored in `play_events.source`.
-  static const Set<String> allowedPlaySources = {
-    'album',
-    'artist',
-    'playlist',
-    'favorites',
-    'search',
-    'queue',
-    'mini',
-    'unknown',
-  };
-
   PlaybackState _currentState = PlaybackState.idle;
   Duration _currentPosition = Duration.zero;
   String? _openedUri;
   String? _lastEmittedUri;
-  String _currentPlaySource = 'unknown';
-  Duration? _armedResumePosition;
-  String? _armedResumeUri;
   int _consecutiveFatalErrors = 0;
   bool _isAdvancing = false;
   bool _disposed = false;
 
-  double _currentFadeGain = 1.0;
-  int _transitionGen = 0;
-  Future<void>? _activeTransition;
-  Timer? _fadeTimer;
-  Timer? _delayTimer;
-  Timer? _deadlineTimer;
-  Completer<void>? _activeWaitCompleter;
+  late final PlaybackFadeHandler _fadeHandler;
+  late final PlaybackGaplessPreloader _preloader;
+  final PlaybackResumeState _resumeState = PlaybackResumeState();
+  final PlaybackPlaySourceTracker _playSourceTracker =
+      PlaybackPlaySourceTracker();
+  late final PlaybackQueueOperations _queueOps;
 
   /// Creates a controller wired to [engine] and [queue].
   ///
@@ -102,48 +93,55 @@ class PlaybackController {
     bool smoothTransitions = false,
     this.fadeTickInterval = kDefaultFadeTickInterval,
   }) {
-    _fadeProfile = fadeProfile ??
-        (smoothTransitions ? FadeProfile.soft : FadeProfile.off);
+    final initialProfile =
+        fadeProfile ?? (smoothTransitions ? FadeProfile.soft : FadeProfile.off);
+    _fadeHandler = PlaybackFadeHandler(
+      engine: engine,
+      fadeTickInterval: fadeTickInterval,
+      isDisposed: () => _disposed,
+      initialProfile: initialProfile,
+    );
+    _preloader = PlaybackGaplessPreloader(
+      engine: engine,
+      queue: queue,
+      isDisposed: () => _disposed,
+      emitError: _errorCtrl.add,
+    );
+    _queueOps = PlaybackQueueOperations(
+      queue: queue,
+      fadeHandler: _fadeHandler,
+      preloader: _preloader,
+      resumeState: _resumeState,
+      playSourceTracker: _playSourceTracker,
+      resetFatalErrors: () => _consecutiveFatalErrors = 0,
+      notifyQueueChanged: notifyQueueChanged,
+      getOpenedUri: () => _openedUri,
+      switchTrackInternal: _switchTrackInternal,
+      stopInternal: _stopInternal,
+      stop: stop,
+    );
   }
 
   /// The active transition fade profile.
-  FadeProfile get fadeProfile => _fadeProfile;
+  FadeProfile get fadeProfile => _fadeHandler.fadeProfile;
 
   /// Origin source label (`album`, `artist`, `playlist`, `favorites`,
   /// `search`, `queue`, `mini`, or `unknown`) for the current playback context.
-  String get currentPlaySource => _currentPlaySource;
-
-  static String _normalizePlaySource(String? source) {
-    if (source != null && allowedPlaySources.contains(source)) {
-      return source;
-    }
-    return 'unknown';
-  }
+  String get currentPlaySource => _playSourceTracker.currentPlaySource;
 
   /// Updates the active transition fade profile.
   ///
   /// Takes effect on the next transition, never in the middle of a running fade.
   set fadeProfile(FadeProfile value) {
-    if (_fadeProfile == value) return;
-    _fadeProfile = value;
+    _fadeHandler.fadeProfile = value;
   }
 
   /// Whether smooth volume fade transitions are applied on transport actions.
-  bool get smoothTransitions => !_fadeProfile.isOff;
+  bool get smoothTransitions => _fadeHandler.smoothTransitions;
 
   /// Updates whether smooth volume fade transitions are enabled.
-  ///
-  /// Thin adapter over [fadeProfile] for backward compatibility:
-  /// `true` maps to [FadeProfile.soft], `false` maps to [FadeProfile.off].
-  /// When setting to `false`, immediately cancels active fade waiters and restores unity gain.
   set smoothTransitions(bool value) {
-    if (value) {
-      fadeProfile = FadeProfile.soft;
-    } else {
-      fadeProfile = FadeProfile.off;
-      _abortPendingWaiters();
-      unawaited(_setFadeGain(1.0));
-    }
+    _fadeHandler.smoothTransitions = value;
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────
@@ -164,24 +162,19 @@ class PlaybackController {
   }
 
   void _checkArmedResume([Duration? dur]) {
-    final effectiveDur = dur ?? engine.currentDuration;
-    if (_armedResumePosition != null &&
-        effectiveDur > Duration.zero &&
-        (_openedUri == null ||
-            _openedUri == _armedResumeUri ||
-            queue.current?.uri == _armedResumeUri)) {
-      final pos = _armedResumePosition!;
-      _armedResumePosition = null;
-      _armedResumeUri = null;
-      unawaited(engine.seek(pos));
-    }
+    _resumeState.checkArmedResume(
+      dur: dur,
+      engineDuration: engine.currentDuration,
+      openedUri: _openedUri,
+      currentQueueUri: queue.current?.uri,
+      seekEngine: engine.seek,
+    );
   }
 
   /// Tears down subscriptions and timers. Does **not** dispose the engine.
   Future<void> dispose() async {
     _disposed = true;
-    _transitionGen++;
-    _abortPendingWaiters();
+    _fadeHandler.dispose();
     for (final s in _subs) {
       await s.cancel();
     }
@@ -228,13 +221,14 @@ class PlaybackController {
     bool shuffled = false,
     RepeatMode repeatMode = RepeatMode.off,
   }) {
-    queue.restoreSnapshot(
+    _resumeState.restoreQueueSnapshot(
+      queue,
       entries: entries,
       currentIndex: currentIndex,
       shuffled: shuffled,
       repeatMode: repeatMode,
+      notifyQueueChanged: notifyQueueChanged,
     );
-    notifyQueueChanged();
   }
 
   /// Seeks to [position] within the current track.
@@ -251,18 +245,18 @@ class PlaybackController {
 
   /// Arms a lazy seek to [position] when the current track is next opened.
   void armResume(Duration position) {
-    _armedResumePosition = position;
-    _armedResumeUri = queue.current?.uri;
+    _resumeState.armResume(position, currentUri: queue.current?.uri);
   }
 
   /// The currently armed lazy seek position, if any.
-  Duration? get armedResumePosition => _armedResumePosition;
+  Duration? get armedResumePosition => _resumeState.armedResumePosition;
 
   /// The current playback position, or the armed resume position when nothing is loaded.
   Duration get currentPosition {
-    if ((_currentState == PlaybackState.idle || _currentState == PlaybackState.paused) &&
-        _armedResumePosition != null) {
-      return _armedResumePosition!;
+    if ((_currentState == PlaybackState.idle ||
+            _currentState == PlaybackState.paused) &&
+        _resumeState.armedResumePosition != null) {
+      return _resumeState.armedResumePosition!;
     }
     return engine.currentPosition;
   }
@@ -289,9 +283,10 @@ class PlaybackController {
     _consecutiveFatalErrors = 0;
     final source = queue.current;
     if (source == null) return Future<void>.value();
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    return _enqueueTransition(() => _playOrResumeInternal(source, gen, profile));
+    final gen = _fadeHandler.beginTransition();
+    final profile = _fadeHandler.fadeProfile;
+    return _fadeHandler
+        .enqueueTransition(() => _playOrResumeInternal(source, gen, profile));
   }
 
   Future<void> _playOrResumeInternal(
@@ -299,19 +294,19 @@ class PlaybackController {
     int gen,
     FadeProfile profile,
   ) async {
-    if (_isStale(gen)) return;
+    if (_fadeHandler.isStale(gen)) return;
 
     // When paused on the same track, resume playback without re-opening.
     if (_currentState == PlaybackState.paused && _openedUri == source.uri) {
       if (!profile.isOff && profile.resumeFadeIn > Duration.zero) {
-        await _setFadeGain(0.0);
-        if (_isStale(gen)) return;
+        await _fadeHandler.setFadeGain(0.0);
+        if (_fadeHandler.isStale(gen)) return;
         await engine.play();
-        if (_isStale(gen)) return;
-        _startFadeIn(profile.resumeFadeIn, gen, profile);
+        if (_fadeHandler.isStale(gen)) return;
+        _fadeHandler.startFadeIn(profile.resumeFadeIn, gen, profile);
       } else {
-        await _ensureUnityFadeGain();
-        if (_isStale(gen)) return;
+        await _fadeHandler.ensureUnityFadeGain();
+        if (_fadeHandler.isStale(gen)) return;
         await engine.play();
       }
       return;
@@ -320,9 +315,9 @@ class PlaybackController {
     // Resuming while already playing the same track (e.g. aborted pause fade).
     if (_currentState == PlaybackState.playing && _openedUri == source.uri) {
       if (!profile.isOff && profile.resumeFadeIn > Duration.zero) {
-        _startFadeIn(profile.resumeFadeIn, gen, profile);
+        _fadeHandler.startFadeIn(profile.resumeFadeIn, gen, profile);
       } else {
-        await _ensureUnityFadeGain();
+        await _fadeHandler.ensureUnityFadeGain();
       }
       return;
     }
@@ -351,91 +346,26 @@ class PlaybackController {
   Future<void> playTrack(int index) {
     _consecutiveFatalErrors = 0;
     if (index < 0 || index >= queue.length) return Future<void>.value();
-    if (_armedResumeUri != null && queue.items[index].uri != _armedResumeUri) {
-      _armedResumePosition = null;
-      _armedResumeUri = null;
-    }
+    _resumeState.clearIfDifferentUri(queue.items[index].uri);
     queue.jumpTo(index);
     final source = queue.current;
     if (source == null) return Future<void>.value();
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    return _enqueueTransition(() => _switchTrackInternal(source, gen, profile));
+    final gen = _fadeHandler.beginTransition();
+    final profile = _fadeHandler.fadeProfile;
+    return _fadeHandler
+        .enqueueTransition(() => _switchTrackInternal(source, gen, profile));
   }
 
-  void _replaceQueuePreservingUserQueue(
-    List<AudioSource> sources, {
-    required int startIndex,
-  }) {
-    final survivingUserEntries = <QueueEntry>[];
-    if (kKeepUserQueueOnNewContext && !queue.isEmpty && queue.currentIndex >= 0) {
-      for (var i = queue.currentIndex + 1; i < queue.length; i++) {
-        final entry = queue.entries[i];
-        if (entry.isUserQueued) {
-          survivingUserEntries.add(entry);
-        }
-      }
-    }
-
-    if (survivingUserEntries.isEmpty) {
-      queue.replaceAll(sources, startIndex: startIndex);
-    } else {
-      final validStartIndex = startIndex.clamp(0, sources.length - 1);
-      final newEntries = <QueueEntry>[];
-      for (var i = 0; i < validStartIndex; i++) {
-        newEntries.add(queue.createEntry(sources[i], isUserQueued: false));
-      }
-      newEntries.add(
-        queue.createEntry(sources[validStartIndex], isUserQueued: false),
-      );
-      newEntries.addAll(survivingUserEntries);
-      for (var i = validStartIndex + 1; i < sources.length; i++) {
-        newEntries.add(queue.createEntry(sources[i], isUserQueued: false));
-      }
-      queue.replaceAllEntries(newEntries, startIndex: validStartIndex);
-    }
-  }
+  // ── Queue Operations (delegated) ────────────────────────────────────
 
   /// Replaces the queue with [sources], starts playback at [startIndex],
   /// resets preload state, and preloads the next track for gapless transitions.
-  ///
-  /// When [kKeepUserQueueOnNewContext] is true, any upcoming user-queued tracks
-  /// survive the context switch and are placed directly after the newly started track.
   Future<void> playQueue(
     List<AudioSource> sources, {
     int startIndex = 0,
     String? source,
-  }) {
-    _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
-    _currentPlaySource = _normalizePlaySource(source);
-    if (sources.isEmpty) {
-      queue.clear();
-      _currentPlaySource = 'unknown';
-      final gen = _beginTransition();
-      final profile = _fadeProfile;
-      return _enqueueTransition(
-        () => _stopInternal(gen, clearResume: false, profile: profile),
-      );
-    }
-
-    _replaceQueuePreservingUserQueue(sources, startIndex: startIndex);
-
-    notifyQueueChanged();
-    final currentSource = queue.current;
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    if (currentSource == null) {
-      return _enqueueTransition(
-        () => _stopInternal(gen, clearResume: false, profile: profile),
-      );
-    }
-
-    return _enqueueTransition(
-      () => _switchTrackInternal(currentSource, gen, profile),
-    );
-  }
+  }) =>
+      _queueOps.playQueue(sources, startIndex: startIndex, source: source);
 
   /// Replaces the queue with [sources], enables shuffle mode, starts playback on
   /// a randomly selected item, notifies queue listeners, and preloads the next track.
@@ -443,252 +373,84 @@ class PlaybackController {
     List<AudioSource> sources, {
     math.Random? random,
     String? source,
-  }) {
-    _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
-    _currentPlaySource = _normalizePlaySource(source);
-    if (sources.isEmpty) {
-      return playQueue(const [], source: source);
-    }
-
-    final startIndex = sources.length > 1
-        ? (random ?? math.Random()).nextInt(sources.length)
-        : 0;
-    _replaceQueuePreservingUserQueue(sources, startIndex: startIndex);
-    queue.setShuffle(true);
-    notifyQueueChanged();
-
-    final currentSource = queue.current;
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    if (currentSource == null) {
-      return _enqueueTransition(
-        () => _stopInternal(gen, clearResume: false, profile: profile),
-      );
-    }
-
-    return _enqueueTransition(
-      () => _switchTrackInternal(currentSource, gen, profile),
-    );
-  }
+  }) =>
+      _queueOps.playShuffled(sources, random: random, source: source);
 
   /// Stops playback, clears the entire queue, notifies listeners, and clears preload.
-  Future<void> clearQueue() async {
-    queue.clear();
-    _currentPlaySource = 'unknown';
-    _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
-    notifyQueueChanged();
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    await _enqueueTransition(
-      () => _stopInternal(gen, clearResume: false, profile: profile),
-    );
-    await _preloadNext();
-  }
+  Future<void> clearQueue() => _queueOps.clearQueue();
 
   /// Removes upcoming items from the queue while keeping the currently
   /// playing track active without restart.
-  ///
-  /// If nothing is currently playing, clears the entire queue and stops playback.
-  /// Refreshes the gapless preload to reflect the new next track (or null).
-  Future<void> clearUpcoming() async {
-    if (_openedUri == null || queue.current == null) {
-      queue.clear();
-      notifyQueueChanged();
-      await stop();
-      return;
-    }
-
-    queue.clearUpcoming();
-    notifyQueueChanged();
-    await _preloadNext();
-  }
+  Future<void> clearUpcoming() => _queueOps.clearUpcoming();
 
   /// Inserts [sources] immediately after the currently playing track.
-  ///
-  /// If the queue is currently empty, behaves like [playQueue] starting at index 0.
-  /// If the queue is non-empty, preserves the current track and active playback position.
-  Future<void> playNext(List<AudioSource> sources) async {
-    if (sources.isEmpty) return;
-    if (queue.isEmpty || queue.current == null) {
-      await playQueue(sources, startIndex: 0, source: 'queue');
-      return;
-    }
-
-    queue.playNext(sources);
-    notifyQueueChanged();
-    unawaited(_preloadNext());
-  }
+  Future<void> playNext(List<AudioSource> sources) =>
+      _queueOps.playNext(sources);
 
   /// Appends [sources] to the playback queue after the current track and after any
   /// upcoming user-queued tracks.
-  ///
-  /// If the queue is currently empty, behaves like [playQueue] starting at index 0.
-  Future<void> addToQueue(List<AudioSource> sources) async {
-    if (sources.isEmpty) return;
-    if (queue.isEmpty || queue.current == null) {
-      await playQueue(sources, startIndex: 0, source: 'queue');
-      return;
-    }
-
-    queue.addToQueue(sources);
-    notifyQueueChanged();
-    unawaited(_preloadNext());
-  }
+  Future<void> addToQueue(List<AudioSource> sources) =>
+      _queueOps.addToQueue(sources);
 
   /// Reorders the item at [from] to [to] in active playback order.
-  ///
-  /// Validates indices, preserves the currently playing track without restarting,
-  /// notifies listeners, and refreshes the gapless preload.
-  Future<void> moveInQueue(int from, int to) async {
-    if (from < 0 || from >= queue.length) return;
-    if (to < 0 || to >= queue.length) return;
-    if (from == to) return;
-
-    queue.move(from, to);
-    notifyQueueChanged();
-    await _preloadNext();
-  }
+  Future<void> moveInQueue(int from, int to) => _queueOps.moveInQueue(from, to);
 
   /// Enables or disables shuffle mode, notifies queue listeners, and refreshes
   /// the gapless preload target.
-  Future<void> setShuffle(bool enabled) async {
-    queue.setShuffle(enabled);
-    notifyQueueChanged();
-    await _preloadNext();
-  }
+  Future<void> setShuffle(bool enabled) => _queueOps.setShuffle(enabled);
 
   /// Cycles repeat mode (`off` -> `all` -> `one` -> `off`), notifies queue
   /// listeners, and refreshes the gapless preload target.
-  Future<void> cycleRepeatMode() async {
-    final next = switch (queue.repeatMode) {
-      RepeatMode.off => RepeatMode.all,
-      RepeatMode.all => RepeatMode.one,
-      RepeatMode.one => RepeatMode.off,
-    };
-    queue.repeatMode = next;
-    notifyQueueChanged();
-    await _preloadNext();
-  }
+  Future<void> cycleRepeatMode() => _queueOps.cycleRepeatMode();
 
   /// Safely removes the entry identified by [entryId] from the queue.
-  Future<void> removeEntryFromQueue(int entryId) {
-    return removeEntriesFromQueue([entryId]);
-  }
+  Future<void> removeEntryFromQueue(int entryId) =>
+      _queueOps.removeEntryFromQueue(entryId);
 
-  /// Safely removes all entries matching [entryIds] in a single operation,
-  /// keeping playback continuous when current survives, advancing when current
-  /// is removed, stopping when empty, notifying listeners, and refreshing preload.
-  Future<void> removeEntriesFromQueue(Iterable<int> entryIds) async {
-    final idSet = entryIds.toSet();
-    if (idSet.isEmpty || queue.isEmpty) return;
-
-    final existingIds = queue.entries.map((e) => e.id).toSet();
-    final matchingIds = idSet.intersection(existingIds);
-    if (matchingIds.isEmpty) return;
-
-    final wasCurrent = queue.currentEntry != null &&
-        matchingIds.contains(queue.currentEntry!.id);
-
-    queue.removeByIds(matchingIds);
-
-    if (queue.isEmpty) {
-      _consecutiveFatalErrors = 0;
-      _armedResumePosition = null;
-      _armedResumeUri = null;
-      notifyQueueChanged();
-      final gen = _beginTransition();
-      final profile = _fadeProfile;
-      await _enqueueTransition(
-        () => _stopInternal(gen, clearResume: false, profile: profile),
-      );
-      await _preloadNext();
-      return;
-    }
-
-    if (!wasCurrent) {
-      notifyQueueChanged();
-      await _preloadNext();
-      return;
-    }
-
-    notifyQueueChanged();
-    _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
-    final nextSource = queue.current;
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    await _enqueueTransition(() async {
-      if (nextSource != null) {
-        await _switchTrackInternal(nextSource, gen, profile);
-      } else {
-        await _stopInternal(gen, clearResume: false, profile: profile);
-      }
-    });
-    await _preloadNext();
-  }
+  /// Safely removes all entries matching [entryIds] in a single operation.
+  Future<void> removeEntriesFromQueue(Iterable<int> entryIds) =>
+      _queueOps.removeEntriesFromQueue(entryIds);
 
   /// Safely removes the track at [index] in active playback order.
-  ///
-  /// - If [index] is invalid, this is a no-op.
-  /// - If [index] is not current, removes it, notifies listeners, and refreshes preload
-  ///   without interrupting current playback.
-  /// - If [index] is current and other items remain, removes it, resets error/resume state,
-  ///   plays the item now at the cursor, and notifies listeners.
-  /// - If [index] was the only item, clears the queue, stops the engine, and emits null current track.
-  Future<void> removeFromQueue(int index) async {
-    if (index < 0 || index >= queue.length) return;
-    await removeEntryFromQueue(queue.entries[index].id);
-  }
+  Future<void> removeFromQueue(int index) => _queueOps.removeFromQueue(index);
 
   /// Moves the item at [index] in active playback order to directly after the current track.
-  ///
-  /// No-op if [index] is invalid, is currently playing, or is already immediately next.
-  Future<void> playNextFromQueue(int index) async {
-    if (index < 0 || index >= queue.length) return;
-    final cur = queue.currentIndex;
-    if (cur < 0 || index == cur || index == cur + 1) return;
-    final target = index > cur ? cur + 1 : cur;
-    await moveInQueue(index, target);
-  }
+  Future<void> playNextFromQueue(int index) =>
+      _queueOps.playNextFromQueue(index);
 
   /// Pauses playback.
   Future<void> pause() {
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    return _enqueueTransition(() => _pauseInternal(gen, profile));
+    final gen = _fadeHandler.beginTransition();
+    final profile = _fadeHandler.fadeProfile;
+    return _fadeHandler.enqueueTransition(() => _pauseInternal(gen, profile));
   }
 
   Future<void> _pauseInternal(int gen, FadeProfile profile) async {
-    if (_isStale(gen)) return;
+    if (_fadeHandler.isStale(gen)) return;
     if (!profile.isOff &&
         profile.pauseFadeOut > Duration.zero &&
         _currentState == PlaybackState.playing) {
-      await _rampOut(profile.pauseFadeOut, gen);
-      if (_isStale(gen)) return;
+      await _fadeHandler.rampOut(profile.pauseFadeOut, gen);
+      if (_fadeHandler.isStale(gen)) return;
       await engine.pause();
-      if (!_disposed && !_isStale(gen)) {
-        await _setFadeGain(1.0);
+      if (!_disposed && !_fadeHandler.isStale(gen)) {
+        await _fadeHandler.setFadeGain(1.0);
       }
       return;
     }
 
-    await _ensureUnityFadeGain();
-    if (_isStale(gen)) return;
+    await _fadeHandler.ensureUnityFadeGain();
+    if (_fadeHandler.isStale(gen)) return;
     await engine.pause();
   }
 
   /// Stops playback and clears the active track.
   Future<void> stop() {
-    _armedResumePosition = null;
-    _armedResumeUri = null;
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
-    return _enqueueTransition(() => _stopInternal(gen, profile: profile));
+    _resumeState.clearArmedResume();
+    final gen = _fadeHandler.beginTransition();
+    final profile = _fadeHandler.fadeProfile;
+    return _fadeHandler
+        .enqueueTransition(() => _stopInternal(gen, profile: profile));
   }
 
   Future<void> _stopInternal(
@@ -696,54 +458,54 @@ class PlaybackController {
     bool clearResume = true,
     required FadeProfile profile,
   }) async {
-    if (_isStale(gen)) return;
+    if (_fadeHandler.isStale(gen)) return;
     if (clearResume) {
-      _armedResumePosition = null;
-      _armedResumeUri = null;
+      _resumeState.clearArmedResume();
     }
     if (!profile.isOff &&
         profile.stopFadeOut > Duration.zero &&
         _currentState == PlaybackState.playing) {
       final stopMax = Duration(
-        milliseconds:
-            (profile.stopFadeOut.inMilliseconds * 1.3).round().clamp(10, 10000),
+        milliseconds: (profile.stopFadeOut.inMilliseconds * 1.3)
+            .round()
+            .clamp(10, 10000),
       );
-      await _rampOut(
+      await _fadeHandler.rampOut(
         profile.stopFadeOut,
         gen,
         maxDuration: stopMax,
       );
-      if (_isStale(gen)) return;
+      if (_fadeHandler.isStale(gen)) return;
     }
     _openedUri = null;
     await engine.stop();
     if (!_disposed) {
       _emitCurrent(null);
     }
-    if (!_disposed && !_isStale(gen)) {
-      await _setFadeGain(1.0);
+    if (!_disposed && !_fadeHandler.isStale(gen)) {
+      await _fadeHandler.setFadeGain(1.0);
     }
   }
 
   /// Skips to the next track.
   Future<void> skipNext() {
     _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
+    _resumeState.clearArmedResume();
     final next = queue.next();
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
+    final gen = _fadeHandler.beginTransition();
+    final profile = _fadeHandler.fadeProfile;
     if (next == null) {
-      return _enqueueTransition(() => _stopInternal(gen, profile: profile));
+      return _fadeHandler
+          .enqueueTransition(() => _stopInternal(gen, profile: profile));
     }
-    return _enqueueTransition(() => _switchTrackInternal(next, gen, profile));
+    return _fadeHandler
+        .enqueueTransition(() => _switchTrackInternal(next, gen, profile));
   }
 
   /// Skips to the previous track, or restarts current track if played past 3 seconds.
   Future<void> skipPrevious() async {
     _consecutiveFatalErrors = 0;
-    _armedResumePosition = null;
-    _armedResumeUri = null;
+    _resumeState.clearArmedResume();
     if (_currentPosition > const Duration(seconds: 3)) {
       _currentPosition = Duration.zero;
       await engine.seek(Duration.zero);
@@ -751,231 +513,35 @@ class PlaybackController {
     }
 
     final prev = queue.previous();
-    final gen = _beginTransition();
-    final profile = _fadeProfile;
+    final gen = _fadeHandler.beginTransition();
+    final profile = _fadeHandler.fadeProfile;
     if (prev == null) {
       _currentPosition = Duration.zero;
       await engine.seek(Duration.zero);
       return;
     }
     _currentPosition = Duration.zero;
-    await _enqueueTransition(() => _switchTrackInternal(prev, gen, profile));
+    await _fadeHandler
+        .enqueueTransition(() => _switchTrackInternal(prev, gen, profile));
   }
 
-  // ── Internal transition & fade helpers ──────────────────────────────
-
-  int _beginTransition() {
-    _transitionGen++;
-    _abortPendingWaiters();
-    return _transitionGen;
-  }
-
-  bool _isStale(int gen) => _disposed || gen != _transitionGen;
-
-  Future<void> _enqueueTransition(Future<void> Function() task) {
-    final prev = _activeTransition;
-    final next = prev == null
-        ? task()
-        : prev.catchError((Object _) {}).then((_) => task());
-    late final Future<void> tracked;
-    tracked = next.whenComplete(() {
-      if (identical(_activeTransition, tracked)) {
-        _activeTransition = null;
-      }
-    });
-    _activeTransition = tracked;
-    return tracked;
-  }
-
-  void _abortPendingWaiters() {
-    _fadeTimer?.cancel();
-    _fadeTimer = null;
-    _delayTimer?.cancel();
-    _delayTimer = null;
-    _deadlineTimer?.cancel();
-    _deadlineTimer = null;
-    final completer = _activeWaitCompleter;
-    _activeWaitCompleter = null;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete();
-    }
-  }
-
-  Future<void> _setFadeGain(double gain) async {
-    final clamped = gain.clamp(0.0, 1.0);
-    _currentFadeGain = clamped;
-    if (_disposed) return;
-    await engine.setFadeGain(clamped);
-  }
-
-  Future<void> _ensureUnityFadeGain() async {
-    if ((_currentFadeGain - 1.0).abs() > 1e-6) {
-      await _setFadeGain(1.0);
-    }
-  }
-
-  static double _smoothStep(double t) => 0.5 * (1.0 - math.cos(math.pi * t));
-
-  double _fadeProgress(int step, int totalDurationUs, int swElapsedUs) {
-    final tickUs = step * fadeTickInterval.inMicroseconds;
-    final elapsedUs = math.max(tickUs, swElapsedUs);
-    return (elapsedUs / totalDurationUs).clamp(0.0, 1.0);
-  }
-
-  Future<void> _rampOut(
-    Duration duration,
-    int gen, {
-    Duration? maxDuration,
-  }) async {
-    if (_isStale(gen)) return;
-    final startGain = _currentFadeGain.clamp(0.0, 1.0);
-    if (startGain <= 0.0 || duration <= Duration.zero) {
-      await _setFadeGain(0.0);
-      return;
-    }
-
-    final scaledMs = (duration.inMilliseconds * startGain).round();
-    final effectiveMs = maxDuration != null
-        ? math.min(scaledMs, maxDuration.inMilliseconds)
-        : scaledMs;
-    if (effectiveMs <= 0) {
-      await _setFadeGain(0.0);
-      return;
-    }
-
-    final totalDurationUs = effectiveMs * 1000;
-    final sw = Stopwatch()..start();
-    var step = 0;
-    final completer = Completer<void>();
-    _activeWaitCompleter = completer;
-
-    void finish() {
-      _fadeTimer?.cancel();
-      _fadeTimer = null;
-      _deadlineTimer?.cancel();
-      _deadlineTimer = null;
-      if (identical(_activeWaitCompleter, completer)) {
-        _activeWaitCompleter = null;
-      }
-      if (!completer.isCompleted) {
-        completer.complete();
-      }
-    }
-
-    if (maxDuration != null) {
-      _deadlineTimer = Timer(maxDuration, () {
-        if (!_isStale(gen)) {
-          unawaited(_setFadeGain(0.0));
-        }
-        finish();
-      });
-    }
-
-    _fadeTimer = Timer.periodic(fadeTickInterval, (_) {
-      if (_isStale(gen)) {
-        finish();
-        return;
-      }
-      step++;
-      final t = _fadeProgress(step, totalDurationUs, sw.elapsedMicroseconds);
-      final gain = startGain * (1.0 - _smoothStep(t));
-      unawaited(_setFadeGain(gain));
-      if (t >= 1.0) {
-        finish();
-      }
-    });
-
-    await completer.future;
-    if (!_isStale(gen)) {
-      await _setFadeGain(0.0);
-    }
-  }
-
-  Future<void> _waitGap(Duration duration, int gen) async {
-    if (_isStale(gen) || duration <= Duration.zero) return;
-    final completer = Completer<void>();
-    _activeWaitCompleter = completer;
-    _delayTimer = Timer(duration, () {
-      _delayTimer = null;
-      if (identical(_activeWaitCompleter, completer)) {
-        _activeWaitCompleter = null;
-      }
-      if (!completer.isCompleted) {
-        completer.complete();
-      }
-    });
-    await completer.future;
-  }
-
-  void _startFadeIn(Duration duration, int gen, FadeProfile profile) {
-    if (_isStale(gen)) return;
-    _fadeTimer?.cancel();
-    _fadeTimer = null;
-
-    if (profile.isOff || duration <= Duration.zero) {
-      if ((_currentFadeGain - 1.0).abs() > 1e-6) {
-        unawaited(_setFadeGain(1.0));
-      }
-      return;
-    }
-
-    final startGain = _currentFadeGain.clamp(0.0, 1.0);
-    if (startGain >= 1.0) {
-      return;
-    }
-
-    final remainingFraction = 1.0 - startGain;
-    final totalDurationUs =
-        (duration.inMilliseconds * remainingFraction * 1000).round().clamp(1, 10000000);
-    final sw = Stopwatch()..start();
-    var step = 0;
-
-    _fadeTimer = Timer.periodic(fadeTickInterval, (timer) {
-      if (_isStale(gen)) {
-        timer.cancel();
-        if (identical(_fadeTimer, timer)) {
-          _fadeTimer = null;
-        }
-        return;
-      }
-      step++;
-      final t = _fadeProgress(step, totalDurationUs, sw.elapsedMicroseconds);
-      final gain = startGain + (1.0 - startGain) * _smoothStep(t);
-      unawaited(_setFadeGain(gain));
-      if (t >= 1.0) {
-        timer.cancel();
-        if (identical(_fadeTimer, timer)) {
-          _fadeTimer = null;
-        }
-      }
-    });
-  }
+  // ── Internal track switching & engine listeners ─────────────────────
 
   Future<void> _switchTrackInternal(
     AudioSource source,
     int gen,
     FadeProfile profile,
   ) async {
-    if (_isStale(gen)) return;
+    if (_fadeHandler.isStale(gen)) return;
 
     final wasPlaying = _currentState == PlaybackState.playing;
-    if (!profile.isOff) {
-      if (wasPlaying) {
-        if (profile.switchFadeOut > Duration.zero) {
-          await _rampOut(profile.switchFadeOut, gen);
-          if (_isStale(gen)) return;
-        }
-        if (profile.switchGap > Duration.zero) {
-          await _waitGap(profile.switchGap, gen);
-          if (_isStale(gen)) return;
-        }
-      } else {
-        await _setFadeGain(0.0);
-        if (_isStale(gen)) return;
-      }
-    } else if ((_currentFadeGain - 1.0).abs() > 1e-6) {
-      await _setFadeGain(1.0);
-      if (_isStale(gen)) return;
+    if (!profile.isOff || (_fadeHandler.currentFadeGain - 1.0).abs() > 1e-6) {
+      await _fadeHandler.prepareForTrackSwitch(
+        wasPlaying: wasPlaying,
+        gen: gen,
+        profile: profile,
+      );
+      if (_fadeHandler.isStale(gen)) return;
     }
 
     _openedUri = source.uri;
@@ -988,9 +554,9 @@ class PlaybackController {
         e,
         st,
       );
-      if (!_disposed && !_isStale(gen)) {
-        await _setFadeGain(1.0);
-        // Schedule asynchronously outside _enqueueTransition so _onError
+      if (!_disposed && !_fadeHandler.isStale(gen)) {
+        await _fadeHandler.setFadeGain(1.0);
+        // Schedule asynchronously outside enqueueTransition so _onError
         // can safely advance past the broken track without deadlocking.
         Timer.run(() {
           if (!_disposed) {
@@ -1008,17 +574,15 @@ class PlaybackController {
       }
       return;
     }
-    if (_isStale(gen)) return;
+    if (_fadeHandler.isStale(gen)) return;
 
     _checkArmedResume();
     _emitCurrent(source);
-    unawaited(_preloadNext());
+    unawaited(_preloader.preloadNext());
     final fadeInDuration =
         wasPlaying ? profile.switchFadeIn : profile.startFadeIn;
-    _startFadeIn(fadeInDuration, gen, profile);
+    _fadeHandler.startFadeIn(fadeInDuration, gen, profile);
   }
-
-  // ── Internal listeners ──────────────────────────────────────────────
 
   void _onPlaybackState(PlaybackState state) {
     if (_disposed) return;
@@ -1045,7 +609,8 @@ class PlaybackController {
     if (_isAdvancing) return;
 
     _consecutiveFatalErrors++;
-    if (_consecutiveFatalErrors > queue.length || _consecutiveFatalErrors >= 3) {
+    if (_consecutiveFatalErrors > queue.length ||
+        _consecutiveFatalErrors >= 3) {
       await stop();
       if (!_disposed) {
         _errorCtrl.add(AudioError(
@@ -1066,11 +631,11 @@ class PlaybackController {
     _isAdvancing = true;
     try {
       final next = queue.advance();
-      final gen = _beginTransition();
-      await _enqueueTransition(() async {
-        if (_isStale(gen)) return;
-        await _ensureUnityFadeGain();
-        if (_isStale(gen)) return;
+      final gen = _fadeHandler.beginTransition();
+      await _fadeHandler.enqueueTransition(() async {
+        if (_fadeHandler.isStale(gen)) return;
+        await _fadeHandler.ensureUnityFadeGain();
+        if (_fadeHandler.isStale(gen)) return;
         if (next == null) {
           _openedUri = null;
           _emitCurrent(null);
@@ -1081,35 +646,12 @@ class PlaybackController {
         // continuingGapless: if the engine already moved on to this track by
         // itself, it only confirms the switch instead of reloading the file.
         await engine.open(next, autoPlay: true, continuingGapless: true);
-        if (_isStale(gen)) return;
+        if (_fadeHandler.isStale(gen)) return;
         _emitCurrent(next);
-        unawaited(_preloadNext());
+        unawaited(_preloader.preloadNext());
       });
     } finally {
       _isAdvancing = false;
-    }
-  }
-
-  /// Asks the engine to prepare the next track. Never throws: a failure is
-  /// reported as a non-fatal error on [errorStream] and playback continues
-  /// (the next track will then start without the gapless preparation).
-  Future<void> _preloadNext() async {
-    if (_disposed || !engine.capabilities.gapless) return;
-    try {
-      await engine.preloadNext(queue.peekNext());
-    } catch (e, st) {
-      AppLogger.instance.warn(
-        'PlaybackController',
-        'Preloading the next track failed',
-        e,
-        st,
-      );
-      if (_disposed) return;
-      _errorCtrl.add(AudioError(
-        code: AudioErrorCode.engineFailure,
-        message: 'Preloading the next track failed: $e',
-        isFatal: false,
-      ));
     }
   }
 

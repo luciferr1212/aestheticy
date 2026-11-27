@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- Foundation F4 composition root under `lib/app/` (`AppBootstrap`, `AppServices`, `WindowLifecycleCoordinator`, `AestheticyApp`, `AudioInitErrorApp`/`LibraryInitErrorApp`) reducing `lib/main.dart` from 1,159 to 60 lines with identical startup/shutdown order.
+- Internal `PlaybackController` collaborators under `lib/audio/playback/` (`PlaybackFadeHandler`, `PlaybackGaplessPreloader`, `PlaybackQueueOperations`, `PlaybackResumeState`, `PlaybackPlaySourceTracker`) reducing `lib/audio/playback_controller.dart` from 1,121 to 661 lines with zero behavioral change.
+- Cross-OS platform selector (`lib/platform/platform_services.dart`), `FileAssociationService` interface + Windows placeholder, production no-op fallbacks (`lib/platform/noop_platform_services.dart`), and typed `FeatureFlags` (`lib/app/feature_flags.dart`) backed by a hidden `featureFlags` map in `AppSettings`.
+- Architecture guard tests `test/architecture/ui_layer_boundaries_test.dart`, `test/architecture/no_direct_queue_mutation_in_ui_test.dart`, and `test/architecture/windows_platform_isolation_test.dart`, plus pre-refactor characterization suite `test/refactor/f4_characterization_test.dart`.
+- Architecture decisions `docs/decisions/0007-composition-root.md`, `docs/decisions/0008-platform-layer.md`, and `docs/decisions/0009-architecture-tests.md`, and folder map in `README.md`.
 - Foundation F3 error model (`Result<T>`, sealed `AppError` subtypes in `lib/core/result.dart`), calm localized `ErrorPresenter` (`lib/ui/common/error_presenter.dart`, 10 `error.*` EN+AR strings), and pilot wiring across M3U import/export and adding a library folder (`ScanService.addFolderResult`, `FolderManagementSheet`, `AppShell`).
 - Upgraded `AppLogger` (`lib/diagnostics/app_logger.dart`) with `LogLevel` (`debug`, `info`, `warn`, `error`), `minLevel` filtering, injectable `customSink`, `AppLogger.swallow(...)`, 1 MB x 5 rolling rotation (`aestheticy.log` + `.1`..`.4`), quoted/UNC/`file://` path sanitization, and safe timer-free uninitialized logging in tests.
 - Architecture guard `test/architecture/no_silent_catch_test.dart` with empty allowlist (`kSilentCatchAllowlist = {}`) verifying every `catch` / `on` clause across `lib/`, backed by the full catch audit table in `docs/PROJECT_STATE.md`.

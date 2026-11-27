@@ -155,6 +155,9 @@ class AppSettings {
   /// Active tab in the docked right side panel ('queue' or 'lyrics').
   final String sidePanelTab;
 
+  /// Hidden feature flag overrides parsed from `ui_settings.json` (no UI).
+  final Map<String, bool> featureFlags;
+
   /// Whether smooth volume fade transitions are enabled around playback changes.
   bool get smoothTransitions => transitionSmoothness != 'off';
 
@@ -224,7 +227,8 @@ class AppSettings {
     bool? smoothTransitions,
     this.sidePanelOpen = false,
     String sidePanelTab = 'queue',
-  })  : replayGainPreampDb = replayGainPreampDb < -15.0
+    this.featureFlags = const {},
+  }) : replayGainPreampDb = replayGainPreampDb < -15.0
             ? -15.0
             : (replayGainPreampDb > 15.0 ? 15.0 : replayGainPreampDb),
         volume = volume < 0.0 ? 0.0 : (volume > 1.0 ? 1.0 : volume),
@@ -319,6 +323,7 @@ class AppSettings {
     bool? smoothTransitions,
     bool? sidePanelOpen,
     String? sidePanelTab,
+    Map<String, bool>? featureFlags,
   }) {
     String resolvedSmoothness = this.transitionSmoothness;
     if (transitionSmoothness != null) {
@@ -393,6 +398,7 @@ class AppSettings {
       sidePanelTab: sidePanelTab == null
           ? this.sidePanelTab
           : (sidePanelTab == 'lyrics' ? 'lyrics' : 'queue'),
+      featureFlags: featureFlags ?? this.featureFlags,
     );
   }
 
@@ -450,6 +456,7 @@ class AppSettings {
       'smoothTransitions': smoothTransitions,
       'sidePanelOpen': sidePanelOpen,
       'sidePanelTab': sidePanelTab,
+      if (featureFlags.isNotEmpty) 'featureFlags': featureFlags,
     };
   }
 
@@ -740,6 +747,16 @@ class AppSettings {
     final rawSidePanelTab = json['sidePanelTab'];
     final sidePanelTab = rawSidePanelTab == 'lyrics' ? 'lyrics' : 'queue';
 
+    final rawFeatureFlags = json['featureFlags'];
+    final parsedFlags = <String, bool>{};
+    if (rawFeatureFlags is Map) {
+      for (final entry in rawFeatureFlags.entries) {
+        if (entry.key is String && entry.value is bool) {
+          parsedFlags[entry.key as String] = entry.value as bool;
+        }
+      }
+    }
+
     return AppSettings(
       language: language,
       userName: userName,
@@ -791,6 +808,7 @@ class AppSettings {
       transitionSmoothness: transitionSmoothness,
       sidePanelOpen: sidePanelOpen,
       sidePanelTab: sidePanelTab,
+      featureFlags: parsedFlags.isEmpty ? const {} : Map.unmodifiable(parsedFlags),
     );
   }
 
@@ -849,7 +867,8 @@ class AppSettings {
           miniPlayerShowLyrics == other.miniPlayerShowLyrics &&
           transitionSmoothness == other.transitionSmoothness &&
           sidePanelOpen == other.sidePanelOpen &&
-          sidePanelTab == other.sidePanelTab;
+          sidePanelTab == other.sidePanelTab &&
+          mapEquals(featureFlags, other.featureFlags);
 
   @override
   int get hashCode => Object.hashAll([
@@ -903,5 +922,8 @@ class AppSettings {
         transitionSmoothness,
         sidePanelOpen,
         sidePanelTab,
+        Object.hashAllUnordered(
+          featureFlags.entries.map((e) => Object.hash(e.key, e.value)),
+        ),
       ]);
 }

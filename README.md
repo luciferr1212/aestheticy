@@ -43,7 +43,20 @@ flutter test
 ## Tech Stack
 
 - **Flutter** (Dart) — Windows desktop target
-- **libmpv** (planned) — Audio playback behind an `AudioEngine` interface
+- **libmpv** — Audio playback behind an `AudioEngine` interface
+
+## Folder Map
+
+- `lib/main.dart` — Slim app entrypoint (`runZonedGuarded`, logger init, `AppBootstrap.initialize`, `runApp`).
+- `lib/app/` — Composition root (`app_bootstrap.dart`, `app_services.dart`, `window_lifecycle.dart`, `aestheticy_app.dart`, `init_error_apps.dart`, `feature_flags.dart`).
+- `lib/audio/` — `AudioEngine` contract, `MpvAudioEngine`, `PlaybackQueue`, and `PlaybackController` facade backed by internal collaborators under `lib/audio/playback/` (fade, gapless preload, queue operations, resume state, play-source tracking).
+- `lib/core/` — Shared `Result<T>` and sealed `AppError` types.
+- `lib/diagnostics/` — Rotating privacy-redacted `AppLogger` and diagnostic report builder.
+- `lib/features/` — Feature coordinators (collections/M3U, play history recorder, OS integration & shutdown, lyrics, atomic & versioned JSON persistence, session save/restore).
+- `lib/library/` — Pure-Dart models, scanner, cover cache, and split SQLite stores (`library.db` + `userdata.db` under `lib/library/sqlite/`).
+- `lib/platform/` — Abstract OS interfaces (`TrayService`, `WindowService`, `MediaSessionService`, `SleepInhibitor`, `FileAssociationService`), `PlatformServices` OS selector, no-op fallbacks, and isolated Windows implementations under `lib/platform/windows/`.
+- `lib/ui/` — Glass UI shell, views, settings, mini player, localization (`AppStrings` EN + AR), and `ErrorPresenter`.
+- `test/architecture/` — Automated architecture guard tests (file-size budget, UI layer boundaries, no direct UI queue mutation, Windows isolation, no silent catches, no user audio file writes).
 
 ## License
 
