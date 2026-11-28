@@ -483,6 +483,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         dataCache: _dataCache,
                         settingsStore: _settingsStore,
                         navigator: _navigator,
+                        sessionStore: _sessionStore,
                         directoryPicker: widget.directoryPicker,
                         audioSettingsApplier: _audioSettingsApplier,
                         artistNameStore: _artistNameStore,

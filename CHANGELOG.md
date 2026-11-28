@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Changed
+- `AppDestination.home` is now the first sidebar item (`sidebar_home`) and default start destination when the library has configured folders (`WelcomeView` remains active when no folders exist).
 - Docked Queue/Lyrics side panel now computes responsive width via `SidePanelController.panelWidthFor(windowWidth)` (`(windowWidth * 0.22).clamp(280.0, 320.0)`) instead of a fixed `360 px` width, with `LibraryViewControls`, `QueueContent`, and unsynced lyrics notices tightened for clean 280 px LTR/RTL rendering at Large text scale.
 - Updated `docs/PROJECT_STATE.md` Catch Audit summary to match the live `lib/` codebase (`261` total: `38` class `(a)`, `182` class `(b)`, `41` class `(c)`).
 
@@ -12,6 +13,8 @@ All notable changes to this project will be documented in this file.
 - Forward `FlutterErrorDetails.stack` into `AppLogger.instance.error` inside `FlutterError.onError` (extracted to `lib/app/flutter_error_handler.dart`) while preserving `FlutterError.presentError`.
 
 ### Added
+- Prompt 9A calm 3-element Home screen under `lib/ui/home/` (`HomeView`, `HomeHeroCard`, `HomeMediaRow`, `HomeController`, `home_greeting.dart`, `home_models.dart`) with EN/AR time-of-day greetings, Now Playing / Resume Last Session hero card, lazy horizontal "Continue listening" row, one daily rotating row (`recentlyAdded`, `forgottenFavorites`, `onThisDay`, `mostPlayedThisMonth`) with "why this row" caption, and friendly empty-history state.
+- Read-only Home analytics queries on `SqliteHistoryAnalytics` and `LibraryRepository` (`recentAlbumsPlayed`, `forgottenFavorites`, `onThisDay`, `mostPlayedThisMonth`, `recentlyAddedAlbums`) respecting `UserDataAccessMode.safeReadOnly`, plus seeded query, controller, and EN/AR widget tests.
 - Foundation F4 composition root under `lib/app/` (`AppBootstrap`, `AppServices`, `WindowLifecycleCoordinator`, `AestheticyApp`, `AudioInitErrorApp`/`LibraryInitErrorApp`) reducing `lib/main.dart` from 1,159 to 60 lines with identical startup/shutdown order.
 - Internal `PlaybackController` collaborators under `lib/audio/playback/` (`PlaybackFadeHandler`, `PlaybackGaplessPreloader`, `PlaybackQueueOperations`, `PlaybackResumeState`, `PlaybackPlaySourceTracker`) reducing `lib/audio/playback_controller.dart` from 1,121 to 661 lines with zero behavioral change.
 - Cross-OS platform selector (`lib/platform/platform_services.dart`), `FileAssociationService` interface + Windows placeholder, production no-op fallbacks (`lib/platform/noop_platform_services.dart`), and typed `FeatureFlags` (`lib/app/feature_flags.dart`) backed by a hidden `featureFlags` map in `AppSettings`.

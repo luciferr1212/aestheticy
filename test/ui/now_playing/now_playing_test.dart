@@ -349,7 +349,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(wentBack, isTrue);
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
     });
 
     testWidgets('AppShell integration: navigation to NowPlaying and back preserves state', (tester) async {
@@ -378,12 +378,17 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Starts on Albums
-      expect(navigator.current, equals(AppDestination.albums));
+      // Starts on Home
+      expect(navigator.current, equals(AppDestination.home));
       expect(find.byType(BottomNowPlayingBar), findsOneWidget);
 
       // Tap player bar to open Now Playing
-      await tester.tap(find.text('Track One'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomNowPlayingBar),
+          matching: find.text('Track One'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(navigator.current, equals(AppDestination.nowPlaying));
@@ -395,7 +400,7 @@ void main() {
       await tester.tap(find.text('Library'));
       await tester.pumpAndSettle();
 
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
       expect(find.byType(BottomNowPlayingBar), findsOneWidget);
 
       await repo.close();

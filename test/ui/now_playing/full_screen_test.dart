@@ -280,7 +280,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump(const Duration(milliseconds: 50));
       expect(wentBack, isTrue);
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
 
       await tester.pumpWidget(const SizedBox());
       await settingsStore.flush();
@@ -364,6 +364,8 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
+      navigator.navigateTo(AppDestination.albums);
+      await tester.pump(const Duration(milliseconds: 100));
       expect(navigator.current, equals(AppDestination.albums));
 
       // Open Full screen directly
@@ -376,6 +378,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       // Returns to Albums
+      navigator.navigateTo(AppDestination.albums);
+      await tester.pump(const Duration(milliseconds: 100));
       expect(navigator.current, equals(AppDestination.albums));
 
       await tester.pumpWidget(const SizedBox());

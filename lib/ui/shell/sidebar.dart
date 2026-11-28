@@ -68,6 +68,17 @@ class Sidebar extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        _SidebarTile(
+                          key: const Key('sidebar_home'),
+                          icon: Icons.home_outlined,
+                          selectedIcon: Icons.home,
+                          title: context.t('nav.home'),
+                          isCompact: isCompact,
+                          isSelected: navigator.current == AppDestination.home,
+                          onTap: () => navigator.navigateTo(AppDestination.home),
+                        ),
+                        const SizedBox(height: 12),
+
                         // Library section
                         if (!isCompact)
                           _SectionHeader(title: context.t('nav.library')),

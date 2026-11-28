@@ -196,6 +196,29 @@ abstract class LibraryRepository {
     bool countedOnly = false,
   });
 
+  // ── Home Read-Only Queries ───────────────────────────────────────────
+
+  /// Returns distinct albums ordered by most recent counted play.
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8});
+
+  /// Returns favorited tracks whose last counted play is older than [olderThan]
+  /// or that have never been played.
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  });
+
+  /// Returns tracks played (counted = 1) on the same month/day as [today] in
+  /// earlier years.
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8});
+
+  /// Returns tracks most played (counted = 1) in the current month up to [now].
+  Future<List<Track>> mostPlayedThisMonth({int limit = 8, DateTime? now});
+
+  /// Returns albums ordered by latest `addedAt` descending.
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8});
+
   /// Retrieves the most recent playback events ordered from newest to oldest.
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50});
 

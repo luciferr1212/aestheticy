@@ -5,6 +5,9 @@ import '../../library/models.dart';
 
 /// Available top-level navigation destinations.
 enum AppDestination {
+  /// Calm Home landing screen.
+  home,
+
   /// Albums grid or list screen.
   albums,
 
@@ -125,8 +128,8 @@ class AppNavigator extends ChangeNotifier {
   /// Optional callback invoked to capture active view state before navigating.
   void Function(Map<String, Object?>)? onCaptureViewState;
 
-  /// Creates an [AppNavigator] defaulting to [AppDestination.albums].
-  AppNavigator({AppDestination initialDestination = AppDestination.albums}) {
+  /// Creates an [AppNavigator] defaulting to [AppDestination.home].
+  AppNavigator({AppDestination initialDestination = AppDestination.home}) {
     _history.add(
       NavEntry(
         id: 'nav_${_idSeq++}',
@@ -277,6 +280,9 @@ class AppNavigator extends ChangeNotifier {
       ),
     );
   }
+
+  /// Opens the Home screen.
+  void openHome() => navigateTo(AppDestination.home);
 
   /// Opens the synchronized lyrics view.
   void openLyrics() => navigateTo(AppDestination.lyrics);

@@ -41,9 +41,9 @@ void main() {
       expect(nav.canGoBack, isTrue);
       expect(nav.canGoForward, isTrue);
 
-      // Go back to albums (root)
+      // Go back to home (root)
       expect(nav.goBack(), isTrue);
-      expect(nav.current, AppDestination.albums);
+      expect(nav.current, AppDestination.home);
       expect(nav.canGoBack, isFalse);
       expect(nav.canGoForward, isTrue);
 
@@ -61,7 +61,7 @@ void main() {
       final nav = AppNavigator();
       expect(nav.history.length, 1);
 
-      nav.navigateTo(AppDestination.albums);
+      nav.navigateTo(AppDestination.home);
       expect(nav.history.length, 1);
 
       nav.openAlbumDetail('Abbey Road');
@@ -99,7 +99,7 @@ void main() {
       expect(nav.current, AppDestination.playlists);
       expect(nav.canGoForward, isFalse);
       expect(nav.history.map((e) => e.destination).toList(), [
-        AppDestination.albums,
+        AppDestination.home,
         AppDestination.tracks,
         AppDestination.playlists,
       ]);
@@ -304,7 +304,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Tracks View'), findsOneWidget);
 
-        // Navigate back to albums
+        // Navigate back to home
         nav.goBack();
         await tester.pumpAndSettle();
 

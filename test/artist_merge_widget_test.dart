@@ -249,6 +249,30 @@ class FailingMergeRepository implements LibraryRepository {
       );
 
   @override
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8}) =>
+      _inner.recentAlbumsPlayed(limit: limit);
+
+  @override
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  }) =>
+      _inner.forgottenFavorites(olderThan: olderThan, limit: limit, now: now);
+
+  @override
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8}) =>
+      _inner.onThisDay(today, limit: limit);
+
+  @override
+  Future<List<Track>> mostPlayedThisMonth({int limit = 8, DateTime? now}) =>
+      _inner.mostPlayedThisMonth(limit: limit, now: now);
+
+  @override
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8}) =>
+      _inner.recentlyAddedAlbums(limit: limit);
+
+  @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) =>
       _inner.recentPlayEvents(limit: limit);
 

@@ -449,7 +449,7 @@ void main() {
                         body: AlbumsView(
                           repository: repo,
                           settingsStore: settingsStore,
-                          navigator: navigator,
+                          navigator: AppNavigator(initialDestination: AppDestination.albums),
                           dataCache: localCache,
                         ),
                       ),
@@ -522,7 +522,7 @@ void main() {
                         body: ArtistsView(
                           repository: repo,
                           settingsStore: settingsStore,
-                          navigator: navigator,
+                          navigator: AppNavigator(initialDestination: AppDestination.albums),
                           dataCache: localCache,
                         ),
                       ),
@@ -932,7 +932,7 @@ void main() {
                 repository: repo,
                 scanService: scanService,
                 settingsStore: settingsStore,
-                navigator: navigator,
+                navigator: AppNavigator(initialDestination: AppDestination.albums),
                 userCollections: collections,
                 dataCache: cache,
                 artistNameStore: artistNameStore,

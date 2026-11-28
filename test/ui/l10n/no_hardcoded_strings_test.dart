@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('No hardcoded user-visible string literals in lib/ui outside AppStrings', () {
     final uiDirs = [
+      Directory('lib/ui/home'),
       Directory('lib/ui/library'),
       Directory('lib/ui/shell'),
       Directory('lib/ui/now_playing'),

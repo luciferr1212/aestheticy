@@ -652,6 +652,34 @@ class SqliteLibraryRepository implements LibraryRepository {
       );
 
   @override
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8}) =>
+      _historyAnalytics.recentAlbumsPlayed(limit: limit);
+
+  @override
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  }) =>
+      _historyAnalytics.forgottenFavorites(
+        olderThan: olderThan,
+        limit: limit,
+        now: now,
+      );
+
+  @override
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8}) =>
+      _historyAnalytics.onThisDay(today, limit: limit);
+
+  @override
+  Future<List<Track>> mostPlayedThisMonth({int limit = 8, DateTime? now}) =>
+      _historyAnalytics.mostPlayedThisMonth(limit: limit, now: now);
+
+  @override
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8}) =>
+      _historyAnalytics.recentlyAddedAlbums(limit: limit);
+
+  @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) =>
       _history.recentPlayEvents(limit: limit);
 

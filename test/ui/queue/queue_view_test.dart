@@ -479,10 +479,10 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Bottom bar queue button opens the docked Queue side panel; Expand opens QueueView
-      expect(navigator.current, AppDestination.albums);
+      expect(navigator.current, AppDestination.home);
       await tester.tap(find.byKey(const Key('player_queue_button')));
       await tester.pumpAndSettle();
-      expect(navigator.current, AppDestination.albums);
+      expect(navigator.current, AppDestination.home);
       expect(find.byKey(const ValueKey('side_panel_queue_content')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('side_panel_expand_button')));
@@ -491,10 +491,10 @@ void main() {
       expect(find.byType(QueueView), findsOneWidget);
       expect(find.byKey(const Key('side_panel_surface')), findsNothing);
 
-      // Esc returns to albums and panel remains closed
+      // Esc returns to home and panel remains closed
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(navigator.current, AppDestination.albums);
+      expect(navigator.current, AppDestination.home);
       expect(find.byKey(const Key('side_panel_surface')), findsNothing);
 
       // 2. Open Now Playing, then click "Open queue"

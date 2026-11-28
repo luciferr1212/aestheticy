@@ -135,7 +135,7 @@ void main() {
       await tester.pumpWidget(buildTestShell());
       await tester.pumpAndSettle();
 
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
 
       // Press F11 to enter full screen
       await tester.sendKeyEvent(LogicalKeyboardKey.f11);
@@ -148,7 +148,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
 
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
       expect(fakeWindow.calls, contains('setFullScreen(false)'));
 
       // Press F11 to enter full screen again
@@ -159,7 +159,7 @@ void main() {
       // Press F11 again to exit full screen
       await tester.sendKeyEvent(LogicalKeyboardKey.f11);
       await tester.pumpAndSettle();
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
     }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets('If window was maximized before entering full screen, it returns to maximized on exit', (tester) async {
@@ -316,7 +316,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
 
       expect(slowWindow.maxConcurrentOps, equals(1));
-      expect(navigator.current, equals(AppDestination.albums));
+      expect(navigator.current, equals(AppDestination.home));
       expect(slowWindow.currentGeometry.isFullScreen, isFalse);
       expect(slowWindow.currentGeometry.isMaximized, isTrue);
 

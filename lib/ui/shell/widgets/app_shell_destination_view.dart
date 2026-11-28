@@ -5,12 +5,14 @@ import '../../../audio/playback_controller.dart';
 import '../../../features/audio_lab/audio_lab_screen.dart';
 import '../../../features/collections/user_collections.dart';
 import '../../../features/integration/tray_window_controller.dart';
+import '../../../features/session/session_store.dart';
 import '../../../library/album_identity.dart';
 import '../../../library/library_repository.dart';
 import '../../../library/models.dart';
 import '../../artist_names/artist_name_store.dart';
 import '../../audio_panels/audio_panels_view.dart';
 import '../../audio_panels/eq_controller.dart';
+import '../../home/home_view.dart';
 import '../../library/album_detail_view.dart';
 import '../../library/albums_view.dart';
 import '../../library/artist_detail_view.dart';
@@ -69,6 +71,12 @@ class AppShellDestinationView extends StatelessWidget {
   /// Optional tray & window close controller.
   final TrayWindowController? trayWindowController;
 
+  /// Optional session store used by the Home screen.
+  final SessionStore? sessionStore;
+
+  /// Optional clock override for the Home screen.
+  final DateTime Function()? homeClock;
+
   /// Callback to add a music folder from the welcome state.
   final VoidCallback onAddFolder;
 
@@ -93,6 +101,8 @@ class AppShellDestinationView extends StatelessWidget {
     this.artistNameStore,
     this.eqController,
     this.trayWindowController,
+    this.sessionStore,
+    this.homeClock,
   });
 
   @override
@@ -105,6 +115,17 @@ class AppShellDestinationView extends StatelessWidget {
     }
 
     switch (destination) {
+      case AppDestination.home:
+        return HomeView(
+          key: const ValueKey('view_home'),
+          repository: repository,
+          controller: controller,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          dataCache: dataCache,
+          sessionStore: sessionStore,
+          clock: homeClock,
+        );
       case AppDestination.albums:
         return AlbumsView(
           key: const ValueKey('view_albums'),

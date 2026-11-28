@@ -13,6 +13,7 @@ import '../../features/integration/tray_window_controller.dart';
 import '../../features/library/folder_management_sheet.dart';
 import '../../features/lyrics/lyrics_controller.dart';
 import '../../features/lyrics/lyrics_repository.dart';
+import '../../features/session/session_store.dart';
 import '../../library/library_repository.dart';
 import '../../library/models.dart';
 import '../../library/scan_service.dart';
@@ -108,6 +109,12 @@ class AppShell extends StatefulWidget {
   /// Optional callback to open the backups folder from the safe read-only banner.
   final VoidCallback? onOpenBackupsFolder;
 
+  /// Optional session store used by the Home screen resume card.
+  final SessionStore? sessionStore;
+
+  /// Optional clock override for the Home screen greeting and daily rotation.
+  final DateTime Function()? homeClock;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -131,6 +138,8 @@ class AppShell extends StatefulWidget {
     this.startupReport,
     this.onOpenLogsFolder,
     this.onOpenBackupsFolder,
+    this.sessionStore,
+    this.homeClock,
   });
 
   @override
@@ -651,6 +660,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                                     widget.eqController,
                                                 trayWindowController:
                                                     widget.trayWindowController,
+                                                sessionStore:
+                                                    widget.sessionStore,
+                                                homeClock: widget.homeClock,
                                                 onAddFolder: _onAddFolder,
                                                 onOpenFolders: _openFolders,
                                               ),

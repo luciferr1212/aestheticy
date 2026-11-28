@@ -14,7 +14,7 @@ import 'package:aestheticy/library/sqlite_library_repository.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
 import 'package:aestheticy/ui/glass/glass_quality.dart';
 import 'package:aestheticy/ui/glass/glass_scope.dart';
-import 'package:aestheticy/ui/library/albums_view.dart';
+import 'package:aestheticy/ui/home/home_view.dart';
 import 'package:aestheticy/ui/library/artists_view.dart';
 import 'package:aestheticy/ui/library/tracks_view.dart';
 import 'package:aestheticy/ui/settings/app_settings.dart';
@@ -262,6 +262,30 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
       0;
 
   @override
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8}) async =>
+      const [];
+
+  @override
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8}) async =>
+      const [];
+
+  @override
+  Future<List<Track>> mostPlayedThisMonth({int limit = 8, DateTime? now}) async =>
+      const [];
+
+  @override
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8}) async =>
+      const [];
+
+  @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async => [];
 
   @override
@@ -476,12 +500,12 @@ void main() {
       await tester.pumpWidget(createTestShell());
       await tester.pumpAndSettle();
 
-      expect(navigator.current, AppDestination.albums);
+      expect(navigator.current, AppDestination.home);
 
       // Tapping Last.fm (disabled)
       await tester.tap(find.byKey(const Key('sidebar_last_fm')));
       await tester.pumpAndSettle();
-      expect(navigator.current, AppDestination.albums);
+      expect(navigator.current, AppDestination.home);
 
       // Tapping Playlists (now enabled)
       await tester.tap(find.byKey(const Key('sidebar_playlists')));
@@ -578,6 +602,9 @@ void main() {
 
       final fakeRepo = FakeVirtualLibraryRepository(fakeAlbumCount: 5000);
       await tester.pumpWidget(createTestShell(customRepo: fakeRepo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('sidebar_albums')));
       await tester.pumpAndSettle();
 
       // Virtualization assertion: out of 5,000 albums, fewer than 100 tiles exist in widget tree
@@ -802,7 +829,7 @@ void main() {
         await tester.pumpWidget(createTestShell());
         await tester.pumpAndSettle();
 
-        expect(find.byType(AlbumsView), findsOneWidget);
+        expect(find.byType(HomeView), findsOneWidget);
         expect(find.byType(ArtistsView), findsNothing);
 
         // Navigate to artists
@@ -812,13 +839,13 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 30));
 
-        // The outgoing page (AlbumsView) is removed immediately (no overlapping heavy pages)
-        expect(find.byType(AlbumsView), findsNothing);
+        // The outgoing page (HomeView) is removed immediately (no overlapping heavy pages)
+        expect(find.byType(HomeView), findsNothing);
         // The incoming page (ArtistsView) is the only active page
         expect(find.byType(ArtistsView), findsOneWidget);
 
         await tester.pumpAndSettle();
-        expect(find.byType(AlbumsView), findsNothing);
+        expect(find.byType(HomeView), findsNothing);
         expect(find.byType(ArtistsView), findsOneWidget);
       },
     );
@@ -911,7 +938,7 @@ void main() {
         // Instant switch on very first frame
         await tester.pump();
 
-        expect(find.byType(AlbumsView), findsNothing);
+        expect(find.byType(HomeView), findsNothing);
         expect(find.byType(ArtistsView), findsOneWidget);
 
         final fadeFinder = find.descendant(

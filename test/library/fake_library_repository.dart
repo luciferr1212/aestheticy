@@ -325,6 +325,234 @@ class FakeLibraryRepository implements LibraryRepository {
   }) async =>
       0;
 
+  List<AlbumSummary> _buildAlbumSummaries() {
+    final grouped = <String, List<Track>>{};
+    for (final t in _tracks.values) {
+      grouped.putIfAbsent(AlbumIdentity.forTrack(t), () => []).add(t);
+    }
+    return grouped.entries.map((entry) {
+      final tracks = entry.value;
+      final albumName = tracks
+              .map((t) => t.album?.trim())
+              .firstWhere((a) => a != null && a.isNotEmpty, orElse: () => null) ??
+          AlbumIdentity.unknownAlbumTitle;
+      final albumArtist = tracks
+          .map((t) => t.albumArtist?.trim())
+          .firstWhere((a) => a != null && a.isNotEmpty, orElse: () => null);
+      final distinctArtists = tracks
+          .map((t) => t.artist?.trim())
+          .where((a) => a != null && a.isNotEmpty)
+          .toSet();
+      final displayArtist = (albumArtist != null && albumArtist.isNotEmpty)
+          ? albumArtist
+          : (distinctArtists.length == 1
+              ? distinctArtists.first
+              : (distinctArtists.length > 1 ? 'various' : null));
+      int? year;
+      String? coverKey;
+      DateTime? latestAdded;
+      for (final t in tracks) {
+        if (t.year != null && (year == null || t.year! > year)) year = t.year;
+        if ((coverKey == null || coverKey.isEmpty) &&
+            t.coverKey != null &&
+            t.coverKey!.isNotEmpty) {
+          coverKey = t.coverKey;
+        }
+        if (latestAdded == null || t.addedAt.isAfter(latestAdded)) {
+          latestAdded = t.addedAt;
+        }
+      }
+      return AlbumSummary(
+        album: albumName,
+        albumArtist: albumArtist,
+        year: year,
+        trackCount: tracks.length,
+        coverKey: coverKey,
+        displayArtist: displayArtist,
+        identityKey: entry.key,
+        addedAt: latestAdded,
+      );
+    }).toList();
+  }
+
+  @override
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8}) async {
+    if (limit <= 0) return const [];
+    final tracksByKey = <String, Track>{
+      for (final e in _tracks.entries) FilePathUtils.canonicalKey(e.key): e.value,
+    };
+    final lastByAlbum = <String, DateTime>{};
+    for (final ev in _playEvents.where((e) => e.counted)) {
+      final track = tracksByKey[FilePathUtils.canonicalKey(ev.uri)];
+      if (track == null) continue;
+      final albumKey = AlbumIdentity.forTrack(track);
+      final prev = lastByAlbum[albumKey];
+      if (prev == null || ev.startedAt.isAfter(prev)) {
+        lastByAlbum[albumKey] = ev.startedAt;
+      }
+    }
+    final summaries = {
+      for (final a in _buildAlbumSummaries())
+        if (a.identityKey != null) a.identityKey!: a,
+    };
+    final keys = lastByAlbum.keys.where(summaries.containsKey).toList()
+      ..sort((a, b) {
+        final cmp = lastByAlbum[b]!.compareTo(lastByAlbum[a]!);
+        if (cmp != 0) return cmp;
+        return summaries[a]!.album.toLowerCase().compareTo(
+              summaries[b]!.album.toLowerCase(),
+            );
+      });
+    return keys.take(limit).map((k) => summaries[k]!).toList();
+  }
+
+  @override
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  }) async {
+    if (limit <= 0) return const [];
+    final cutoff = (now ?? DateTime.now()).toUtc().subtract(olderThan);
+    final lastPlayByKey = <String, DateTime>{};
+    for (final ev in _playEvents.where((e) => e.counted)) {
+      final k = FilePathUtils.canonicalKey(ev.uri);
+      final prev = lastPlayByKey[k];
+      if (prev == null || ev.startedAt.isAfter(prev)) {
+        lastPlayByKey[k] = ev.startedAt;
+      }
+    }
+    final tracksByKey = <String, Track>{
+      for (final e in _tracks.entries) FilePathUtils.canonicalKey(e.key): e.value,
+    };
+    final candidates = <({Track track, DateTime? lastPlay, int favAt})>[];
+    for (final favPath in _favorites) {
+      final k = FilePathUtils.canonicalKey(favPath);
+      final track = tracksByKey[k];
+      if (track == null) continue;
+      final lastPlay = lastPlayByKey[k];
+      if (lastPlay == null || lastPlay.isBefore(cutoff)) {
+        candidates.add((
+          track: track,
+          lastPlay: lastPlay,
+          favAt: _favTimestamps[favPath] ?? 0,
+        ));
+      }
+    }
+    candidates.sort((a, b) {
+      if (a.lastPlay == null && b.lastPlay != null) return -1;
+      if (a.lastPlay != null && b.lastPlay == null) return 1;
+      if (a.lastPlay != null && b.lastPlay != null) {
+        final cmp = a.lastPlay!.compareTo(b.lastPlay!);
+        if (cmp != 0) return cmp;
+      }
+      final favCmp = a.favAt.compareTo(b.favAt);
+      if (favCmp != 0) return favCmp;
+      return (a.track.title ?? a.track.path)
+          .toLowerCase()
+          .compareTo((b.track.title ?? b.track.path).toLowerCase());
+    });
+    return candidates.take(limit).map((c) => c.track).toList();
+  }
+
+  @override
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8}) async {
+    if (limit <= 0) return const [];
+    final tracksByKey = <String, Track>{
+      for (final e in _tracks.entries) FilePathUtils.canonicalKey(e.key): e.value,
+    };
+    final byPath = <String, ({Track track, DateTime lastPlay})>{};
+    for (final ev in _playEvents.where((e) => e.counted)) {
+      final evDate = today.isUtc ? ev.startedAt.toUtc() : ev.startedAt.toLocal();
+      if (evDate.year < today.year &&
+          evDate.month == today.month &&
+          evDate.day == today.day) {
+        final track = tracksByKey[FilePathUtils.canonicalKey(ev.uri)];
+        if (track == null) continue;
+        final prev = byPath[track.path];
+        if (prev == null || ev.startedAt.isAfter(prev.lastPlay)) {
+          byPath[track.path] = (track: track, lastPlay: ev.startedAt);
+        }
+      }
+    }
+    final list = byPath.values.toList()
+      ..sort((a, b) {
+        final cmp = b.lastPlay.compareTo(a.lastPlay);
+        if (cmp != 0) return cmp;
+        return (a.track.title ?? a.track.path)
+            .toLowerCase()
+            .compareTo((b.track.title ?? b.track.path).toLowerCase());
+      });
+    return list.take(limit).map((e) => e.track).toList();
+  }
+
+  @override
+  Future<List<Track>> mostPlayedThisMonth({
+    int limit = 8,
+    DateTime? now,
+  }) async {
+    if (limit <= 0) return const [];
+    final ref = now ?? DateTime.now();
+    final monthStart = ref.isUtc
+        ? DateTime.utc(ref.year, ref.month, 1)
+        : DateTime(ref.year, ref.month, 1);
+    final tracksByKey = <String, Track>{
+      for (final e in _tracks.entries) FilePathUtils.canonicalKey(e.key): e.value,
+    };
+    final stats =
+        <String, ({Track track, int count, int listenedMs, DateTime lastPlay})>{};
+    for (final ev in _playEvents.where((e) => e.counted)) {
+      final ts = ref.isUtc ? ev.startedAt.toUtc() : ev.startedAt.toLocal();
+      if (ts.isBefore(monthStart) || ts.isAfter(ref)) continue;
+      final track = tracksByKey[FilePathUtils.canonicalKey(ev.uri)];
+      if (track == null) continue;
+      final prev = stats[track.path];
+      if (prev == null) {
+        stats[track.path] = (
+          track: track,
+          count: 1,
+          listenedMs: ev.listenedMs,
+          lastPlay: ev.startedAt,
+        );
+      } else {
+        stats[track.path] = (
+          track: track,
+          count: prev.count + 1,
+          listenedMs: prev.listenedMs + ev.listenedMs,
+          lastPlay: ev.startedAt.isAfter(prev.lastPlay)
+              ? ev.startedAt
+              : prev.lastPlay,
+        );
+      }
+    }
+    final list = stats.values.toList()
+      ..sort((a, b) {
+        final c = b.count.compareTo(a.count);
+        if (c != 0) return c;
+        final l = b.listenedMs.compareTo(a.listenedMs);
+        if (l != 0) return l;
+        final t = b.lastPlay.compareTo(a.lastPlay);
+        if (t != 0) return t;
+        return (a.track.title ?? a.track.path)
+            .toLowerCase()
+            .compareTo((b.track.title ?? b.track.path).toLowerCase());
+      });
+    return list.take(limit).map((e) => e.track).toList();
+  }
+
+  @override
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8}) async {
+    if (limit <= 0) return const [];
+    final list = _buildAlbumSummaries()
+      ..sort((a, b) {
+        final cmp = (b.addedAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(a.addedAt ?? DateTime.fromMillisecondsSinceEpoch(0));
+        if (cmp != 0) return cmp;
+        return a.album.toLowerCase().compareTo(b.album.toLowerCase());
+      });
+    return list.take(limit).toList();
+  }
+
   @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async {
     final sorted = List.of(_playEvents)

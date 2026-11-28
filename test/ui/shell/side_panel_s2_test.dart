@@ -307,7 +307,7 @@ void main() {
 
         navigator.goBack();
         await tester.pumpAndSettle();
-        expect(navigator.current, AppDestination.albums);
+        expect(navigator.current, AppDestination.home);
         expect(sidePanelController.isOpen, isFalse);
         expect(find.byKey(const Key('side_panel_surface')), findsNothing);
 
@@ -322,7 +322,7 @@ void main() {
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
-        expect(navigator.current, AppDestination.albums);
+        expect(navigator.current, AppDestination.home);
         expect(sidePanelController.isOpen, isFalse);
         expect(find.byKey(const Key('side_panel_surface')), findsNothing);
 

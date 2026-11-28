@@ -455,7 +455,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
 
-    navigator.navigateTo(AppDestination.albums);
+    navigator.navigateTo(AppDestination.home);
     navigator.navigateTo(AppDestination.settings);
 
     await tester.pumpWidget(
@@ -477,7 +477,7 @@ void main() {
     await tester.tap(backBtn);
     await tester.pumpAndSettle();
 
-    expect(navigator.current, equals(AppDestination.albums));
+    expect(navigator.current, equals(AppDestination.home));
   });
 
   testWidgets('S5: Playback resume switch toggles and persists', (tester) async {

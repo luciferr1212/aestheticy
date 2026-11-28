@@ -22,6 +22,14 @@ lib/ui/
 ├── gallery/
 │   ├── design_gallery_screen.dart    # Full-screen developer gallery (Ctrl+Shift+G)
 │   └── performance_metrics.dart      # Pure calculations for frame timings & export
+├── home/
+│   ├── home_controller.dart          # Home ChangeNotifier with daily rotation & SWR cache
+│   ├── home_greeting.dart            # Pure time-of-day localized greeting helper
+│   ├── home_models.dart              # Home hero, resume session, and rotating row models
+│   ├── home_view.dart                # Calm 3-element Home screen (EN/AR RTL)
+│   └── widgets/
+│       ├── home_hero_card.dart       # Now Playing / Resume last session / calm idle hero
+│       └── home_media_row.dart       # Lazy horizontal album/track shelves (CoverCache)
 ├── glass/
 │   ├── glass_blur_budget.dart        # Global budget enforcer (max 6 concurrent blurs)
 │   ├── glass_button.dart             # GlassIconButton & GlassPillButton
@@ -836,5 +844,20 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
 - **Decision (ViewStateRestorer via Global Keys & ScrollControllers)**: Scroll preservation stores explicit `pixels` in `NavEntry.viewState` keyed by `nav.currentEntry.id`, avoiding full page destruction while guaranteeing deterministic offset recovery on back/forward navigation.
 - **Decision (Hit Rect Disambiguation for Double Click)**: Rather than adding delayed `onDoubleTap` handlers directly to interactive children (which would introduce a 300 ms delay on single taps), `FullScreenView` determines whether double clicks occurred on interactive controls via bounding rect checks against registered keys (`_seekBarKey`, `_topBarKey`, `_lyricsKey`, `_controlsColumnKey`).
 - **Decision (Transform.flip for RTL Icons)**: `GlassIconButton` and `GlassPillButton` use `Transform.flip(flipX: true)` when `matchTextDirection` is true and text direction is RTL, avoiding non-const `IconData` constructor warnings while maintaining perfect RTL mirroring.
+
+---
+
+## 35. Phase 4, Prompt 9A — Calm Home Screen (`lib/ui/home/*`)
+
+### 35.1 Navigation & Entry (`app_navigator.dart`, `sidebar.dart`, `app_shell_destination_view.dart`)
+- **First Sidebar Item & Default Start:** `AppDestination.home` is the first enum value and first sidebar tile (`sidebar_home`) and serves as the default start destination whenever the library has at least one folder; empty libraries continue to show `WelcomeView`.
+- **History Preservation:** Navigation between Home, Library, Detail views, Settings, and Back/Forward history works identically through `AppNavigator`.
+
+### 35.2 Three-Element Layout (`home_view.dart`, `home_hero_card.dart`, `home_media_row.dart`)
+1. **Greeting & Hero Card:** Live time-of-day greeting (`morning` 05:00–11:59, `afternoon` 12:00–16:59, `evening` 17:00–20:59, `night` 21:00–04:59) using saved `AppSettings.userName` (or neutral greeting when blank, updated live when edited in Settings), placed above a single `GlassSurface` hero card (`GlassDensity.clear`, within the 6-blur budget). Shows active Now Playing art, title, artist, and play/pause; when idle, shows a "Resume last session" card from `SessionStore` or a calm "Quiet and ready" card.
+2. **Continue Listening:** One lazy horizontal `ListView.separated` shelf of up to 8 recently played albums (`recentAlbumsPlayed`), rendered with `CoverCache` thumbnails (`AlbumCoverImage`, `cacheSize: 160`) and zero `BackdropFilter` inside row cards.
+3. **One Daily Rotating Row:** `HomeController` picks one non-empty candidate deterministically by local calendar date (`daysSinceEpoch % nonEmptyCandidates.length`) among `recentlyAddedAlbums`, `forgottenFavorites`, `onThisDay`, and `mostPlayedThisMonth`, with a localized title and subtle "why this row" caption.
+- **Empty History & Read-Only Safety:** When all rows are empty, renders a single calm empty-history card instead of empty shelves; query errors are logged and hide only the failing row; reads continue normally in `UserDataAccessMode.safeReadOnly`.
+
 
 

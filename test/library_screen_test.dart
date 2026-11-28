@@ -174,7 +174,9 @@ void main() {
       // Credit "by mido" is visible
       expect(find.text('by mido'), findsWidgets);
 
-      // Default tab: Albums. Albums should render
+      // Default tab is Home; switch to Albums tab
+      await tester.tap(find.byKey(const Key('sidebar_albums')));
+      await tester.pumpAndSettle();
       expect(find.text('Daybreak'), findsOneWidget);
       expect(find.text('Midnight'), findsOneWidget);
 
@@ -204,7 +206,10 @@ void main() {
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
-      // Initially on Albums tab, both Daybreak and Midnight are shown
+      await tester.tap(find.byKey(const Key('sidebar_albums')));
+      await tester.pumpAndSettle();
+
+      // On Albums tab, both Daybreak and Midnight are shown
       expect(find.text('Daybreak'), findsOneWidget);
       expect(find.text('Midnight'), findsOneWidget);
 
@@ -249,6 +254,9 @@ void main() {
 
       await seedTestData();
       await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('sidebar_albums')));
       await tester.pumpAndSettle();
 
       final searchField = find.byKey(const Key('library_search_field'));
@@ -311,6 +319,9 @@ void main() {
 
       await seedTestData();
       await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('sidebar_albums')));
       await tester.pumpAndSettle();
 
       // On Albums tab: tap "Daybreak" album card

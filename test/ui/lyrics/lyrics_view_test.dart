@@ -315,7 +315,7 @@ void main() {
         await tester.tap(backButton);
         await tester.pump();
 
-        expect(navigator.current, equals(AppDestination.albums));
+        expect(navigator.current, equals(AppDestination.home));
       },
     );
 

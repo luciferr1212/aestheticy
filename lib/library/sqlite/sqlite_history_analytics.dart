@@ -18,6 +18,54 @@ class SqliteHistoryAnalytics {
     String Function()? userSchema,
   }) : _userSchema = userSchema ?? (() => 'userdata');
 
+  Set<String> _tableColumns(String schema, String table) {
+    return _db
+        .select('PRAGMA $schema.table_info($table);')
+        .map((r) => r['name'] as String)
+        .toSet();
+  }
+
+  bool _hasTable(String schema, String table) {
+    return _db
+        .select(
+          "SELECT 1 FROM $schema.sqlite_master WHERE type = 'table' AND name = ? LIMIT 1;",
+          [table],
+        )
+        .isNotEmpty;
+  }
+
+  ({String pathKeyExpr, String identityJoin}) _playEventTrackResolution(
+    String schema,
+  ) {
+    final playCols = _tableColumns(schema, 'play_events');
+    final hasTrackUid = playCols.contains('track_uid');
+    final hasUriKey = playCols.contains('uri_key');
+    final hasIdentity = hasTrackUid && _hasTable(schema, 'track_identity');
+    final uriFallback = hasUriKey
+        ? 'COALESCE(NULLIF(p.uri_key, \'\'), normalize_file_path(p.uri))'
+        : 'normalize_file_path(p.uri)';
+    if (!hasIdentity) {
+      return (pathKeyExpr: uriFallback, identityJoin: '');
+    }
+    final idCols = _tableColumns(schema, 'track_identity');
+    final idPathExpr = idCols.contains('path_key')
+        ? 'COALESCE(NULLIF(ti.path_key, \'\'), normalize_file_path(ti.path))'
+        : 'normalize_file_path(ti.path)';
+    return (
+      pathKeyExpr: "COALESCE(NULLIF($idPathExpr, ''), $uriFallback)",
+      identityJoin:
+          'LEFT JOIN $schema.track_identity ti ON p.track_uid IS NOT NULL AND ti.uid = p.track_uid',
+    );
+  }
+
+  String _favoritesPathKeyExpr(String schema) {
+    final favCols = _tableColumns(schema, 'favorites');
+    if (favCols.contains('path_key')) {
+      return "COALESCE(NULLIF(f.path_key, ''), normalize_file_path(f.path))";
+    }
+    return 'normalize_file_path(f.path)';
+  }
+
   String _selectColumnsSql(String schema) {
     final cols = _db
         .select('PRAGMA $schema.table_info(play_events);')
@@ -275,5 +323,249 @@ class SqliteHistoryAnalytics {
       [startMs, endMs],
     );
     return rows.first['total'] as int;
+  }
+
+  /// Returns distinct albums ordered by most recent counted play, skipping
+  /// tracks no longer present in `main.tracks`.
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8}) async {
+    if (limit <= 0) return const [];
+    final u = _userSchema();
+    final res = _playEventTrackResolution(u);
+
+    final rows = _db.select(
+      '''
+      WITH latest_track_play AS (
+        SELECT
+          ${res.pathKeyExpr} AS resolved_path_key,
+          MAX(p.started_at_ms) AS last_played_ms
+        FROM $u.play_events p
+        ${res.identityJoin}
+        WHERE p.counted = 1
+        GROUP BY resolved_path_key
+      ),
+      recent_album_keys AS (
+        SELECT
+          album_identity_key(t.album, t.album_artist, t.artist, t.path) AS album_key,
+          MAX(ltp.last_played_ms) AS last_played_ms,
+          MIN(COALESCE(NULLIF(TRIM(t.album), ''), 'Unknown Album')) AS sort_album_name
+        FROM latest_track_play ltp
+        INNER JOIN main.tracks t ON normalize_file_path(t.path) = ltp.resolved_path_key
+        GROUP BY album_key
+        ORDER BY last_played_ms DESC, sort_album_name COLLATE NOCASE ASC
+        LIMIT ?
+      )
+      SELECT
+        rak.album_key,
+        MIN(COALESCE(NULLIF(TRIM(t.album), ''), 'Unknown Album')) AS album_name,
+        MAX(NULLIF(TRIM(t.album_artist), '')) AS album_artist,
+        MAX(t.year) AS release_year,
+        COUNT(*) AS track_count,
+        MAX(t.cover_key) AS cover_key,
+        COUNT(DISTINCT NULLIF(t.artist, '')) AS distinct_artist_count,
+        MIN(NULLIF(t.artist, '')) AS single_artist,
+        MAX(t.added_at) AS latest_added_at
+      FROM recent_album_keys rak
+      INNER JOIN main.tracks t
+        ON album_identity_key(t.album, t.album_artist, t.artist, t.path) = rak.album_key
+      GROUP BY rak.album_key
+      ORDER BY MAX(rak.last_played_ms) DESC, album_name COLLATE NOCASE ASC;
+      ''',
+      [limit],
+    );
+    return rows.map(SqliteRowMappers.mapAlbum).toList();
+  }
+
+  /// Returns favorited tracks whose last counted play is older than
+  /// [olderThan] or that have never been played (counted = 1).
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  }) async {
+    if (limit <= 0) return const [];
+    final u = _userSchema();
+    final res = _playEventTrackResolution(u);
+    final favKeyExpr = _favoritesPathKeyExpr(u);
+    final cutoffMs =
+        (now ?? DateTime.now()).toUtc().subtract(olderThan).millisecondsSinceEpoch;
+
+    final rows = _db.select(
+      '''
+      WITH latest_track_play AS (
+        SELECT
+          ${res.pathKeyExpr} AS resolved_path_key,
+          MAX(p.started_at_ms) AS last_played_ms
+        FROM $u.play_events p
+        ${res.identityJoin}
+        WHERE p.counted = 1
+        GROUP BY resolved_path_key
+      ),
+      dedup_favorites AS (
+        SELECT
+          $favKeyExpr AS resolved_fav_key,
+          MIN(f.added_at_ms) AS added_at_ms
+        FROM $u.favorites f
+        GROUP BY resolved_fav_key
+      )
+      SELECT t.*
+      FROM main.tracks t
+      INNER JOIN dedup_favorites f
+        ON f.resolved_fav_key = normalize_file_path(t.path)
+      LEFT JOIN latest_track_play ltp
+        ON ltp.resolved_path_key = normalize_file_path(t.path)
+      WHERE ltp.last_played_ms IS NULL OR ltp.last_played_ms < ?
+      ORDER BY
+        CASE WHEN ltp.last_played_ms IS NULL THEN 0 ELSE 1 END ASC,
+        COALESCE(ltp.last_played_ms, 0) ASC,
+        f.added_at_ms ASC,
+        COALESCE(NULLIF(TRIM(t.title), ''), t.path) COLLATE NOCASE ASC
+      LIMIT ?;
+      ''',
+      [cutoffMs, limit],
+    );
+    return rows.map(SqliteRowMappers.mapTrack).toList();
+  }
+
+  /// Returns tracks played (counted = 1) on the same month/day as [today] in
+  /// earlier years, ordered newest play first.
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8}) async {
+    if (limit <= 0) return const [];
+    final u = _userSchema();
+    final minRows = _db.select(
+      'SELECT MIN(started_at_ms) AS min_ms FROM $u.play_events WHERE counted = 1;',
+    );
+    final minMs = minRows.first['min_ms'] as int?;
+    if (minMs == null) return const [];
+
+    final minDt = DateTime.fromMillisecondsSinceEpoch(minMs, isUtc: true);
+    final minYear = ((today.isUtc ? minDt : minDt.toLocal()).year - 1)
+        .clamp(1970, today.year);
+    final res = _playEventTrackResolution(u);
+
+    final byPath = <String, ({Track track, int lastPlayedMs})>{};
+    for (var y = today.year - 1; y >= minYear; y--) {
+      if (today.month == 2 && today.day == 29) {
+        final isLeap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+        if (!isLeap) continue;
+      }
+      final dayStart = today.isUtc
+          ? DateTime.utc(y, today.month, today.day)
+          : DateTime(y, today.month, today.day);
+      final dayEnd = today.isUtc
+          ? DateTime.utc(y, today.month, today.day, 23, 59, 59, 999)
+          : DateTime(y, today.month, today.day, 23, 59, 59, 999);
+      final rows = _db.select(
+        '''
+        WITH year_day_plays AS (
+          SELECT
+            ${res.pathKeyExpr} AS resolved_path_key,
+            MAX(p.started_at_ms) AS last_played_ms
+          FROM $u.play_events p
+          ${res.identityJoin}
+          WHERE p.started_at_ms >= ? AND p.started_at_ms <= ? AND p.counted = 1
+          GROUP BY resolved_path_key
+        )
+        SELECT t.*, ydp.last_played_ms AS event_last_played_ms
+        FROM main.tracks t
+        INNER JOIN year_day_plays ydp
+          ON normalize_file_path(t.path) = ydp.resolved_path_key;
+        ''',
+        [
+          dayStart.toUtc().millisecondsSinceEpoch,
+          dayEnd.toUtc().millisecondsSinceEpoch,
+        ],
+      );
+      for (final r in rows) {
+        final track = SqliteRowMappers.mapTrack(r);
+        final lastMs = r['event_last_played_ms'] as int;
+        final existing = byPath[track.path];
+        if (existing == null || lastMs > existing.lastPlayedMs) {
+          byPath[track.path] = (track: track, lastPlayedMs: lastMs);
+        }
+      }
+    }
+
+    final sorted = byPath.values.toList()
+      ..sort((a, b) {
+        final timeCmp = b.lastPlayedMs.compareTo(a.lastPlayedMs);
+        if (timeCmp != 0) return timeCmp;
+        final aTitle = (a.track.title?.trim().isNotEmpty ?? false)
+            ? a.track.title!.trim()
+            : a.track.path;
+        final bTitle = (b.track.title?.trim().isNotEmpty ?? false)
+            ? b.track.title!.trim()
+            : b.track.path;
+        return aTitle.toLowerCase().compareTo(bTitle.toLowerCase());
+      });
+    return sorted.take(limit).map((e) => e.track).toList();
+  }
+
+  /// Returns tracks most played (counted = 1) in the current month up to [now].
+  Future<List<Track>> mostPlayedThisMonth({
+    int limit = 8,
+    DateTime? now,
+  }) async {
+    if (limit <= 0) return const [];
+    final u = _userSchema();
+    final res = _playEventTrackResolution(u);
+    final ref = now ?? DateTime.now();
+    final monthStart = ref.isUtc
+        ? DateTime.utc(ref.year, ref.month, 1)
+        : DateTime(ref.year, ref.month, 1);
+    final startMs = monthStart.toUtc().millisecondsSinceEpoch;
+    final endMs = ref.toUtc().millisecondsSinceEpoch;
+
+    final rows = _db.select(
+      '''
+      WITH month_plays AS (
+        SELECT
+          ${res.pathKeyExpr} AS resolved_path_key,
+          COUNT(*) AS play_count,
+          COALESCE(SUM(p.listened_ms), 0) AS total_listened_ms,
+          MAX(p.started_at_ms) AS last_played_ms
+        FROM $u.play_events p
+        ${res.identityJoin}
+        WHERE p.started_at_ms >= ? AND p.started_at_ms <= ? AND p.counted = 1
+        GROUP BY resolved_path_key
+      )
+      SELECT t.*
+      FROM main.tracks t
+      INNER JOIN month_plays mp
+        ON normalize_file_path(t.path) = mp.resolved_path_key
+      ORDER BY
+        mp.play_count DESC,
+        mp.total_listened_ms DESC,
+        mp.last_played_ms DESC,
+        COALESCE(NULLIF(TRIM(t.title), ''), t.path) COLLATE NOCASE ASC
+      LIMIT ?;
+      ''',
+      [startMs, endMs, limit],
+    );
+    return rows.map(SqliteRowMappers.mapTrack).toList();
+  }
+
+  /// Returns albums ordered by latest track `added_at` descending.
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8}) async {
+    if (limit <= 0) return const [];
+    final rows = _db.select(
+      '''
+      SELECT
+        album_identity_key(album, album_artist, artist, path) AS album_key,
+        MIN(COALESCE(NULLIF(TRIM(album), ''), 'Unknown Album')) AS album_name,
+        MAX(NULLIF(TRIM(album_artist), '')) AS album_artist,
+        MAX(year) AS release_year,
+        COUNT(*) AS track_count,
+        MAX(cover_key) AS cover_key,
+        COUNT(DISTINCT NULLIF(artist, '')) AS distinct_artist_count,
+        MIN(NULLIF(artist, '')) AS single_artist,
+        MAX(added_at) AS latest_added_at
+      FROM main.tracks
+      GROUP BY album_key
+      ORDER BY latest_added_at DESC, album_name COLLATE NOCASE ASC
+      LIMIT ?;
+      ''',
+      [limit],
+    );
+    return rows.map(SqliteRowMappers.mapAlbum).toList();
   }
 }

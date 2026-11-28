@@ -83,6 +83,7 @@ class SettingsLanguageSection extends StatelessWidget {
           control: SizedBox(
             width: 220,
             child: TextField(
+              key: const Key('settings_name_field'),
               controller: nameController,
               maxLength: 40,
               style: AppTypography.body,

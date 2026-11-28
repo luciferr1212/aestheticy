@@ -196,6 +196,30 @@ class _FakeSearchRepo implements LibraryRepository {
       0;
 
   @override
+  Future<List<AlbumSummary>> recentAlbumsPlayed({int limit = 8}) async =>
+      const [];
+
+  @override
+  Future<List<Track>> forgottenFavorites({
+    required Duration olderThan,
+    int limit = 8,
+    DateTime? now,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<Track>> onThisDay(DateTime today, {int limit = 8}) async =>
+      const [];
+
+  @override
+  Future<List<Track>> mostPlayedThisMonth({int limit = 8, DateTime? now}) async =>
+      const [];
+
+  @override
+  Future<List<AlbumSummary>> recentlyAddedAlbums({int limit = 8}) async =>
+      const [];
+
+  @override
   Future<List<PlayEvent>> recentPlayEvents({int limit = 50}) async => [];
 
   @override

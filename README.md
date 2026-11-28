@@ -9,6 +9,7 @@ Phase 1–4 active: audio core, SQLite library, liquid-glass UI foundation ([doc
 
 ## Highlights
 
+- **Home & Discovery**: Calm 3-element Home screen (`HomeView`, `HomeController`) as the default landing view when folders exist, featuring a live time-of-day greeting (`en`/`ar`), Now Playing / Resume Last Session hero card, a "Continue listening" recent albums shelf, and one daily rotating row (`Recently added`, `Forgotten favorites`, `On this day`, or `Most played this month`).
 - **Audio & Queue**: `libmpv` behind `AudioEngine`, 10-band EQ, fade profiles, unified `PlaybackController.playShuffled` / repeat sync, entry-identity multi-select queue editing & delete, session restore preserving shuffled order and duplicate entry identity, and responsive docked Queue/Lyrics side panel (22% of window width clamped to 280–320 px, auto-hidden below 1000 px).
 - **Library & Protection**: Folder scanning with continuous multi-folder progress, cancellation protection, split `library.db` (rebuildable index) and `userdata.db` (favorites, ratings, playlists, play history, artist rules) via SQLite `ATTACH`, stable `track_identity` UIDs with automatic move/rename relinking and offline-drive preservation, hardened `play_events` with 30s heartbeats / interrupted-session recovery / date-range analytics queries, WAL + `PRAGMA quick_check` corruption recovery, crash-recoverable legacy migration, safe read-only fallback mode, daily verified `userdata.db` backups (5-day rotation), unified `AlbumIdentity` grouping and cover keys, real recently-added album sorting, live stale-while-revalidate refresh on scan/folder changes, stale-guarded search (matching track artists & display translations on Albums), artist merge/never-split rules, `file://` URI-aware history/playlists, and safe atomic `.m3u`/`.m3u8` export & Windows-path M3U import.
 - **Localization & Display**: Full English + Arabic RTL interface, display-only artist name translations manager in Settings, localized library sheets/dialogs.
@@ -55,7 +56,7 @@ flutter test
 - `lib/features/` — Feature coordinators (collections/M3U, play history recorder, OS integration & shutdown, lyrics, atomic & versioned JSON persistence, session save/restore).
 - `lib/library/` — Pure-Dart models, scanner, cover cache, and split SQLite stores (`library.db` + `userdata.db` under `lib/library/sqlite/`).
 - `lib/platform/` — Abstract OS interfaces (`TrayService`, `WindowService`, `MediaSessionService`, `SleepInhibitor`, `FileAssociationService`), `PlatformServices` OS selector, no-op fallbacks, and isolated Windows implementations under `lib/platform/windows/`.
-- `lib/ui/` — Glass UI shell, views, settings, mini player, localization (`AppStrings` EN + AR), and `ErrorPresenter`.
+- `lib/ui/` — Glass UI shell, Home screen (`lib/ui/home/`), library views, settings, mini player, localization (`AppStrings` EN + AR), and `ErrorPresenter`.
 - `test/architecture/` — Automated architecture guard tests (file-size budget, UI layer boundaries, no direct UI queue mutation, Windows isolation, no silent catches, no user audio file writes).
 
 ## License
