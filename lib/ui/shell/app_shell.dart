@@ -118,6 +118,9 @@ class AppShell extends StatefulWidget {
   /// Optional clock override for the Stats screen range calculations.
   final DateTime Function()? statsClock;
 
+  /// Optional folder opener callback (e.g. Windows Explorer on Windows).
+  final Future<void> Function(String path)? onOpenFolder;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -144,6 +147,7 @@ class AppShell extends StatefulWidget {
     this.sessionStore,
     this.homeClock,
     this.statsClock,
+    this.onOpenFolder,
   });
 
   @override
@@ -668,6 +672,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                                     widget.sessionStore,
                                                 homeClock: widget.homeClock,
                                                 statsClock: widget.statsClock,
+                                                directoryPicker:
+                                                    widget.directoryPicker,
+                                                onOpenFolder:
+                                                    widget.onOpenFolder,
                                                 onAddFolder: _onAddFolder,
                                                 onOpenFolders: _openFolders,
                                               ),

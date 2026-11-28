@@ -6,6 +6,7 @@ import '../../../features/audio_lab/audio_lab_screen.dart';
 import '../../../features/collections/user_collections.dart';
 import '../../../features/integration/tray_window_controller.dart';
 import '../../../features/session/session_store.dart';
+import '../../../features/wrapped/recap.dart';
 import '../../../library/album_identity.dart';
 import '../../../library/library_repository.dart';
 import '../../../library/models.dart';
@@ -29,6 +30,7 @@ import '../../settings/audio_settings_applier.dart';
 import '../../settings/settings_store.dart';
 import '../../settings/settings_view.dart';
 import '../../stats/stats_view.dart';
+import '../../wrapped/wrapped_view.dart';
 import '../app_navigator.dart';
 
 /// Resolves and builds the active content destination inside [AppShell].
@@ -81,6 +83,12 @@ class AppShellDestinationView extends StatelessWidget {
   /// Optional clock override for the Stats screen.
   final DateTime Function()? statsClock;
 
+  /// Optional directory picker override for folder selection and exports.
+  final Future<String?> Function()? directoryPicker;
+
+  /// Optional folder opener callback for export success notifications.
+  final Future<void> Function(String path)? onOpenFolder;
+
   /// Callback to add a music folder from the welcome state.
   final VoidCallback onAddFolder;
 
@@ -108,6 +116,8 @@ class AppShellDestinationView extends StatelessWidget {
     this.sessionStore,
     this.homeClock,
     this.statsClock,
+    this.directoryPicker,
+    this.onOpenFolder,
   });
 
   @override
@@ -164,6 +174,24 @@ class AppShellDestinationView extends StatelessWidget {
           navigator: navigator,
           dataCache: dataCache,
           clock: statsClock,
+        );
+      case AppDestination.wrapped:
+        final entry = navigator.currentEntry;
+        final kind = entry.wrappedKind ?? RecapPeriodKind.monthly;
+        return WrappedView(
+          key: ValueKey(
+            'view_wrapped_${kind.name}_${entry.wrappedYear}_${entry.wrappedMonth}',
+          ),
+          repository: repository,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          dataCache: dataCache,
+          initialKind: kind,
+          initialYear: entry.wrappedYear,
+          initialMonth: entry.wrappedMonth,
+          clock: statsClock,
+          directoryPicker: directoryPicker,
+          onOpenFolder: onOpenFolder,
         );
       case AppDestination.albumDetail:
         final album = navigator.selectedAlbum ??

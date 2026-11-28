@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../library/history_models.dart';
+import '../../glass/glass_button.dart';
 import '../../l10n/app_strings.dart';
 import '../../l10n/number_format.dart';
 import '../../theme/app_colors.dart';
@@ -121,11 +122,15 @@ class StatsActivityHeatmap extends StatefulWidget {
   /// Whether to minimize tooltip hover delay transitions.
   final bool reduceMotion;
 
+  /// Optional action opening the Weekly listening recap from this section.
+  final VoidCallback? onOpenWeeklyRecap;
+
   /// Creates a [StatsActivityHeatmap].
   const StatsActivityHeatmap({
     super.key,
     required this.snapshot,
     this.reduceMotion = false,
+    this.onOpenWeeklyRecap,
   });
 
   @override
@@ -242,36 +247,51 @@ class _StatsActivityHeatmapState extends State<StatsActivityHeatmap> {
                   ),
                 )
               else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: AppSpacing.s12,
+                  runSpacing: AppSpacing.s8,
                   children: [
-                    Text(
-                      context.t('stats.heatmap.less'),
-                      style: AppTypography.caption.copyWith(
-                        fontSize: 11,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    for (var level = 0; level <= 4; level++) ...[
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: StatsHeatmapPainter.colorForLevel(level),
-                          borderRadius: BorderRadius.circular(2.5),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          context.t('stats.heatmap.less'),
+                          style: AppTypography.caption.copyWith(
+                            fontSize: 11,
+                            color: AppColors.textMuted,
+                          ),
                         ),
-                      ),
-                      if (level < 4) const SizedBox(width: 3),
-                    ],
-                    const SizedBox(width: 6),
-                    Text(
-                      context.t('stats.heatmap.more'),
-                      style: AppTypography.caption.copyWith(
-                        fontSize: 11,
-                        color: AppColors.textMuted,
-                      ),
+                        const SizedBox(width: 6),
+                        for (var level = 0; level <= 4; level++) ...[
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: StatsHeatmapPainter.colorForLevel(level),
+                              borderRadius: BorderRadius.circular(2.5),
+                            ),
+                          ),
+                          if (level < 4) const SizedBox(width: 3),
+                        ],
+                        const SizedBox(width: 6),
+                        Text(
+                          context.t('stats.heatmap.more'),
+                          style: AppTypography.caption.copyWith(
+                            fontSize: 11,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
                     ),
+                    if (widget.onOpenWeeklyRecap != null)
+                      GlassPillButton(
+                        key: const Key('stats_weekly_recap_button'),
+                        size: GlassButtonSize.small,
+                        leadingIcon: Icons.auto_awesome_outlined,
+                        label: context.t('stats.weeklyRecapButton'),
+                        onPressed: widget.onOpenWeeklyRecap,
+                      ),
                   ],
                 ),
             ],

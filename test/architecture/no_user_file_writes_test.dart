@@ -29,6 +29,8 @@ const Map<String, String> kWriteApiAllowlist = {
       'Extracts bundled tray icon bytes into a temporary app-cache .ico file.',
   'lib/features/collections/m3u.dart':
       'Exports playlists atomically only to user-selected validated .m3u/.m3u8 paths.',
+  'lib/features/wrapped/wrapped_image_exporter.dart':
+      'Exports Wrapped/weekly recap PNGs atomically only to user-selected validated .png paths.',
   'lib/library/sqlite/legacy_userdata_migrator.dart':
       'Creates pre-split backups of library.db inside the app-support backups directory.',
   'lib/library/sqlite/database_protection.dart':

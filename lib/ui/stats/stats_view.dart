@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../audio/playback_controller.dart';
 import '../../../core/result.dart';
+import '../../../features/wrapped/recap.dart';
 import '../../../library/library_repository.dart';
 import '../common/error_presenter.dart';
 import '../glass/glass_button.dart';
@@ -165,6 +166,9 @@ class _StatsViewState extends State<StatsView> {
                         StatsActivityHeatmap(
                           snapshot: snapshot,
                           reduceMotion: reduceMotion,
+                          onOpenWeeklyRecap: () => widget.navigator.openWrapped(
+                            kind: RecapPeriodKind.weekly,
+                          ),
                         ),
                         const SizedBox(height: AppSpacing.s24),
                         StatsRankedLists(
@@ -197,31 +201,45 @@ class _StatsViewState extends State<StatsView> {
           key: const Key('stats_header_title'),
           style: AppTypography.display.copyWith(color: AppColors.text),
         ),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SettingsSegmentedControl<StatsRange>(
-            key: const Key('stats_range_selector'),
-            value: _controller.range,
-            onChanged: (next) => unawaited(_controller.setRange(next)),
-            options: [
-              SettingsSegmentedOption(
-                value: StatsRange.week,
-                label: context.t('stats.range.week'),
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: AppSpacing.s12,
+          runSpacing: AppSpacing.s8,
+          children: [
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SettingsSegmentedControl<StatsRange>(
+                key: const Key('stats_range_selector'),
+                value: _controller.range,
+                onChanged: (next) => unawaited(_controller.setRange(next)),
+                options: [
+                  SettingsSegmentedOption(
+                    value: StatsRange.week,
+                    label: context.t('stats.range.week'),
+                  ),
+                  SettingsSegmentedOption(
+                    value: StatsRange.month,
+                    label: context.t('stats.range.month'),
+                  ),
+                  SettingsSegmentedOption(
+                    value: StatsRange.year,
+                    label: context.t('stats.range.year'),
+                  ),
+                  SettingsSegmentedOption(
+                    value: StatsRange.allTime,
+                    label: context.t('stats.range.allTime'),
+                  ),
+                ],
               ),
-              SettingsSegmentedOption(
-                value: StatsRange.month,
-                label: context.t('stats.range.month'),
-              ),
-              SettingsSegmentedOption(
-                value: StatsRange.year,
-                label: context.t('stats.range.year'),
-              ),
-              SettingsSegmentedOption(
-                value: StatsRange.allTime,
-                label: context.t('stats.range.allTime'),
-              ),
-            ],
-          ),
+            ),
+            GlassPillButton(
+              key: const Key('stats_wrapped_button'),
+              size: GlassButtonSize.small,
+              leadingIcon: Icons.auto_awesome_outlined,
+              label: context.t('stats.wrappedButton'),
+              onPressed: widget.navigator.openWrapped,
+            ),
+          ],
         ),
       ],
     );

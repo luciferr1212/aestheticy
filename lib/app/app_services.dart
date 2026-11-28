@@ -56,6 +56,7 @@ class AppServices {
   final UserDataBackupService? userDataBackupService;
   final VoidCallback? onOpenLogsFolder;
   final VoidCallback? onOpenBackupsFolder;
+  final Future<void> Function(String path)? onOpenFolder;
 
   /// Creates an [AppServices] container.
   const AppServices({
@@ -86,5 +87,6 @@ class AppServices {
     this.userDataBackupService,
     this.onOpenLogsFolder,
     this.onOpenBackupsFolder,
+    this.onOpenFolder,
   });
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../diagnostics/app_logger.dart';
+import '../../features/wrapped/recap.dart';
 import '../../library/models.dart';
 
 /// Available top-level navigation destinations.
@@ -19,6 +20,9 @@ enum AppDestination {
 
   /// Calm listening statistics screen.
   stats,
+
+  /// Monthly Wrapped and weekly listening recap screen.
+  wrapped,
 
   /// Detail view for a specific album.
   albumDetail,
@@ -89,6 +93,15 @@ class NavEntry {
   /// Selected playlist model when available.
   final PlaylistSummary? playlist;
 
+  /// Selected recap period kind when destination is [AppDestination.wrapped].
+  final RecapPeriodKind? wrappedKind;
+
+  /// Selected calendar year when destination is [AppDestination.wrapped].
+  final int? wrappedYear;
+
+  /// Selected calendar month when destination is [AppDestination.wrapped].
+  final int? wrappedMonth;
+
   /// Preserved view state (e.g. scroll offset) across navigation.
   final Map<String, Object?> viewState;
 
@@ -102,6 +115,9 @@ class NavEntry {
     this.artist,
     this.playlistId,
     this.playlist,
+    this.wrappedKind,
+    this.wrappedYear,
+    this.wrappedMonth,
     Map<String, Object?>? viewState,
   }) : viewState = viewState ?? <String, Object?>{};
 
@@ -111,11 +127,20 @@ class NavEntry {
     String? albumId,
     String? artistId,
     int? playlistId,
+    RecapPeriodKind? wrappedKind,
+    int? wrappedYear,
+    int? wrappedMonth,
   }) {
     if (this.destination != destination) return false;
     if (destination == AppDestination.albumDetail && this.albumId != albumId) return false;
     if (destination == AppDestination.artistDetail && this.artistId != artistId) return false;
     if (destination == AppDestination.playlistDetail && this.playlistId != playlistId) return false;
+    if (destination == AppDestination.wrapped &&
+        (this.wrappedKind != wrappedKind ||
+            this.wrappedYear != wrappedYear ||
+            this.wrappedMonth != wrappedMonth)) {
+      return false;
+    }
     return true;
   }
 }
@@ -201,6 +226,9 @@ class AppNavigator extends ChangeNotifier {
       albumId: entry.albumId,
       artistId: entry.artistId,
       playlistId: entry.playlistId,
+      wrappedKind: entry.wrappedKind,
+      wrappedYear: entry.wrappedYear,
+      wrappedMonth: entry.wrappedMonth,
     )) {
       return;
     }
@@ -213,6 +241,9 @@ class AppNavigator extends ChangeNotifier {
         albumId: entry.albumId,
         artistId: entry.artistId,
         playlistId: entry.playlistId,
+        wrappedKind: entry.wrappedKind,
+        wrappedYear: entry.wrappedYear,
+        wrappedMonth: entry.wrappedMonth,
       )) {
         goBack();
         return;
@@ -289,6 +320,23 @@ class AppNavigator extends ChangeNotifier {
 
   /// Opens the Listening Stats screen.
   void openStats() => navigateTo(AppDestination.stats);
+
+  /// Opens the Wrapped (monthly) or Weekly listening recap screen.
+  void openWrapped({
+    RecapPeriodKind kind = RecapPeriodKind.monthly,
+    int? year,
+    int? month,
+  }) {
+    _pushEntry(
+      NavEntry(
+        id: 'nav_${_idSeq++}',
+        destination: AppDestination.wrapped,
+        wrappedKind: kind,
+        wrappedYear: year,
+        wrappedMonth: month,
+      ),
+    );
+  }
 
   /// Opens the synchronized lyrics view.
   void openLyrics() => navigateTo(AppDestination.lyrics);

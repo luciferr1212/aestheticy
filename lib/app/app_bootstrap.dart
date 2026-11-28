@@ -331,6 +331,7 @@ class AppBootstrap {
             unawaited(folderOpener(backupsPath));
           }
         },
+        onOpenFolder: folderOpener,
       ),
     );
   }

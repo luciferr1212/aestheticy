@@ -67,6 +67,11 @@ lib/ui/
 │   │       ├── stats_bar_chart.dart      # CustomPainter daily/monthly bars with hover/focus
 │   │       ├── stats_ranked_lists.dart   # Top 10 tracks/artists/albums (CoverCache + actions)
 │   │       └── stats_summary_grid.dart   # 4 calm KPI tiles (time, plays, new, busiest day)
+│   ├── wrapped/
+│   │   ├── wrapped_card_pages.dart       # 8 matte Wrapped / Weekly recap cards
+│   │   ├── wrapped_controller.dart       # Monthly/weekly coordinator reusing StatsDateRange
+│   │   ├── wrapped_poster_renderer.dart  # Offscreen 1080x1350 PNG poster renderer & safe export
+│   │   └── wrapped_view.dart             # Paged card viewer, keyboard/RTL nav & month selector
 │   └── theme/
     ├── app_colors.dart               # Static WCAG-compliant color palette
     ├── app_spacing.dart              # Standard spacing and border radii
@@ -885,6 +890,20 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
 3. **Daily / Monthly Listening Bars (`StatsBarChartPainter`):** Pure `CustomPainter` rendering 7 trailing daily bars (`This week`), 30 trailing daily bars (`This month`), 12 monthly bars (`This year`), or active monthly history (`All time`), with baseline zero ticks, RTL mirroring, hover tooltips, and keyboard focus semantics.
 4. **Weekly Listening Activity (`StatsHeatmapPainter`):** Calm 7 × 24 heat strip ordered by locale week start (`EN` Mon..Sun, `AR` Sat..Fri), discrete 5-step accent alpha levels, localized weekday/hour ticks, and per-cell hover/focus readouts.
 5. **Top 10 Ranked Lists:** Top tracks (tap plays via `PlaybackController`), top artists, and top albums (tap navigates via `AppNavigator`) using cached `CoverCache` thumbnails (`AlbumCoverImage`), plus a calm empty state ("Play something and your stats appear here") when no history exists.
+
+---
+
+## 37. Phase 4, Prompt 9C — Monthly Wrapped & Weekly Listening Recap (`lib/features/wrapped/*`, `lib/ui/wrapped/*`)
+
+### 37.1 RecapBuilder & Eligibility (`lib/features/wrapped/recap.dart`, `recap_builder.dart`)
+- **Pure-Dart Period Summaries:** `RecapBuilder` reuses `StatsDateRange` and existing read-only `LibraryRepository` analytics queries (`playEventsBetween`, `topTracksInRange`, `topArtistsInRange`, `topAlbumsInRange`, `distinctTracksFirstPlayedInRange`, `listeningByWeekdayAndHour`) with an injectable clock.
+- **Metrics & Highlights:** Produces `totalMinutes`, `playsCounted`, `topArtist`, top 5 `topTracks`, `topAlbum`, `newTracksDiscovered`, separate `busiestDay` (highest play count) and `longestListeningDay` (highest listening ms), and deterministic rule-based `RecapPersonality` (`nightOwl`, `earlyBird`, `albumListener`, `explorer`, `steadyListener`).
+- **Thresholds & Selectable Months:** Monthly Wrapped unlocks at 20 counted plays (`minMonthlyCountedPlays`); months with fewer plays show a calm "Not enough listening yet" card with counted-play progress (`availableMonths()` includes only months containing data).
+
+### 37.2 Matte Pager Flow & Offscreen 1080x1350 PNG Share (`lib/ui/wrapped/*`, `wrapped_image_exporter.dart`)
+- **Entry Points & Navigation:** `AppDestination.wrapped` opens cleanly from `StatsView` (monthly Wrapped button and the `StatsActivityHeatmap` "Weekly recap" button) as well as `HomeView`.
+- **8-Card Matte Flow:** Swipe/arrow pager supporting Left/Right keyboard navigation (mirrored cleanly in RTL), month selector limited to months with history, `CoverCache` artwork, `arabicNumerals` formatting, and `reduceMotion`-aware page transitions.
+- **Shareable 1080x1350 PNG:** Renders `WrappedPosterCard` offscreen via `RenderRepaintBoundary.toImage` using the bundled `Roboto` asset font (`pubspec.yaml`) + platform Arabic fallbacks, cover-palette matte background, and `"Aestheticy by mido"` footer. Directory selection strictly uses `FilePicker.getDirectoryPath` (never `saveFile`), enforces `.png`-only extension (`aestheticy-wrapped-<yyyy-MM>.png` or `aestheticy-week-<yyyy-Www>.png`), prompts before overwriting an existing `.png`, writes atomically via temp sibling + flush + rename (`WrappedImageExporter`, allowlisted in `no_user_file_writes_test.dart`), shows an `"Open folder"` SnackBar action via `PlatformServices.openFolder`, and routes errors through `ErrorPresenter`.
 
 
 

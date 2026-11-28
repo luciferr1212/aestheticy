@@ -84,6 +84,7 @@ class AestheticyApp extends StatefulWidget {
   final UserDataBackupService? userDataBackupService;
   final VoidCallback? onOpenLogsFolder;
   final VoidCallback? onOpenBackupsFolder;
+  final Future<void> Function(String path)? onOpenFolder;
 
   /// Creates an [AestheticyApp].
   const AestheticyApp({
@@ -117,6 +118,7 @@ class AestheticyApp extends StatefulWidget {
     this.userDataBackupService,
     this.onOpenLogsFolder,
     this.onOpenBackupsFolder,
+    this.onOpenFolder,
   });
 
   /// Creates an [AestheticyApp] populated from a bootstrapped [AppServices] container.
@@ -149,6 +151,7 @@ class AestheticyApp extends StatefulWidget {
       userDataBackupService: services.userDataBackupService,
       onOpenLogsFolder: services.onOpenLogsFolder,
       onOpenBackupsFolder: services.onOpenBackupsFolder,
+      onOpenFolder: services.onOpenFolder,
     );
   }
 
@@ -496,6 +499,7 @@ class _AestheticyAppState extends State<AestheticyApp> {
                         startupReport: widget.startupReport,
                         onOpenLogsFolder: widget.onOpenLogsFolder,
                         onOpenBackupsFolder: widget.onOpenBackupsFolder,
+                        onOpenFolder: widget.onOpenFolder,
                       ),
               ),
             ),

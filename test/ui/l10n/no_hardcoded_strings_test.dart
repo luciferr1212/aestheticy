@@ -7,6 +7,7 @@ void main() {
     final uiDirs = [
       Directory('lib/ui/home'),
       Directory('lib/ui/stats'),
+      Directory('lib/ui/wrapped'),
       Directory('lib/ui/library'),
       Directory('lib/ui/shell'),
       Directory('lib/ui/now_playing'),

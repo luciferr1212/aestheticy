@@ -169,15 +169,30 @@ class _HomeViewState extends State<HomeView> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       // Element 1: Greeting + Hero card
-                      Text(
-                        greeting,
-                        key: const Key('home_greeting_text'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textDirection: textDirectionFor(greeting),
-                        style: AppTypography.display.copyWith(
-                          color: AppColors.text,
-                        ),
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: AppSpacing.s12,
+                        runSpacing: AppSpacing.s8,
+                        children: [
+                          Text(
+                            greeting,
+                            key: const Key('home_greeting_text'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textDirection: textDirectionFor(greeting),
+                            style: AppTypography.display.copyWith(
+                              color: AppColors.text,
+                            ),
+                          ),
+                          GlassPillButton(
+                            key: const Key('home_wrapped_button'),
+                            size: GlassButtonSize.small,
+                            leadingIcon: Icons.auto_awesome_outlined,
+                            label: context.t('home.wrappedButton'),
+                            onPressed: widget.navigator.openWrapped,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: AppSpacing.s16),
                       HomeHeroCard(
