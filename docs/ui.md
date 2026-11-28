@@ -53,10 +53,21 @@ lib/ui/
 │   ├── settings_scope.dart           # Inherited notifier exposing SettingsStore
 │   ├── settings_store.dart           # Debounced atomic JSON persistence
 │   └── settings_view.dart            # Central configuration screen (max 1 blur surface)
-├── shell/
-│   ├── app_navigator.dart            # Pure Dart hierarchical navigation controller
-│   └── app_shell.dart                # Desktop application shell with adaptive glass
-└── theme/
+│   ├── shell/
+│   │   ├── app_navigator.dart            # Pure Dart hierarchical navigation controller
+│   │   └── app_shell.dart                # Desktop application shell with adaptive glass
+│   ├── stats/
+│   │   ├── stats_controller.dart         # Stats ChangeNotifier (local ranges, deltas, SWR)
+│   │   ├── stats_date_range.dart         # DST-safe local calendar windows (EN Mon / AR Sat)
+│   │   ├── stats_formatters.dart         # Localized hours/minutes, dates & arabicNumerals
+│   │   ├── stats_models.dart             # Immutable bar, busiest-day, and snapshot models
+│   │   ├── stats_view.dart               # Calm Stats screen (EN/AR RTL, ErrorPresenter retry)
+│   │   └── widgets/
+│   │       ├── stats_activity_heatmap.dart # 7x24 CustomPainter heat strip with hover/focus
+│   │       ├── stats_bar_chart.dart      # CustomPainter daily/monthly bars with hover/focus
+│   │       ├── stats_ranked_lists.dart   # Top 10 tracks/artists/albums (CoverCache + actions)
+│   │       └── stats_summary_grid.dart   # 4 calm KPI tiles (time, plays, new, busiest day)
+│   └── theme/
     ├── app_colors.dart               # Static WCAG-compliant color palette
     ├── app_spacing.dart              # Standard spacing and border radii
     ├── app_theme.dart                # Material 3 dark theme builder
@@ -858,6 +869,23 @@ Phase 4, Prompt 3 introduces a native desktop Mini Player mode and real Windows 
 2. **Continue Listening:** One lazy horizontal `ListView.separated` shelf of up to 8 recently played albums (`recentAlbumsPlayed`), rendered with `CoverCache` thumbnails (`AlbumCoverImage`, `cacheSize: 160`) and zero `BackdropFilter` inside row cards.
 3. **One Daily Rotating Row:** `HomeController` picks one non-empty candidate deterministically by local calendar date (`daysSinceEpoch % nonEmptyCandidates.length`) among `recentlyAddedAlbums`, `forgottenFavorites`, `onThisDay`, and `mostPlayedThisMonth`, with a localized title and subtle "why this row" caption.
 - **Empty History & Read-Only Safety:** When all rows are empty, renders a single calm empty-history card instead of empty shelves; query errors are logged and hide only the failing row; reads continue normally in `UserDataAccessMode.safeReadOnly`.
+
+---
+
+## 36. Phase 4, Prompt 9B — Calm Listening Stats Screen (`lib/ui/stats/*`)
+
+### 36.1 Navigation & Range Selection (`stats_date_range.dart`, `stats_controller.dart`)
+- **Sidebar Destination:** `AppDestination.stats` sits under the Library group (`sidebar_stats`).
+- **Local-Time & DST-Safe Ranges:** `StatsDateRange` calculates `This week` (Monday start in English, Saturday start in Arabic), `This month`, `This year`, and `All time` with local midnight calendar arithmetic safe across leap-year, month/year, and DST transitions, alongside immediately preceding period windows for percentage delta comparisons (including zero-previous `isNew` / flat handling).
+- **Read-Only Queries:** `StatsController` combines `playEventsBetween`, `topTracksInRange`, `topArtistsInRange`, `topAlbumsInRange`, `distinctTracksFirstPlayedInRange`, and the schema-qualified `listeningByWeekdayAndHour` query on `SqliteHistoryAnalytics`, continuing to operate cleanly in `UserDataAccessMode.safeReadOnly` and surfacing errors calmly through `ErrorPresenter` with retry.
+
+### 36.2 Ordered Layout & CustomPainter Visualizations (`stats_view.dart`, `widgets/*`)
+1. **Header & Range Selector:** Title plus `SettingsSegmentedControl<StatsRange>` wrapped responsively for narrow windows and large text scales.
+2. **Summary Tiles (4 max):** Listening time (+ previous-period delta), Plays counted (with distinct tracks/artists subtitle), Newly discovered tracks, and Busiest day, localized via `StatsFormatters` and obeying `arabicNumerals`.
+3. **Daily / Monthly Listening Bars (`StatsBarChartPainter`):** Pure `CustomPainter` rendering 7 trailing daily bars (`This week`), 30 trailing daily bars (`This month`), 12 monthly bars (`This year`), or active monthly history (`All time`), with baseline zero ticks, RTL mirroring, hover tooltips, and keyboard focus semantics.
+4. **Weekly Listening Activity (`StatsHeatmapPainter`):** Calm 7 × 24 heat strip ordered by locale week start (`EN` Mon..Sun, `AR` Sat..Fri), discrete 5-step accent alpha levels, localized weekday/hour ticks, and per-cell hover/focus readouts.
+5. **Top 10 Ranked Lists:** Top tracks (tap plays via `PlaybackController`), top artists, and top albums (tap navigates via `AppNavigator`) using cached `CoverCache` thumbnails (`AlbumCoverImage`), plus a calm empty state ("Play something and your stats appear here") when no history exists.
+
 
 
 

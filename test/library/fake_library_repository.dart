@@ -5,6 +5,7 @@ import 'package:aestheticy/library/file_path_utils.dart';
 import 'package:aestheticy/library/history_models.dart';
 import 'package:aestheticy/library/library_repository.dart';
 import 'package:aestheticy/library/models.dart';
+import 'package:aestheticy/library/text_normalizer.dart';
 import 'package:aestheticy/library/track_identity_models.dart';
 import 'package:aestheticy/library/user_data_access_mode.dart';
 
@@ -286,8 +287,70 @@ class FakeLibraryRepository implements LibraryRepository {
     HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
     int limit = 20,
     bool countedOnly = false,
-  }) async =>
-      const [];
+  }) async {
+    final events = await playEventsBetween(start, end, countedOnly: countedOnly);
+    final grouped = <String,
+        ({
+      String? uid,
+      String uri,
+      String? title,
+      String? artist,
+      String? album,
+      int count,
+      int listenedMs
+    })>{};
+    for (final e in events) {
+      final key = e.trackUid ?? FilePathUtils.canonicalKey(e.uri);
+      final prev = grouped[key];
+      if (prev == null) {
+        grouped[key] = (
+          uid: e.trackUid,
+          uri: e.uri,
+          title: e.title?.trim().isNotEmpty == true ? e.title!.trim() : null,
+          artist: e.artist?.trim().isNotEmpty == true ? e.artist!.trim() : null,
+          album: e.album?.trim().isNotEmpty == true ? e.album!.trim() : null,
+          count: 1,
+          listenedMs: e.listenedMs,
+        );
+      } else {
+        grouped[key] = (
+          uid: prev.uid ?? e.trackUid,
+          uri: e.uri,
+          title: (e.title?.trim().isNotEmpty == true ? e.title!.trim() : null) ??
+              prev.title,
+          artist:
+              (e.artist?.trim().isNotEmpty == true ? e.artist!.trim() : null) ??
+                  prev.artist,
+          album: (e.album?.trim().isNotEmpty == true ? e.album!.trim() : null) ??
+              prev.album,
+          count: prev.count + 1,
+          listenedMs: prev.listenedMs + e.listenedMs,
+        );
+      }
+    }
+    final list = grouped.values
+        .map(
+          (g) => RankedTrackStat(
+            trackUid: g.uid,
+            uri: g.uri,
+            title: g.title,
+            artist: g.artist,
+            album: g.album,
+            playCount: g.count,
+            totalListenedMs: g.listenedMs,
+          ),
+        )
+        .toList()
+      ..sort((a, b) {
+        if (metric == HistoryRankingMetric.playCount) {
+          final c = b.playCount.compareTo(a.playCount);
+          return c != 0 ? c : b.totalListenedMs.compareTo(a.totalListenedMs);
+        }
+        final l = b.totalListenedMs.compareTo(a.totalListenedMs);
+        return l != 0 ? l : b.playCount.compareTo(a.playCount);
+      });
+    return list.take(limit).toList();
+  }
 
   @override
   Future<List<RankedArtistStat>> topArtistsInRange(
@@ -296,8 +359,43 @@ class FakeLibraryRepository implements LibraryRepository {
     HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
     int limit = 20,
     bool countedOnly = false,
-  }) async =>
-      const [];
+  }) async {
+    final events = await playEventsBetween(start, end, countedOnly: countedOnly);
+    final grouped = <String, ({String name, int count, int listenedMs})>{};
+    for (final e in events) {
+      final raw = e.artist?.trim() ?? '';
+      if (raw.isEmpty) continue;
+      final key = TextNormalizer.normalize(raw);
+      final prev = grouped[key];
+      if (prev == null) {
+        grouped[key] = (name: raw, count: 1, listenedMs: e.listenedMs);
+      } else {
+        grouped[key] = (
+          name: prev.name,
+          count: prev.count + 1,
+          listenedMs: prev.listenedMs + e.listenedMs,
+        );
+      }
+    }
+    final list = grouped.values
+        .map(
+          (g) => RankedArtistStat(
+            artist: g.name,
+            playCount: g.count,
+            totalListenedMs: g.listenedMs,
+          ),
+        )
+        .toList()
+      ..sort((a, b) {
+        if (metric == HistoryRankingMetric.playCount) {
+          final c = b.playCount.compareTo(a.playCount);
+          return c != 0 ? c : b.totalListenedMs.compareTo(a.totalListenedMs);
+        }
+        final l = b.totalListenedMs.compareTo(a.totalListenedMs);
+        return l != 0 ? l : b.playCount.compareTo(a.playCount);
+      });
+    return list.take(limit).toList();
+  }
 
   @override
   Future<List<RankedAlbumStat>> topAlbumsInRange(
@@ -306,24 +404,138 @@ class FakeLibraryRepository implements LibraryRepository {
     HistoryRankingMetric metric = HistoryRankingMetric.listenedMs,
     int limit = 20,
     bool countedOnly = false,
-  }) async =>
-      const [];
+  }) async {
+    final events = await playEventsBetween(start, end, countedOnly: countedOnly);
+    final grouped =
+        <String, ({String album, String? artist, int count, int listenedMs})>{};
+    for (final e in events) {
+      final rawAlbum = e.album?.trim() ?? '';
+      if (rawAlbum.isEmpty) continue;
+      final key = AlbumIdentity.key(
+        album: rawAlbum,
+        albumArtist: e.albumArtist,
+        artist: e.artist,
+        trackPath: e.uri,
+      );
+      final artistName = (e.albumArtist?.trim().isNotEmpty == true)
+          ? e.albumArtist!.trim()
+          : (e.artist?.trim().isNotEmpty == true ? e.artist!.trim() : null);
+      final prev = grouped[key];
+      if (prev == null) {
+        grouped[key] = (
+          album: rawAlbum,
+          artist: artistName,
+          count: 1,
+          listenedMs: e.listenedMs,
+        );
+      } else {
+        grouped[key] = (
+          album: prev.album,
+          artist: prev.artist ?? artistName,
+          count: prev.count + 1,
+          listenedMs: prev.listenedMs + e.listenedMs,
+        );
+      }
+    }
+    final list = grouped.values
+        .map(
+          (g) => RankedAlbumStat(
+            album: g.album,
+            artist: g.artist,
+            playCount: g.count,
+            totalListenedMs: g.listenedMs,
+          ),
+        )
+        .toList()
+      ..sort((a, b) {
+        if (metric == HistoryRankingMetric.playCount) {
+          final c = b.playCount.compareTo(a.playCount);
+          return c != 0 ? c : b.totalListenedMs.compareTo(a.totalListenedMs);
+        }
+        final l = b.totalListenedMs.compareTo(a.totalListenedMs);
+        return l != 0 ? l : b.playCount.compareTo(a.playCount);
+      });
+    return list.take(limit).toList();
+  }
 
   @override
   Future<List<DailyListeningStat>> listeningMinutesPerDay(
     DateTime start,
     DateTime end, {
     bool countedOnly = false,
-  }) async =>
-      const [];
+  }) async {
+    final events = await playEventsBetween(start, end, countedOnly: countedOnly);
+    final byDay = <String, int>{};
+    for (final e in events) {
+      final utc = e.startedAt.toUtc();
+      final key = '${utc.year.toString().padLeft(4, '0')}-'
+          '${utc.month.toString().padLeft(2, '0')}-'
+          '${utc.day.toString().padLeft(2, '0')}';
+      byDay[key] = (byDay[key] ?? 0) + e.listenedMs;
+    }
+    final keys = byDay.keys.toList()..sort();
+    return keys
+        .map((k) => DailyListeningStat(dateKey: k, totalListenedMs: byDay[k]!))
+        .toList();
+  }
+
+  @override
+  Future<List<WeekdayHourListeningStat>> listeningByWeekdayAndHour(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = true,
+  }) async {
+    final events = await playEventsBetween(start, end, countedOnly: countedOnly);
+    final buckets = <({int weekday, int hour}), ({int count, int ms})>{};
+    for (final e in events) {
+      final local = e.startedAt.toLocal();
+      final key = (weekday: local.weekday, hour: local.hour);
+      final prev = buckets[key];
+      if (prev == null) {
+        buckets[key] = (count: 1, ms: e.listenedMs);
+      } else {
+        buckets[key] = (count: prev.count + 1, ms: prev.ms + e.listenedMs);
+      }
+    }
+    final entries = buckets.entries.toList()
+      ..sort((a, b) {
+        final w = a.key.weekday.compareTo(b.key.weekday);
+        return w != 0 ? w : a.key.hour.compareTo(b.key.hour);
+      });
+    return entries
+        .map(
+          (e) => WeekdayHourListeningStat(
+            weekday: e.key.weekday,
+            hour: e.key.hour,
+            totalListenedMs: e.value.ms,
+            playCount: e.value.count,
+          ),
+        )
+        .toList();
+  }
 
   @override
   Future<int> distinctTracksFirstPlayedInRange(
     DateTime start,
     DateTime end, {
     bool countedOnly = false,
-  }) async =>
-      0;
+  }) async {
+    final firstByTrack = <String, int>{};
+    for (final e in _playEvents) {
+      if (countedOnly && !e.counted) continue;
+      final key = e.trackUid ?? FilePathUtils.canonicalKey(e.uri);
+      final ms = e.startedAt.toUtc().millisecondsSinceEpoch;
+      final prev = firstByTrack[key];
+      if (prev == null || ms < prev) {
+        firstByTrack[key] = ms;
+      }
+    }
+    final startMs = start.toUtc().millisecondsSinceEpoch;
+    final endMs = end.toUtc().millisecondsSinceEpoch;
+    return firstByTrack.values
+        .where((ms) => ms >= startMs && ms <= endMs)
+        .length;
+  }
 
   List<AlbumSummary> _buildAlbumSummaries() {
     final grouped = <String, List<Track>>{};

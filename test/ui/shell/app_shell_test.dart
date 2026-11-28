@@ -254,6 +254,14 @@ class FakeVirtualLibraryRepository implements LibraryRepository {
       const [];
 
   @override
+  Future<List<WeekdayHourListeningStat>> listeningByWeekdayAndHour(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = true,
+  }) async =>
+      const [];
+
+  @override
   Future<int> distinctTracksFirstPlayedInRange(
     DateTime start,
     DateTime end, {

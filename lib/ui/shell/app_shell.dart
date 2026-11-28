@@ -115,6 +115,9 @@ class AppShell extends StatefulWidget {
   /// Optional clock override for the Home screen greeting and daily rotation.
   final DateTime Function()? homeClock;
 
+  /// Optional clock override for the Stats screen range calculations.
+  final DateTime Function()? statsClock;
+
   /// Creates an [AppShell].
   const AppShell({
     super.key,
@@ -140,6 +143,7 @@ class AppShell extends StatefulWidget {
     this.onOpenBackupsFolder,
     this.sessionStore,
     this.homeClock,
+    this.statsClock,
   });
 
   @override
@@ -663,6 +667,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                                 sessionStore:
                                                     widget.sessionStore,
                                                 homeClock: widget.homeClock,
+                                                statsClock: widget.statsClock,
                                                 onAddFolder: _onAddFolder,
                                                 onOpenFolders: _openFolders,
                                               ),

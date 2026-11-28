@@ -28,6 +28,7 @@ import '../../queue/queue_view.dart';
 import '../../settings/audio_settings_applier.dart';
 import '../../settings/settings_store.dart';
 import '../../settings/settings_view.dart';
+import '../../stats/stats_view.dart';
 import '../app_navigator.dart';
 
 /// Resolves and builds the active content destination inside [AppShell].
@@ -77,6 +78,9 @@ class AppShellDestinationView extends StatelessWidget {
   /// Optional clock override for the Home screen.
   final DateTime Function()? homeClock;
 
+  /// Optional clock override for the Stats screen.
+  final DateTime Function()? statsClock;
+
   /// Callback to add a music folder from the welcome state.
   final VoidCallback onAddFolder;
 
@@ -103,6 +107,7 @@ class AppShellDestinationView extends StatelessWidget {
     this.trayWindowController,
     this.sessionStore,
     this.homeClock,
+    this.statsClock,
   });
 
   @override
@@ -149,6 +154,16 @@ class AppShellDestinationView extends StatelessWidget {
           controller: controller,
           settingsStore: settingsStore,
           dataCache: dataCache,
+        );
+      case AppDestination.stats:
+        return StatsView(
+          key: const ValueKey('view_stats'),
+          repository: repository,
+          playbackController: controller,
+          settingsStore: settingsStore,
+          navigator: navigator,
+          dataCache: dataCache,
+          clock: statsClock,
         );
       case AppDestination.albumDetail:
         final album = navigator.selectedAlbum ??

@@ -17,6 +17,9 @@ enum AppDestination {
   /// Tracks tabular screen.
   tracks,
 
+  /// Calm listening statistics screen.
+  stats,
+
   /// Detail view for a specific album.
   albumDetail,
 
@@ -283,6 +286,9 @@ class AppNavigator extends ChangeNotifier {
 
   /// Opens the Home screen.
   void openHome() => navigateTo(AppDestination.home);
+
+  /// Opens the Listening Stats screen.
+  void openStats() => navigateTo(AppDestination.stats);
 
   /// Opens the synchronized lyrics view.
   void openLyrics() => navigateTo(AppDestination.lyrics);

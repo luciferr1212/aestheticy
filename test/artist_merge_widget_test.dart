@@ -237,6 +237,14 @@ class FailingMergeRepository implements LibraryRepository {
       _inner.listeningMinutesPerDay(start, end, countedOnly: countedOnly);
 
   @override
+  Future<List<WeekdayHourListeningStat>> listeningByWeekdayAndHour(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = true,
+  }) =>
+      _inner.listeningByWeekdayAndHour(start, end, countedOnly: countedOnly);
+
+  @override
   Future<int> distinctTracksFirstPlayedInRange(
     DateTime start,
     DateTime end, {

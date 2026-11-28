@@ -6,6 +6,7 @@ void main() {
   test('No hardcoded user-visible string literals in lib/ui outside AppStrings', () {
     final uiDirs = [
       Directory('lib/ui/home'),
+      Directory('lib/ui/stats'),
       Directory('lib/ui/library'),
       Directory('lib/ui/shell'),
       Directory('lib/ui/now_playing'),

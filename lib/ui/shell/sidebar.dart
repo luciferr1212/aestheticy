@@ -113,6 +113,15 @@ class Sidebar extends StatelessWidget {
                           isSelected: navigator.current == AppDestination.tracks,
                           onTap: () => navigator.navigateTo(AppDestination.tracks),
                         ),
+                        _SidebarTile(
+                          key: const Key('sidebar_stats'),
+                          icon: Icons.insights_outlined,
+                          selectedIcon: Icons.insights,
+                          title: context.t('nav.stats'),
+                          isCompact: isCompact,
+                          isSelected: navigator.current == AppDestination.stats,
+                          onTap: () => navigator.navigateTo(AppDestination.stats),
+                        ),
 
                         const SizedBox(height: 16),
                         // Yours section

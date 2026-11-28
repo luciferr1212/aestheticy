@@ -290,6 +290,45 @@ class SqliteHistoryAnalytics {
         .toList();
   }
 
+  /// Returns listening totals grouped by local ISO weekday (`1..7`) and local
+  /// hour of day (`0..23`) within `[start, end]`.
+  Future<List<WeekdayHourListeningStat>> listeningByWeekdayAndHour(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = true,
+  }) async {
+    final u = _userSchema();
+    final startMs = start.toUtc().millisecondsSinceEpoch;
+    final endMs = end.toUtc().millisecondsSinceEpoch;
+    final countedClause = countedOnly ? ' AND counted = 1' : '';
+
+    final rows = _db.select(
+      '''
+      SELECT
+        CAST(strftime('%w', started_at_ms / 1000.0, 'unixepoch', 'localtime') AS INTEGER) AS dow_sun0,
+        CAST(strftime('%H', started_at_ms / 1000.0, 'unixepoch', 'localtime') AS INTEGER) AS hour_of_day,
+        COUNT(*) AS play_count,
+        COALESCE(SUM(listened_ms), 0) AS total_listened_ms
+      FROM $u.play_events
+      WHERE started_at_ms >= ? AND started_at_ms <= ?$countedClause
+      GROUP BY dow_sun0, hour_of_day
+      ORDER BY dow_sun0 ASC, hour_of_day ASC;
+      ''',
+      [startMs, endMs],
+    );
+
+    return rows.map((r) {
+      final dowSun0 = r['dow_sun0'] as int;
+      final isoWeekday = dowSun0 == 0 ? 7 : dowSun0;
+      return WeekdayHourListeningStat(
+        weekday: isoWeekday,
+        hour: r['hour_of_day'] as int,
+        totalListenedMs: r['total_listened_ms'] as int,
+        playCount: r['play_count'] as int,
+      );
+    }).toList();
+  }
+
   /// Returns the count of distinct tracks whose very first recorded play event
   /// occurred within `[start, end]`.
   Future<int> distinctTracksFirstPlayedInRange(

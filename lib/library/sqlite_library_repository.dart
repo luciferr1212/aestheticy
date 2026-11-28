@@ -640,6 +640,18 @@ class SqliteLibraryRepository implements LibraryRepository {
       );
 
   @override
+  Future<List<WeekdayHourListeningStat>> listeningByWeekdayAndHour(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = true,
+  }) =>
+      _historyAnalytics.listeningByWeekdayAndHour(
+        start,
+        end,
+        countedOnly: countedOnly,
+      );
+
+  @override
   Future<int> distinctTracksFirstPlayedInRange(
     DateTime start,
     DateTime end, {

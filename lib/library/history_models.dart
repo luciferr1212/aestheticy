@@ -104,3 +104,30 @@ class DailyListeningStat {
     required this.totalListenedMs,
   });
 }
+
+/// Aggregated listening duration for a single local ISO weekday (1=Mon..7=Sun)
+/// and local hour of day (0..23).
+class WeekdayHourListeningStat {
+  /// ISO weekday (`1` = Monday .. `7` = Sunday).
+  final int weekday;
+
+  /// Local hour of day (`0..23`).
+  final int hour;
+
+  /// Total listened milliseconds in this weekday/hour bucket.
+  final int totalListenedMs;
+
+  /// Total play events in this weekday/hour bucket.
+  final int playCount;
+
+  /// Total listened minutes (`totalListenedMs / 60000.0`).
+  double get minutes => totalListenedMs / 60000.0;
+
+  /// Creates a [WeekdayHourListeningStat].
+  const WeekdayHourListeningStat({
+    required this.weekday,
+    required this.hour,
+    required this.totalListenedMs,
+    required this.playCount,
+  });
+}

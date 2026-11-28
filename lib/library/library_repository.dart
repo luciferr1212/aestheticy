@@ -189,6 +189,14 @@ abstract class LibraryRepository {
     bool countedOnly = false,
   });
 
+  /// Retrieves listening totals grouped by local ISO weekday (`1..7`) and
+  /// local hour (`0..23`) within `[start, end]`.
+  Future<List<WeekdayHourListeningStat>> listeningByWeekdayAndHour(
+    DateTime start,
+    DateTime end, {
+    bool countedOnly = true,
+  });
+
   /// Returns how many distinct tracks had their first play event inside `[start, end]`.
   Future<int> distinctTracksFirstPlayedInRange(
     DateTime start,
