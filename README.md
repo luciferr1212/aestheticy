@@ -9,7 +9,7 @@ Phase 1–4 active: audio core, SQLite library, liquid-glass UI foundation ([doc
 
 ## Highlights
 
-- **Audio & Queue**: `libmpv` behind `AudioEngine`, 10-band EQ, fade profiles, unified `PlaybackController.playShuffled` / repeat sync, entry-identity multi-select queue editing & delete, session restore preserving shuffled order and duplicate entry identity, and resizable docked Queue/Lyrics side panel.
+- **Audio & Queue**: `libmpv` behind `AudioEngine`, 10-band EQ, fade profiles, unified `PlaybackController.playShuffled` / repeat sync, entry-identity multi-select queue editing & delete, session restore preserving shuffled order and duplicate entry identity, and responsive docked Queue/Lyrics side panel (22% of window width clamped to 280–320 px, auto-hidden below 1000 px).
 - **Library & Protection**: Folder scanning with continuous multi-folder progress, cancellation protection, split `library.db` (rebuildable index) and `userdata.db` (favorites, ratings, playlists, play history, artist rules) via SQLite `ATTACH`, stable `track_identity` UIDs with automatic move/rename relinking and offline-drive preservation, hardened `play_events` with 30s heartbeats / interrupted-session recovery / date-range analytics queries, WAL + `PRAGMA quick_check` corruption recovery, crash-recoverable legacy migration, safe read-only fallback mode, daily verified `userdata.db` backups (5-day rotation), unified `AlbumIdentity` grouping and cover keys, real recently-added album sorting, live stale-while-revalidate refresh on scan/folder changes, stale-guarded search (matching track artists & display translations on Albums), artist merge/never-split rules, `file://` URI-aware history/playlists, and safe atomic `.m3u`/`.m3u8` export & Windows-path M3U import.
 - **Localization & Display**: Full English + Arabic RTL interface, display-only artist name translations manager in Settings, localized library sheets/dialogs.
 - **Reliability & Persistence**: Rotating privacy-redacted diagnostics logger (`AppLogger`, 5x 1 MB rolling files), typed `Result<T>` / `AppError` model with calm localized `ErrorPresenter` feedback, empty-allowlist no-silent-catch enforcement across `lib/`, and schema-versioned atomic JSON stores (`SettingsStore`, `EqStore`, `ArtistNameStore`, `LyricsOffsetStore`, `SessionStore`) with ordered migrations, forward unknown-key preservation, `.bad-<timestamp>` quarantine, and rolling 3-copy backups under `backups/settings/`.
@@ -48,7 +48,7 @@ flutter test
 ## Folder Map
 
 - `lib/main.dart` — Slim app entrypoint (`runZonedGuarded`, logger init, `AppBootstrap.initialize`, `runApp`).
-- `lib/app/` — Composition root (`app_bootstrap.dart`, `app_services.dart`, `window_lifecycle.dart`, `aestheticy_app.dart`, `init_error_apps.dart`, `feature_flags.dart`).
+- `lib/app/` — Composition root (`app_bootstrap.dart`, `app_services.dart`, `window_lifecycle.dart`, `aestheticy_app.dart`, `init_error_apps.dart`, `flutter_error_handler.dart`, `feature_flags.dart`).
 - `lib/audio/` — `AudioEngine` contract, `MpvAudioEngine`, `PlaybackQueue`, and `PlaybackController` facade backed by internal collaborators under `lib/audio/playback/` (fade, gapless preload, queue operations, resume state, play-source tracking).
 - `lib/core/` — Shared `Result<T>` and sealed `AppError` types.
 - `lib/diagnostics/` — Rotating privacy-redacted `AppLogger` and diagnostic report builder.

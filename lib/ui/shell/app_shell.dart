@@ -691,6 +691,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             settingsStore: widget.settingsStore,
                             navigator: widget.navigator,
                             userCollections: _userCollections,
+                            panelWidth: SidePanelController.panelWidthFor(
+                              constraints.maxWidth,
+                            ),
                           ),
                         ],
                       );

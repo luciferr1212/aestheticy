@@ -14,8 +14,10 @@ enum SidePanelTab {
 /// Manages open/closed state, active tab, persistence, and responsive auto-hide
 /// for the docked right side panel in [AppShell].
 class SidePanelController extends ChangeNotifier {
-  /// Width of the docked side panel in logical pixels when open.
-  static const double kPanelWidth = 360.0;
+  /// Computes the responsive docked side panel width in logical pixels for a
+  /// given [windowWidth], clamping 22% of the window width to `[280.0, 320.0]`.
+  static double panelWidthFor(double windowWidth) =>
+      (windowWidth * 0.22).clamp(280.0, 320.0);
 
   /// Minimum window width below which the side panel auto-hides temporarily
   /// without mutating the saved preference.

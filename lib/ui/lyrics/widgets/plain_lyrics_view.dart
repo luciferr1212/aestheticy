@@ -162,11 +162,15 @@ class PlainLyricsView extends StatelessWidget {
                       ? Duration.zero
                       : const Duration(milliseconds: 200),
                   opacity: isHovered ? 1.0 : 0.0,
-                  child: Text(
-                    noticeText,
-                    key: const Key('lyrics_unsynced_notice'),
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.textMuted,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      noticeText,
+                      key: const Key('lyrics_unsynced_notice'),
+                      textAlign: TextAlign.center,
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.textMuted,
+                      ),
                     ),
                   ),
                 ),

@@ -143,51 +143,59 @@ class LibraryViewControls extends StatelessWidget {
             ],
 
             // 2. Sort dropdown menu trigger
-            Builder(
-              builder: (sortCtx) {
-                return InkWell(
-                  key: const Key('sort_button'),
-                  borderRadius: BorderRadius.circular(AppSpacing.r10),
-                  onTap: () {
-                    final box = sortCtx.findRenderObject() as RenderBox?;
-                    final pos = box?.localToGlobal(Offset.zero) ?? Offset.zero;
-                    _showSortMenu(
-                      context,
-                      pos + Offset(0, box?.size.height ?? 32),
-                    );
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.sort,
-                          size: 16,
-                          color: AppColors.textSecondary,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${context.t('common.sort')}: ${context.t('sort.$currentSort')}',
-                          style: AppTypography.caption.copyWith(
-                            color: AppColors.text,
-                            fontWeight: FontWeight.w500,
+            Flexible(
+              fit: FlexFit.loose,
+              child: Builder(
+                builder: (sortCtx) {
+                  return InkWell(
+                    key: const Key('sort_button'),
+                    borderRadius: BorderRadius.circular(AppSpacing.r10),
+                    onTap: () {
+                      final box = sortCtx.findRenderObject() as RenderBox?;
+                      final pos = box?.localToGlobal(Offset.zero) ?? Offset.zero;
+                      _showSortMenu(
+                        context,
+                        pos + Offset(0, box?.size.height ?? 32),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.sort,
+                            size: 16,
+                            color: AppColors.textSecondary,
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.arrow_drop_down,
-                          size: 16,
-                          color: AppColors.textMuted,
-                        ),
-                      ],
+                          const SizedBox(width: 6),
+                          Flexible(
+                            fit: FlexFit.loose,
+                            child: Text(
+                              '${context.t('common.sort')}: ${context.t('sort.$currentSort')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.caption.copyWith(
+                                color: AppColors.text,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            size: 16,
+                            color: AppColors.textMuted,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
 
             const SizedBox(width: 4),

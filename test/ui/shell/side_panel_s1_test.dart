@@ -148,6 +148,14 @@ void main() {
       expect(fallback.sidePanelOpen, isFalse);
       expect(fallback.sidePanelTab, equals('queue'));
     });
+
+    test('panelWidthFor computes clamped 22% responsive width across breakpoints', () {
+      expect(SidePanelController.panelWidthFor(1000), equals(280.0));
+      expect(SidePanelController.panelWidthFor(1280), closeTo(281.6, 0.01));
+      expect(SidePanelController.panelWidthFor(1600), equals(320.0));
+      expect(SidePanelController.panelWidthFor(1920), equals(320.0));
+      expect(SidePanelController.kAutoHideWidthThreshold, equals(1000.0));
+    });
   });
 
   group('Docked SidePanel Shell Integration (S1)', () {
@@ -230,14 +238,27 @@ void main() {
       });
     }
 
-    Widget buildShell() {
+    Widget buildShell({
+      Locale locale = const Locale('en'),
+      TextDirection textDirection = TextDirection.ltr,
+      double textScale = 1.0,
+    }) {
       return GlassScope(
         controller: glassController,
         child: SettingsScope(
           store: settingsStore,
           child: MaterialApp(
-            locale: const Locale('en'),
+            locale: locale,
             theme: buildAppTheme(),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(textScale),
+              ),
+              child: Directionality(
+                textDirection: textDirection,
+                child: child!,
+              ),
+            ),
             home: AppShell(
               engine: engine,
               controller: playbackController,
@@ -258,7 +279,9 @@ void main() {
       'opening and closing panel resizes content area without overlaying and respects reduceMotion',
       timeout: const Timeout(Duration(seconds: 30)),
       (tester) async {
-        setViewport(tester, const Size(1280, 800));
+        const viewportWidth = 1280.0;
+        final expectedWidth = SidePanelController.panelWidthFor(viewportWidth);
+        setViewport(tester, const Size(viewportWidth, 800));
         await tester.pumpWidget(buildShell());
         await tester.pumpAndSettle();
 
@@ -274,7 +297,7 @@ void main() {
         // Mid-animation: partially open, no overflow
         final midWidth = tester.getSize(find.byKey(const Key('app_shell_side_panel'))).width;
         expect(midWidth, greaterThan(0));
-        expect(midWidth, lessThan(SidePanelController.kPanelWidth));
+        expect(midWidth, lessThan(expectedWidth));
         expect(tester.takeException(), isNull);
 
         await tester.pumpAndSettle();
@@ -284,12 +307,12 @@ void main() {
 
         expect(
           tester.getSize(find.byKey(const Key('app_shell_side_panel'))).width,
-          closeTo(SidePanelController.kPanelWidth, 0.5),
+          closeTo(expectedWidth, 0.5),
         );
         // Resizes content area rather than overlaying it
         expect(
           openContentRect.width,
-          closeTo(closedRect.width - SidePanelController.kPanelWidth, 0.5),
+          closeTo(closedRect.width - expectedWidth, 0.5),
         );
         expect(openContentRect.right, lessThanOrEqualTo(panelRect.left + 0.1));
         expect(tester.takeException(), isNull);
@@ -573,6 +596,214 @@ void main() {
           await offsetStore.flush();
           await settingsStore.flush();
         });
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'docked panel scales width across 1000/1280/1600/1920 breakpoints and has no drag handle',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        settingsStore.update((s) => s.copyWith(reduceMotion: true));
+        sidePanelController.open(tab: SidePanelTab.queue);
+        setViewport(tester, const Size(1000, 800));
+        await tester.pumpWidget(buildShell());
+        await tester.pumpAndSettle();
+
+        final expectations = <double, double>{
+          1000: 280.0,
+          1280: 281.6,
+          1600: 320.0,
+          1920: 320.0,
+        };
+
+        for (final entry in expectations.entries) {
+          tester.view.physicalSize = Size(entry.key, 800);
+          await tester.pumpAndSettle();
+
+          expect(
+            tester.getSize(find.byKey(const Key('app_shell_side_panel'))).width,
+            closeTo(entry.value, 0.5),
+            reason: 'Expected docked panel width ${entry.value} at window width ${entry.key}',
+          );
+          expect(find.byKey(const Key('side_panel_resize_handle')), findsNothing);
+          expect(tester.takeException(), isNull);
+        }
+
+        // Below 1000px auto-hides the panel without mutating saved state
+        tester.view.physicalSize = const Size(999, 800);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('side_panel_surface')), findsNothing);
+        expect(sidePanelController.isOpen, isTrue);
+
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+    );
+
+    testWidgets(
+      'queue and lyrics panel content lay out cleanly without overflow at 280px and 320px in LTR/RTL with large textScale',
+      timeout: const Timeout(Duration(seconds: 30)),
+      (tester) async {
+        final overflowErrors = <FlutterErrorDetails>[];
+        final prevOnError = FlutterError.onError;
+        FlutterError.onError = (details) {
+          overflowErrors.add(details);
+          prevOnError?.call(details);
+        };
+        addTearDown(() => FlutterError.onError = prevOnError);
+
+        settingsStore.update(
+          (s) => s.copyWith(reduceMotion: true, textScale: 'large'),
+        );
+
+        await playbackController.playQueue([
+          const AudioSource(
+            'C:\\Music\\long_1.flac',
+            extras: {
+              'title': 'Very Long Symphony Movement Number Seven With Extra Words',
+              'artist': 'An Exceptionally Long Orchestral Ensemble Name',
+              'album': 'Extended Album Edition',
+              'durationMs': '240000',
+            },
+          ),
+          const AudioSource(
+            'C:\\Music\\long_2.flac',
+            extras: {
+              'title': 'Second Very Long Track Title That Must Ellipsize Cleanly',
+              'artist': 'Another Long Artist Collaboration Credit',
+              'album': 'Album Two',
+              'durationMs': '210000',
+            },
+          ),
+        ], startIndex: 0);
+        queue.add(
+          const AudioSource(
+            'C:\\Music\\queued_up_next.flac',
+            extras: {
+              'title': 'Queued Track Header Triggering Clear Upcoming Button',
+              'artist': 'Queued Artist',
+              'durationMs': '180000',
+            },
+          ),
+          isUserQueued: true,
+        );
+
+        lyricsRepository.result = const LyricsResultFound(
+          LyricsDocument(
+            kind: LyricsKind.synced,
+            lines: [
+              LyricsLine(
+                startMs: 0,
+                text: 'A remarkably long synchronized lyric line inside the narrower panel',
+                words: [
+                  LyricsWord(
+                    startMs: 0,
+                    endMs: 2000,
+                    text: 'A remarkably long synchronized lyric line inside the narrower panel',
+                  ),
+                ],
+              ),
+            ],
+            source: LyricsSourceOrigin.local,
+            hasWordTiming: true,
+          ),
+        );
+        await lyricsController.retry();
+
+        final variants = <({
+          double windowWidth,
+          double panelWidth,
+          Locale locale,
+          TextDirection direction,
+          String language,
+        })>[
+          (
+            windowWidth: 1000,
+            panelWidth: 280,
+            locale: const Locale('en'),
+            direction: TextDirection.ltr,
+            language: 'en',
+          ),
+          (
+            windowWidth: 1000,
+            panelWidth: 280,
+            locale: const Locale('ar'),
+            direction: TextDirection.rtl,
+            language: 'ar',
+          ),
+          (
+            windowWidth: 1600,
+            panelWidth: 320,
+            locale: const Locale('en'),
+            direction: TextDirection.ltr,
+            language: 'en',
+          ),
+          (
+            windowWidth: 1600,
+            panelWidth: 320,
+            locale: const Locale('ar'),
+            direction: TextDirection.rtl,
+            language: 'ar',
+          ),
+        ];
+
+        setViewport(tester, const Size(1000, 800));
+        for (final v in variants) {
+          overflowErrors.clear();
+          settingsStore.update((s) => s.copyWith(language: v.language));
+          tester.view.physicalSize = Size(v.windowWidth, 800);
+
+          sidePanelController.open(tab: SidePanelTab.queue);
+          await tester.pumpWidget(
+            buildShell(
+              locale: v.locale,
+              textDirection: v.direction,
+              textScale: 1.10,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(
+            tester.getSize(find.byKey(const Key('app_shell_side_panel'))).width,
+            closeTo(v.panelWidth, 0.5),
+          );
+          expect(overflowErrors, isEmpty, reason: 'Queue overflow at $v');
+          expect(tester.takeException(), isNull);
+
+          // Switch to Lyrics tab and check synced lyrics + toolbar
+          await tester.tap(find.byKey(const Key('side_panel_tab_lyrics')));
+          await tester.pumpAndSettle();
+          expect(overflowErrors, isEmpty, reason: 'Lyrics synced overflow at $v');
+          expect(tester.takeException(), isNull);
+        }
+
+        // Also test plain unsynced lyrics notice at 280px RTL large text scale
+        lyricsRepository.result = const LyricsResultFound(
+          LyricsDocument(
+            kind: LyricsKind.plain,
+            lines: [
+              LyricsLine(startMs: 0, text: 'Line one of plain lyrics'),
+              LyricsLine(startMs: 0, text: 'Line two of plain lyrics with long text'),
+            ],
+            source: LyricsSourceOrigin.local,
+            hasWordTiming: false,
+          ),
+        );
+        await lyricsController.retry();
+        overflowErrors.clear();
+        settingsStore.update((s) => s.copyWith(language: 'ar'));
+        tester.view.physicalSize = const Size(1000, 800);
+        await tester.pumpWidget(
+          buildShell(
+            locale: const Locale('ar'),
+            textDirection: TextDirection.rtl,
+            textScale: 1.10,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(overflowErrors, isEmpty);
+        expect(tester.takeException(), isNull);
+
         await tester.pump(const Duration(milliseconds: 500));
       },
     );

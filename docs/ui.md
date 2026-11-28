@@ -203,6 +203,7 @@ The desktop shell orchestrates five core architectural components:
    - Start side: Cover thumbnail (52x52, radius 10), track title, artist name, directional expand chevron; whole area taps to stub SnackBar ("Soon").
    - Center side: Directionality forced to LTR; previous, primary play/pause, next buttons, and an isolated seekbar with time labels. Seek position updates rebuild only the seek slider leaf.
    - End side: Volume button (opens Glass popup with volume slider), lyrics (disabled), queue (disabled), equalizer (disabled), full screen (disabled).
+6. **Docked Side Panel (`SidePanel`, `SidePanelController`):** Responsive Queue/Lyrics panel anchored on the end side with no drag-resize handle. Width scales cleanly as `SidePanelController.panelWidthFor(windowWidth) = (windowWidth * 0.22).clamp(280.0, 320.0)` (`280 px` at `1000 px`, `281.6 px` at `1280 px`, `320 px` at `1600 px`+), auto-hides cleanly below `kAutoHideWidthThreshold` (`1000 px`) without mutating saved state, and lays out cleanly across `en`/`ar` (LTR/RTL) and `Large` text scale (`1.10x`).
 
 ### Navigation Model (`AppNavigator`)
 Pure Dart `ChangeNotifier` managing `AppDestination`:

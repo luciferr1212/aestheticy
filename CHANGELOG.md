@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+- Docked Queue/Lyrics side panel now computes responsive width via `SidePanelController.panelWidthFor(windowWidth)` (`(windowWidth * 0.22).clamp(280.0, 320.0)`) instead of a fixed `360 px` width, with `LibraryViewControls`, `QueueContent`, and unsynced lyrics notices tightened for clean 280 px LTR/RTL rendering at Large text scale.
+- Updated `docs/PROJECT_STATE.md` Catch Audit summary to match the live `lib/` codebase (`261` total: `38` class `(a)`, `182` class `(b)`, `41` class `(c)`).
+
+### Fixed
+- Forward `FlutterErrorDetails.stack` into `AppLogger.instance.error` inside `FlutterError.onError` (extracted to `lib/app/flutter_error_handler.dart`) while preserving `FlutterError.presentError`.
+
 ### Added
 - Foundation F4 composition root under `lib/app/` (`AppBootstrap`, `AppServices`, `WindowLifecycleCoordinator`, `AestheticyApp`, `AudioInitErrorApp`/`LibraryInitErrorApp`) reducing `lib/main.dart` from 1,159 to 60 lines with identical startup/shutdown order.
 - Internal `PlaybackController` collaborators under `lib/audio/playback/` (`PlaybackFadeHandler`, `PlaybackGaplessPreloader`, `PlaybackQueueOperations`, `PlaybackResumeState`, `PlaybackPlaySourceTracker`) reducing `lib/audio/playback_controller.dart` from 1,121 to 661 lines with zero behavioral change.

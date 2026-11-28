@@ -39,6 +39,9 @@ class SidePanel extends StatefulWidget {
   /// Optional user collections scope for queue menus.
   final UserCollections? userCollections;
 
+  /// Optional explicit panel width override (defaults from window width).
+  final double? panelWidth;
+
   /// Creates a [SidePanel].
   const SidePanel({
     super.key,
@@ -49,6 +52,7 @@ class SidePanel extends StatefulWidget {
     required this.settingsStore,
     required this.navigator,
     this.userCollections,
+    this.panelWidth,
   });
 
   @override
@@ -121,13 +125,17 @@ class _SidePanelState extends State<SidePanel>
 
         final reduceMotion = widget.settingsStore.settings.reduceMotion;
         final activeTab = widget.sidePanelController.activeTab;
+        final resolvedWidth = widget.panelWidth ??
+            SidePanelController.panelWidthFor(
+              MediaQuery.sizeOf(context).width,
+            );
 
         return ClipRect(
           child: Align(
             alignment: AlignmentDirectional.centerStart,
             widthFactor: _widthFactorAnimation.value,
             child: SizedBox(
-              width: SidePanelController.kPanelWidth,
+              width: resolvedWidth,
               child: Semantics(
                 container: true,
                 label: context.t('sidePanel.panelLabel'),
@@ -204,7 +212,7 @@ class _SidePanelState extends State<SidePanel>
         : context.t('sidePanel.expandQueue');
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -217,7 +225,7 @@ class _SidePanelState extends State<SidePanel>
             size: GlassButtonSize.small,
             onPressed: () => _handleExpand(activeTab),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Expanded(
             child: Center(
               child: _SidePanelTabBar(
@@ -227,7 +235,7 @@ class _SidePanelState extends State<SidePanel>
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           GlassIconButton(
             key: const Key('side_panel_close_button'),
             icon: Icons.close,
@@ -354,7 +362,7 @@ class _SidePanelTabButtonState extends State<_SidePanelTabButton> {
               duration: widget.reduceMotion
                   ? Duration.zero
                   : const Duration(milliseconds: 120),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: backgroundColor,
                 borderRadius: AppSpacing.brPill,

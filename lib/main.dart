@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:aestheticy/app/aestheticy_app.dart';
 import 'package:aestheticy/app/app_bootstrap.dart';
+import 'package:aestheticy/app/flutter_error_handler.dart';
 import 'package:aestheticy/app/init_error_apps.dart';
 import 'package:aestheticy/diagnostics/app_logger.dart';
 
@@ -16,13 +17,7 @@ void main() {
     WidgetsFlutterBinding.ensureInitialized();
     await AppLogger.instance.init();
 
-    FlutterError.onError = (details) {
-      FlutterError.presentError(details);
-      AppLogger.instance.error(
-        'Flutter',
-        'FlutterError: ${details.exceptionAsString()}',
-      );
-    };
+    FlutterError.onError = handleFlutterError;
 
     PlatformDispatcher.instance.onError = (error, stack) {
       AppLogger.instance.error(

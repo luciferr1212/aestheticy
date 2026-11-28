@@ -31,7 +31,7 @@ class QueueContent extends StatefulWidget {
   /// User collections for favorites and playlist management.
   final UserCollections? userCollections;
 
-  /// Whether to use compact styling suitable for the 360 px docked side panel.
+  /// Whether to use compact styling suitable for the docked side panel (280–320 px).
   final bool compact;
 
   /// Whether the internal keyboard-navigation [Focus] node should autofocus.
@@ -417,11 +417,14 @@ class _QueueContentState extends State<QueueContent> {
                   ),
                   if (hasUpcoming) ...[
                     const SizedBox(width: 8),
-                    GlassPillButton(
-                      key: const Key('side_panel_queue_clear_upcoming'),
-                      label: context.t('queue.clearUpcoming'),
-                      size: GlassButtonSize.small,
-                      onPressed: () => widget.controller.clearUpcoming(),
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: GlassPillButton(
+                        key: const Key('side_panel_queue_clear_upcoming'),
+                        label: context.t('queue.clearUpcoming'),
+                        size: GlassButtonSize.small,
+                        onPressed: () => widget.controller.clearUpcoming(),
+                      ),
                     ),
                   ],
                 ],
@@ -515,6 +518,8 @@ class _QueueContentState extends State<QueueContent> {
                                   child: Text(
                                     headerLabel,
                                     key: headerKey,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: AppTypography.caption.copyWith(
                                       color: AppColors.textSecondary,
                                       fontWeight: FontWeight.w600,
